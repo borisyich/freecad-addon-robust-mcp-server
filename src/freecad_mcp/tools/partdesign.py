@@ -78,9 +78,10 @@ def register_partdesign_tools(
         bridge = await get_bridge()
 
         code = f"""
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
-if doc is None:
-    doc = FreeCAD.newDocument("Unnamed")
+doc = (
+    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
+    else FreeCAD.ActiveDocument
+) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
 
 # Wrap in transaction for undo support
 doc.openTransaction("Create Sketch")
@@ -169,7 +170,10 @@ _result_ = {{
         bridge = await get_bridge()
 
         code = f"""
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
+doc = (
+    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
+    else FreeCAD.ActiveDocument
+) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
 sketch = doc.getObject({sketch_name!r})
 if sketch is None:
     raise ValueError(f"Sketch not found: {sketch_name!r}")
@@ -237,7 +241,10 @@ _result_ = {{
         bridge = await get_bridge()
 
         code = f"""
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
+doc = (
+    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
+    else FreeCAD.ActiveDocument
+) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
 sketch = doc.getObject({sketch_name!r})
 if sketch is None:
     raise ValueError(f"Sketch not found: {sketch_name!r}")
@@ -292,7 +299,10 @@ _result_ = {{
         bridge = await get_bridge()
 
         code = f"""
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
+doc = (
+    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
+    else FreeCAD.ActiveDocument
+) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
 sketch = doc.getObject({sketch_name!r})
 if sketch is None:
     raise ValueError(f"Sketch not found: {sketch_name!r}")
@@ -361,7 +371,10 @@ _result_ = {{
         bridge = await get_bridge()
 
         code = f"""
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
+doc = (
+    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
+    else FreeCAD.ActiveDocument
+) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
 sketch = doc.getObject({sketch_name!r})
 if sketch is None:
     raise ValueError(f"Sketch not found: {sketch_name!r}")
@@ -433,7 +446,10 @@ _result_ = {{
         edges_param = edges if edges else None
 
         code = f"""
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
+doc = (
+    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
+    else FreeCAD.ActiveDocument
+) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
 obj = doc.getObject({object_name!r})
 if obj is None:
     raise ValueError(f"Object not found: {object_name!r}")
@@ -518,7 +534,10 @@ _result_ = {{
         edges_param = edges if edges else None
 
         code = f"""
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
+doc = (
+    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
+    else FreeCAD.ActiveDocument
+) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
 obj = doc.getObject({object_name!r})
 if obj is None:
     raise ValueError(f"Object not found: {object_name!r}")
@@ -610,7 +629,10 @@ _result_ = {{
         bridge = await get_bridge()
 
         code = f"""
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
+doc = (
+    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
+    else FreeCAD.ActiveDocument
+) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
 sketch = doc.getObject({sketch_name!r})
 if sketch is None:
     raise ValueError(f"Sketch not found: {sketch_name!r}")
@@ -701,7 +723,10 @@ _result_ = {{
         bridge = await get_bridge()
 
         code = f"""
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
+doc = (
+    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
+    else FreeCAD.ActiveDocument
+) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
 sketch = doc.getObject({sketch_name!r})
 if sketch is None:
     raise ValueError(f"Sketch not found: {sketch_name!r}")
@@ -795,10 +820,15 @@ _result_ = {{
         bridge = await get_bridge()
 
         code = f"""
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
-sketch = doc.getObject({sketch_name!r})
+doc = (
+    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
+    else FreeCAD.ActiveDocument
+) or FreeCAD.newDocument({doc_name!r} or "Untitled")sketch = doc.getObject({sketch_name!r})
 if sketch is None:
-    raise ValueError(f"Sketch not found: {sketch_name!r}")
+    raise ValueError(
+        f"Sketch not found: {sketch_name!r}",
+        "Firstly you need to create sketch by tool `create_sketch`"
+    )
 
 # Find the body containing this sketch
 body = None
@@ -884,7 +914,10 @@ _result_ = {{
         bridge = await get_bridge()
 
         code = f"""
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
+doc = (
+    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
+    else FreeCAD.ActiveDocument
+) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
 feature = doc.getObject({feature_name!r})
 if feature is None:
     raise ValueError(f"Feature not found: {feature_name!r}")
@@ -960,7 +993,10 @@ _result_ = {{
         bridge = await get_bridge()
 
         code = f"""
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
+doc = (
+    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
+    else FreeCAD.ActiveDocument
+) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
 feature = doc.getObject({feature_name!r})
 if feature is None:
     raise ValueError(f"Feature not found: {feature_name!r}")
@@ -1043,7 +1079,10 @@ _result_ = {{
         plane_ref = plane_map[plane]
 
         code = f"""
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
+doc = (
+    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
+    else FreeCAD.ActiveDocument
+) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
 feature = doc.getObject({feature_name!r})
 if feature is None:
     raise ValueError(f"Feature not found: {feature_name!r}")
@@ -1113,7 +1152,10 @@ _result_ = {{
         bridge = await get_bridge()
 
         code = f"""
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
+doc = (
+    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
+    else FreeCAD.ActiveDocument
+) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
 sketch = doc.getObject({sketch_name!r})
 if sketch is None:
     raise ValueError(f"Sketch not found: {sketch_name!r}")
@@ -1175,7 +1217,10 @@ _result_ = {{
         bridge = await get_bridge()
 
         code = f"""
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
+doc = (
+    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
+    else FreeCAD.ActiveDocument
+) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
 sketch = doc.getObject({sketch_name!r})
 if sketch is None:
     raise ValueError(f"Sketch not found: {sketch_name!r}")
@@ -1237,7 +1282,10 @@ _result_ = {{
         bridge = await get_bridge()
 
         code = f"""
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
+doc = (
+    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
+    else FreeCAD.ActiveDocument
+) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
 sketch = doc.getObject({sketch_name!r})
 if sketch is None:
     raise ValueError(f"Sketch not found: {sketch_name!r}")
@@ -1292,7 +1340,10 @@ _result_ = {{
         bridge = await get_bridge()
 
         code = f"""
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
+doc = (
+    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
+    else FreeCAD.ActiveDocument
+) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
 
 sketches = []
 for sname in {sketch_names!r}:
@@ -1384,7 +1435,10 @@ _result_ = {{
             )
 
         code = f"""
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
+doc = (
+    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
+    else FreeCAD.ActiveDocument
+) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
 
 profile = doc.getObject({profile_sketch!r})
 if profile is None:
@@ -1466,9 +1520,10 @@ _result_ = {{
         bridge = await get_bridge()
 
         code = f"""
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
-if doc is None:
-    raise ValueError("No document found")
+doc = (
+    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
+    else FreeCAD.ActiveDocument
+) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
 
 body = doc.getObject({body_name!r})
 if body is None:
@@ -1535,9 +1590,10 @@ except Exception:
         bridge = await get_bridge()
 
         code = f"""
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
-if doc is None:
-    raise ValueError("No document found")
+doc = (
+    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
+    else FreeCAD.ActiveDocument
+) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
 
 body = doc.getObject({body_name!r})
 if body is None:
@@ -1600,9 +1656,10 @@ except Exception:
         pos = position if position else [0, 0, 0]
 
         code = f"""
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
-if doc is None:
-    raise ValueError("No document found")
+doc = (
+    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
+    else FreeCAD.ActiveDocument
+) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
 
 body = doc.getObject({body_name!r})
 if body is None:
@@ -1679,9 +1736,10 @@ except Exception:
         faces_param = faces if faces else None
 
         code = f"""
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
-if doc is None:
-    raise ValueError("No document found")
+doc = (
+    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
+    else FreeCAD.ActiveDocument
+) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
 
 obj = doc.getObject({object_name!r})
 if obj is None:
@@ -1763,9 +1821,10 @@ except Exception:
         bridge = await get_bridge()
 
         code = f"""
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
-if doc is None:
-    raise ValueError("No document found")
+doc = (
+    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
+    else FreeCAD.ActiveDocument
+) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
 
 obj = doc.getObject({object_name!r})
 if obj is None:
@@ -1840,9 +1899,10 @@ except Exception:
         bridge = await get_bridge()
 
         code = f"""
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
-if doc is None:
-    raise ValueError("No document found")
+doc = (
+    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
+    else FreeCAD.ActiveDocument
+) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
 
 sketches = []
 for sname in {sketch_names!r}:
@@ -1930,9 +1990,10 @@ except Exception:
             raise ValueError(f"Invalid transition: {transition}")
 
         code = f"""
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
-if doc is None:
-    raise ValueError("No document found")
+doc = (
+    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
+    else FreeCAD.ActiveDocument
+) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
 
 profile = doc.getObject({profile_sketch!r})
 if profile is None:
@@ -2010,7 +2071,10 @@ except Exception:
         bridge = await get_bridge()
 
         code = f"""
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
+doc = (
+    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
+    else FreeCAD.ActiveDocument
+) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
 sketch = doc.getObject({sketch_name!r})
 if sketch is None:
     raise ValueError(f"Sketch not found: {sketch_name!r}")
@@ -2070,7 +2134,10 @@ import math
 import Part
 import Sketcher
 
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
+doc = (
+    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
+    else FreeCAD.ActiveDocument
+) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
 sketch = doc.getObject({sketch_name!r})
 if sketch is None:
     raise ValueError(f"Sketch not found: {sketch_name!r}")
@@ -2154,7 +2221,10 @@ import math
 import Part
 import Sketcher
 
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
+doc = (
+    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
+    else FreeCAD.ActiveDocument
+) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
 sketch = doc.getObject({sketch_name!r})
 if sketch is None:
     raise ValueError(f"Sketch not found: {sketch_name!r}")
@@ -2253,7 +2323,10 @@ except Exception:
         code = f"""
 import Part
 
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
+doc = (
+    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
+    else FreeCAD.ActiveDocument
+) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
 sketch = doc.getObject({sketch_name!r})
 if sketch is None:
     raise ValueError(f"Sketch not found: {sketch_name!r}")
@@ -2336,10 +2409,16 @@ except Exception:
         code = f"""
 import Sketcher
 
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
+doc = (
+    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
+    else FreeCAD.ActiveDocument
+) or FreeCAD.newDocument({doc_name!r} or "Untitled")
 sketch = doc.getObject({sketch_name!r})
 if sketch is None:
-    raise ValueError(f"Sketch not found: {sketch_name!r}")
+    raise ValueError(
+        f"Sketch not found: {sketch_name!r}",
+        "Firstly you need to create sketch by tool `create_sketch`"
+    )
 
 # Wrap in transaction for undo support
 doc.openTransaction("Add Sketch Constraint")
@@ -2771,14 +2850,23 @@ except Exception:
         bridge = await get_bridge()
 
         code = f"""
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
+doc = (
+    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
+    else FreeCAD.ActiveDocument
+) or FreeCAD.newDocument({doc_name!r} or "Untitled")
 sketch = doc.getObject({sketch_name!r})
 if sketch is None:
-    raise ValueError(f"Sketch not found: {sketch_name!r}")
+    raise ValueError(Sketch not found
+        f"Sketch not found: {sketch_name!r}",
+        "Firstly you need to create sketch by tool `create_sketch`"
+    )
 
 ref_obj = doc.getObject({object_name!r})
 if ref_obj is None:
-    raise ValueError(f"Object not found: {object_name!r}")
+    raise ValueError(
+        f"Object not found: {object_name!r}",
+        "Firstly you need to create object by tool `create_object` or another object creation tool"
+    )
 
 # Wrap in transaction for undo support
 doc.openTransaction("Add External Geometry")
@@ -2789,7 +2877,7 @@ try:
 
     _result_ = {{
         "success": True,
-        "external_geometry_count": sketch.ExternalGeometryCount,
+        "external_geometry_count": len(sketch.ExternalGeometry),
     }}
 except Exception:
     doc.abortTransaction()
@@ -2821,7 +2909,10 @@ except Exception:
         bridge = await get_bridge()
 
         code = f"""
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
+doc = (
+    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
+    else FreeCAD.ActiveDocument
+) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
 sketch = doc.getObject({sketch_name!r})
 if sketch is None:
     raise ValueError(f"Sketch not found: {sketch_name!r}")
@@ -2867,7 +2958,10 @@ except Exception:
         bridge = await get_bridge()
 
         code = f"""
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
+doc = (
+    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
+    else FreeCAD.ActiveDocument
+) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
 sketch = doc.getObject({sketch_name!r})
 if sketch is None:
     raise ValueError(f"Sketch not found: {sketch_name!r}")
@@ -2915,7 +3009,10 @@ except Exception:
         bridge = await get_bridge()
 
         code = f"""
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
+doc = (
+    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
+    else FreeCAD.ActiveDocument
+) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
 sketch = doc.getObject({sketch_name!r})
 if sketch is None:
     raise ValueError(f"Sketch not found: {sketch_name!r}")
@@ -2959,7 +3056,10 @@ _result_ = {{
         bridge = await get_bridge()
 
         code = f"""
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
+doc = (
+    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
+    else FreeCAD.ActiveDocument
+) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
 sketch = doc.getObject({sketch_name!r})
 if sketch is None:
     raise ValueError(f"Sketch not found: {sketch_name!r}")
