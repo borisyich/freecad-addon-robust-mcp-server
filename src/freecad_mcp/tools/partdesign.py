@@ -99,9 +99,15 @@ try:
         # Check which property exists and use the appropriate one
         plane = {plane!r}
         if plane in ["XY_Plane", "XZ_Plane", "YZ_Plane"]:
-            plane_obj = body.Origin.getObject(plane)
+            plane_obj = None
+            origin_objs = body.Origin.OriginFeatures
+            for obj in origin_objs:
+                if obj.Name.startswith(plane):
+                    plane_obj = obj
+                    break
+            
             if hasattr(sketch, "AttachmentSupport"):
-                sketch.AttachmentSupport = [(plane_obj, "")]
+                sketch.AttachmentSupport = [(plane_obj, [""])]
             else:
                 sketch.Support = (plane_obj, [""])
             sketch.MapMode = "FlatFace"
