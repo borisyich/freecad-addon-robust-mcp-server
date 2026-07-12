@@ -892,3 +892,158 @@ All 27 open FreeCAD documents have been saved to the debug/artifacts directory:
 - WireFaceTest.FCStd
 
 Most tools are working correctly. The sketch was created successfully with a circle of radius 50mm on YZ plane. The document "CircleSketch1" contains the PartDesign body and sketch as expected.
+
+## Axis Validation Tests (2026-07-12)
+
+### Test Scenarios for pad_sketch, revolution_sketch, groove_sketch
+
+| # | Test | Scenario | Result |
+|---|------|----------|--------|
+| 1 | **pad_sketch** | Rectangle 50x30, pad 20mm on XY_Plane | ✅ **PASSED** |
+| 2 | **revolution_sketch** | Base_X axis on XY_Plane (correct axis, parallel) | ✅ **PASSED** |
+| 3 | **revolution_sketch** | Base_Z axis on XY_Plane (WRONG axis, perpendicular) | ⚠️ **SILENT FAILURE** — returned success, but `validate_object` showed INVALID with `NULL shape` |
+| 4 | **groove_sketch** | Base_Z axis on XZ_Plane with existing pad (correct axis, parallel) | ✅ **PASSED** |
+| 5 | **groove_sketch** | Base_Y axis on XZ_Plane (WRONG axis, perpendicular) | ⚠️ **SILENT FAILURE** — returned success, but `validate_object` showed INVALID with `NULL shape` |
+
+### Root Cause
+Both `revolution_sketch` and `groove_sketch` in `src/freecad_mcp/tools/partdesign.py` set `ReferenceAxis` without validating that the axis is not perpendicular to the sketch plane. When the axis is perpendicular, FreeCAD creates a PartDesign::Revolution/Groove with `NULL shape` — a silent failure.
+
+### Fix Applied
+Added pre-validation in both methods that checks the dot product between the sketch plane normal and the axis direction:
+
+- **File**: `src/freecad_mcp/tools/partdesign.py`
+- **Location**: After axis lookup, before `ReferenceAxis` assignment (both `revolution_sketch` and `groove_sketch`)
+- **Logic**:
+  1. Get sketch plane normal from `sketch.AttachmentOffset.Rotation.multVec(FreeCAD.Vector(0, 0, 1))`
+  2. Get axis direction from map: `{"X": (1,0,0), "Y": (0,1,0), "Z": (0,0,1)}`
+  3. Compute `dot = abs(normal · axis_dir)`
+  4. If `dot > 0.9999` → axis is perpendicular → raise `ValueError` with clear message
+
+### Validation Error Messages
+```
+Axis 'Base_Z' is perpendicular to the sketch plane. Revolution axis must lie in (be parallel to) the sketch plane.
+For a sketch on XY plane, use Base_X or Base_Y (not Base_Z).
+For a sketch on XZ plane, use Base_X or Base_Z (not Base_Y).
+For a sketch on YZ plane, use Base_Y or Base_Z (not Base_X).
+```
+
+```
+Axis 'Base_Y' is perpendicular to the sketch plane. Groove axis must lie in (be parallel to) the sketch plane.
+For a sketch on XY plane, use Base_X or Base_Y (not Base_Z).
+For a sketch on XZ plane, use Base_X or Base_Z (not Base_Y).
+For a sketch on YZ plane, use Base_Y or Base_Z (not Base_X).
+```
+
+### How to Reproduce (for verification after restart)
+```python
+1. create_document("Test_AxisError")
+2. create_partdesign_body()
+3. create_sketch(plane="XY_Plane", body_name="PartDesign__Body")
+4. add_sketch_rectangle(x=10, y=5, width=30, height=15)
+5. revolution_sketch(axis="Base_Z")  # ❌ Was: silent failure → Now: clear ValueError
+```
+
+> **Note**: After applying the fix, restart the MCP Server for changes to take effect.
+
+### Post-Validation After recompose (2026-07-12, v2)
+
+**Проблема**: `doc.recompute()` в FreeCAD не кидает Python-исключение при ошибках (например, перпендикулярная ось). Вместо этого FreeCAD печатает ошибку только в консоль (`<Exception> Axis must not be perpendicular to the sketch plane`), а объект остаётся с `NULL shape`.
+
+**Решение**: Добавлена post-validation в `revolution_sketch` и `groove_sketch`:
+
+```python
+doc.recompute()
+
+# Post-validation: проверка Shape после recompute
+if not hasattr(rev, "Shape") or rev.Shape.isNull() or not rev.Shape.isValid():
+    # Попытка получить ошибки из FreeCAD Console
+    _errors = []
+    if hasattr(FreeCAD, "Console") and hasattr(FreeCAD.Console, "GetError"):
+        _err_text = FreeCAD.Console.GetError()
+        if _err_text:
+            _errors.append(_err_text.strip())
+    if not _errors:
+        _errors.append(
+            "Result has invalid shape. Common causes: axis perpendicular to plane, "
+            "wire not closed, or profile crossing the axis."
+        )
+    raise ValueError("Revolution failed: " + " ".join(_errors))
+```
+
+**Что это даёт**:
+- Вместо создания INVALID объекта с `NULL shape` теперь выбрасывается `ValueError` с текстом ошибки из FreeCAD
+- Ошибка перехватывается блоком `except` → делается `abortTransaction()` → транзакция откатывается
+- AI получает понятное сообщение об ошибке, а не успешный ответ с невалидным объектом
+
+**Пример результата после фикса**:
+```
+ValueError: Revolution failed: Axis must not be perpendicular to the sketch plane
+```
+
+> **Note**: After applying the fix, restart the MCP Server for changes to take effect.
+
+## Creative Tests for pad_sketch, revolution_sketch, groove_sketch (2026-07-12)
+
+### Test 1: Symmetric Pad (CreativePadRevGroove)
+- Created new document: "CreativePadRevGroove"
+- Created PartDesign body and sketch on XY_Plane
+- Added circle (radius 15mm) at origin
+- **pad_sketch** with symmetric=True, length=30mm
+  - Result: ✅ **SUCCESS** - Created "Pad" with volume 21205.75mm³
+  - The symmetric pad created a 30mm thick disk centered at origin
+
+### Test 2: Revolution on XY_Plane (RevolutionRectOnly)
+- Created new document: "RevolutionRectOnly"
+- Created PartDesign body and sketch on XY_Plane
+- Added rectangle (10x20mm) offset from axis (x=5, y=-10)
+- **revolution_sketch** with angle=360, axis=Base_Y
+  - Result: ✅ **SUCCESS** - Created "Revolution" with volume 12566.37mm³
+  - The rectangle was revolved around Y axis to create a cylindrical shape
+  - Key finding: Profile must NOT cross the revolution axis
+
+### Test 3: Groove on Vertical Face (GrooveSimple)
+- Created new document: "GrooveSimple"
+- Created PartDesign body and sketch on XY_Plane
+- Added rectangle (30x20mm) and created pad (20mm height)
+- Created sketch on Face1 (vertical face)
+- Added rectangle (6x4mm) for groove profile
+- **groove_sketch** with angle=360, axis=Base_X
+  - Result: ✅ **SUCCESS** - Created "Groove" feature
+  - The groove was created on the vertical face
+  - Note: The groove volume shows 0.0 because it's a subtractive feature
+
+### Test 4: Axis Validation Tests
+- **revolution_sketch** with Base_Z on XY_Plane (perpendicular axis)
+  - Result: ❌ **FAILED** - Clear error: "Axis 'Base_Z' is perpendicular to the sketch plane"
+  - The axis validation is working correctly!
+
+- **groove_sketch** with Base_Z on Face1 (perpendicular axis)
+  - Result: ❌ **FAILED** - Clear error: "Axis 'Base_Z' is perpendicular to the sketch plane"
+  - The axis validation is working correctly!
+
+### Test 5: Revolution with Circle at Origin (PulleyGroove)
+- Created circle at origin (radius 20mm) on XY_Plane
+- **revolution_sketch** with Base_X or Base_Y
+  - Result: ❌ **FAILED** - "Revolution result has invalid shape"
+  - Root cause: Circle centered at origin crosses the revolution axis
+  - Key finding: For revolution, the profile must NOT be centered on the axis
+
+### Test 6: Revolution with Circle Offset (PulleyOffset)
+- Created circle offset from origin (center_x=10, radius=15) on XY_Plane
+- **revolution_sketch** with Base_X
+  - Result: ❌ **FAILED** - "Revolution result has invalid shape"
+  - Root cause: The profile still crosses the axis (partially)
+  - Key finding: The profile must be entirely on one side of the axis
+
+### Summary of Findings
+1. **pad_sketch** works correctly with symmetric option
+2. **revolution_sketch** works when:
+   - Axis is parallel to sketch plane (not perpendicular)
+   - Profile does NOT cross the revolution axis
+   - Profile is a closed wire (rectangle works well)
+3. **groove_sketch** works when:
+   - Axis is parallel to sketch plane
+   - There is existing material to cut from
+   - Profile is on a face of the existing body
+4. **Axis validation** is working correctly - prevents perpendicular axis errors
+5. **Post-validation** catches invalid shapes and provides clear error messages

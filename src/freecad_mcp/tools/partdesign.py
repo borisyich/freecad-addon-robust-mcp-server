@@ -658,6 +658,21 @@ try:
                 break
         if axis_obj is None:
             raise ValueError(f"Axis not found: {{axis_ref}}_Axis")
+
+        # Validate axis is not perpendicular to the sketch plane
+        sketch_normal = sketch.AttachmentOffset.Rotation.multVec(FreeCAD.Vector(0, 0, 1))
+        axis_direction_map = {{"X": FreeCAD.Vector(1, 0, 0), "Y": FreeCAD.Vector(0, 1, 0), "Z": FreeCAD.Vector(0, 0, 1)}}
+        axis_dir = axis_direction_map[axis_ref]
+        dot = abs(sketch_normal.dot(axis_dir))
+        if dot > 0.9999:
+            raise ValueError(
+                f"Axis '{{axis_name}}' is perpendicular to the sketch plane. "
+                f"Revolution axis must lie in (be parallel to) the sketch plane. "
+                f"For a sketch on XY plane, use Base_X or Base_Y (not Base_Z). "
+                f"For a sketch on XZ plane, use Base_X or Base_Z (not Base_Y). "
+                f"For a sketch on YZ plane, use Base_Y or Base_Z (not Base_X)."
+            )
+
         rev.ReferenceAxis = (axis_obj, [""])
     elif axis_name.startswith("Sketch_"):
         if axis_name == "Sketch_V":
@@ -666,6 +681,26 @@ try:
             rev.ReferenceAxis = (sketch, ["H_Axis"])
 
     doc.recompute()
+
+    # Post-validation: check if the result has a valid shape
+    # FreeCAD loggs errors to console but does not raise Python exceptions on recompute
+    if not hasattr(rev, "Shape") or rev.Shape.isNull() or not rev.Shape.isValid():
+        # Collect errors from FreeCAD console
+        import PySide
+        _errors = []
+        if hasattr(FreeCAD, "Console") and hasattr(FreeCAD.Console, "GetError"):
+            _err_text = FreeCAD.Console.GetError()
+            if _err_text:
+                _errors.append(_err_text.strip())
+        if not _errors:
+            # Fallback: check for common error patterns in log
+            _errors.append(
+                "Revolution result has invalid shape. Check FreeCAD console for details. "
+                "Common causes: axis perpendicular to sketch plane, "
+                "wire not closed, or profile crossing the axis."
+            )
+        raise ValueError("Revolution failed: " + " ".join(_errors))
+
     doc.commitTransaction()
 except Exception:
     doc.abortTransaction()
@@ -759,6 +794,21 @@ try:
                 break
         if axis_obj is None:
             raise ValueError(f"Axis not found: {{axis_ref}}_Axis")
+
+        # Validate axis is not perpendicular to the sketch plane
+        sketch_normal = sketch.AttachmentOffset.Rotation.multVec(FreeCAD.Vector(0, 0, 1))
+        axis_direction_map = {{"X": FreeCAD.Vector(1, 0, 0), "Y": FreeCAD.Vector(0, 1, 0), "Z": FreeCAD.Vector(0, 0, 1)}}
+        axis_dir = axis_direction_map[axis_ref]
+        dot = abs(sketch_normal.dot(axis_dir))
+        if dot > 0.9999:
+            raise ValueError(
+                f"Axis '{{axis_name}}' is perpendicular to the sketch plane. "
+                f"Groove axis must lie in (be parallel to) the sketch plane. "
+                f"For a sketch on XY plane, use Base_X or Base_Y (not Base_Z). "
+                f"For a sketch on XZ plane, use Base_X or Base_Z (not Base_Y). "
+                f"For a sketch on YZ plane, use Base_Y or Base_Z (not Base_X)."
+            )
+
         groove.ReferenceAxis = (axis_obj, [""])
     elif axis_name.startswith("Sketch_"):
         if axis_name == "Sketch_V":
@@ -767,6 +817,24 @@ try:
             groove.ReferenceAxis = (sketch, ["H_Axis"])
 
     doc.recompute()
+
+    # Post-validation: check if the result has a valid shape
+    # FreeCAD loggs errors to console but does not raise Python exceptions on recompute
+    if not hasattr(groove, "Shape") or groove.Shape.isNull() or not groove.Shape.isValid():
+        import PySide
+        _errors = []
+        if hasattr(FreeCAD, "Console") and hasattr(FreeCAD.Console, "GetError"):
+            _err_text = FreeCAD.Console.GetError()
+            if _err_text:
+                _errors.append(_err_text.strip())
+        if not _errors:
+            _errors.append(
+                "Groove result has invalid shape. Check FreeCAD console for details. "
+                "Common causes: axis perpendicular to sketch plane, "
+                "wire not closed, or profile crossing the axis."
+            )
+        raise ValueError("Groove failed: " + " ".join(_errors))
+
     doc.commitTransaction()
 except Exception:
     doc.abortTransaction()
