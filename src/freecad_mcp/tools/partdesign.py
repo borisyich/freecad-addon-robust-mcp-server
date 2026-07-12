@@ -321,7 +321,9 @@ try:
     pad = body.newObject("PartDesign::Pad", pad_name)
     pad.Profile = sketch
     pad.Length = {length}
-    pad.Symmetric = {symmetric}
+    # FreeCAD 1.0 uses Midplane instead of Symmetric
+    if {symmetric}:
+        pad.Midplane = True
     pad.Reversed = {reversed}
 
     doc.recompute()
@@ -639,14 +641,24 @@ try:
     rev = body.newObject("PartDesign::Revolution", rev_name)
     rev.Profile = sketch
     rev.Angle = {angle}
-    rev.Symmetric = {symmetric}
+    # FreeCAD 1.0 uses Midplane instead of Symmetric
+    if {symmetric}:
+        rev.Midplane = True
     rev.Reversed = {reversed}
 
     # Set axis reference
     axis_name = {axis!r}
     if axis_name.startswith("Base_"):
         axis_ref = axis_name.replace("Base_", "")
-        rev.ReferenceAxis = (body.Origin.getObject(f"{{axis_ref}}_Axis"), [""])
+        # Find axis in OriginFeatures (getObject doesn't work on Origin)
+        axis_obj = None
+        for obj in body.Origin.OriginFeatures:
+            if obj.Name == f"{{axis_ref}}_Axis":
+                axis_obj = obj
+                break
+        if axis_obj is None:
+            raise ValueError(f"Axis not found: {{axis_ref}}_Axis")
+        rev.ReferenceAxis = (axis_obj, [""])
     elif axis_name.startswith("Sketch_"):
         if axis_name == "Sketch_V":
             rev.ReferenceAxis = (sketch, ["V_Axis"])
@@ -730,14 +742,24 @@ try:
     groove = body.newObject("PartDesign::Groove", groove_name)
     groove.Profile = sketch
     groove.Angle = {angle}
-    groove.Symmetric = {symmetric}
+    # FreeCAD 1.0 uses Midplane instead of Symmetric
+    if {symmetric}:
+        groove.Midplane = True
     groove.Reversed = {reversed}
 
     # Set axis reference
     axis_name = {axis!r}
     if axis_name.startswith("Base_"):
         axis_ref = axis_name.replace("Base_", "")
-        groove.ReferenceAxis = (body.Origin.getObject(f"{{axis_ref}}_Axis"), [""])
+        # Find axis in OriginFeatures (getObject doesn't work on Origin)
+        axis_obj = None
+        for obj in body.Origin.OriginFeatures:
+            if obj.Name == f"{{axis_ref}}_Axis":
+                axis_obj = obj
+                break
+        if axis_obj is None:
+            raise ValueError(f"Axis not found: {{axis_ref}}_Axis")
+        groove.ReferenceAxis = (axis_obj, [""])
     elif axis_name.startswith("Sketch_"):
         if axis_name == "Sketch_V":
             groove.ReferenceAxis = (sketch, ["V_Axis"])
@@ -917,7 +939,15 @@ try:
 
     # Set direction
     dir_name = {direction!r}
-    pattern.Direction = (body.Origin.getObject(f"{{dir_name}}_Axis"), [""])
+    # Find axis in OriginFeatures (getObject doesn't work on Origin)
+    axis_obj = None
+    for obj in body.Origin.OriginFeatures:
+        if obj.Name == f"{{dir_name}}_Axis":
+            axis_obj = obj
+            break
+    if axis_obj is None:
+        raise ValueError(f"Axis not found: {{dir_name}}_Axis")
+    pattern.Direction = (axis_obj, [""])
 
     doc.recompute()
     doc.commitTransaction()
@@ -993,7 +1023,15 @@ try:
 
     # Set axis
     axis_name = {axis!r}
-    pattern.Axis = (body.Origin.getObject(f"{{axis_name}}_Axis"), [""])
+    # Find axis in OriginFeatures (getObject doesn't work on Origin)
+    axis_obj = None
+    for obj in body.Origin.OriginFeatures:
+        if obj.Name == f"{{axis_name}}_Axis":
+            axis_obj = obj
+            break
+    if axis_obj is None:
+        raise ValueError(f"Axis not found: {{axis_name}}_Axis")
+    pattern.Axis = (axis_obj, [""])
 
     doc.recompute()
     doc.commitTransaction()
@@ -1071,7 +1109,15 @@ try:
     mirror_name = {name!r} or "Mirrored"
     mirror = body.newObject("PartDesign::Mirrored", mirror_name)
     mirror.Originals = [feature]
-    mirror.MirrorPlane = (body.Origin.getObject({plane_ref!r}), [""])
+    # Find plane in OriginFeatures (getObject doesn't work on Origin)
+    plane_obj = None
+    for obj in body.Origin.OriginFeatures:
+        if obj.Name == {plane_ref!r}:
+            plane_obj = obj
+            break
+    if plane_obj is None:
+        raise ValueError(f"Plane not found: {{plane_ref}}")
+    mirror.MirrorPlane = (plane_obj, [""])
 
     doc.recompute()
     doc.commitTransaction()
@@ -1488,7 +1534,14 @@ try:
 
     # Set reference plane
     plane = {base_plane!r}
-    plane_obj = body.Origin.getObject(plane)
+    # Find plane in OriginFeatures (getObject doesn't work on Origin)
+    plane_obj = None
+    for obj in body.Origin.OriginFeatures:
+        if obj.Name == plane:
+            plane_obj = obj
+            break
+    if plane_obj is None:
+        raise ValueError(f"Plane not found: {{plane}}")
     datum.AttachmentSupport = [(plane_obj, "")]
     datum.MapMode = "FlatFace"
     datum.MapPathParameter = 0
@@ -1557,7 +1610,14 @@ try:
 
     # Set reference axis
     axis = {base_axis!r}
-    axis_obj = body.Origin.getObject(axis)
+    # Find axis in OriginFeatures (getObject doesn't work on Origin)
+    axis_obj = None
+    for obj in body.Origin.OriginFeatures:
+        if obj.Name == axis:
+            axis_obj = obj
+            break
+    if axis_obj is None:
+        raise ValueError(f"Axis not found: {{axis}}")
     datum.AttachmentSupport = [(axis_obj, "")]
     datum.MapMode = "ObjectXY"
 
@@ -1621,7 +1681,14 @@ try:
     datum = body.newObject("PartDesign::Point", datum_name)
 
     # Set offset from origin
-    origin_point = body.Origin.getObject("Point")
+    # Find Point in OriginFeatures (getObject doesn't work on Origin)
+    origin_point = None
+    for obj in body.Origin.OriginFeatures:
+        if obj.Name == "Point":
+            origin_point = obj
+            break
+    if origin_point is None:
+        raise ValueError("Point not found in Origin")
     datum.AttachmentSupport = [(origin_point, "")]
     datum.MapMode = "ObjectOrigin"
     datum.AttachmentOffset = FreeCAD.Placement(
@@ -1720,7 +1787,14 @@ try:
     plane_name = {plane!r}
     plane_map = {{"XY": "XY_Plane", "XZ": "XZ_Plane", "YZ": "YZ_Plane"}}
     if plane_name in plane_map:
-        plane_obj = body.Origin.getObject(plane_map[plane_name])
+        # Find plane in OriginFeatures (getObject doesn't work on Origin)
+        plane_obj = None
+        for obj in body.Origin.OriginFeatures:
+            if obj.Name == plane_map[plane_name]:
+                plane_obj = obj
+                break
+        if plane_obj is None:
+            raise ValueError(f"Plane not found: {{plane_map[plane_name]}}")
         draft.NeutralPlane = (plane_obj, "")
 
     doc.recompute()

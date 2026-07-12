@@ -862,4 +862,33 @@ Document management tools (save_document, close_document, open_document) are wor
 - All operations maintain document integrity
 
 ## Summary
+All 27 open FreeCAD documents have been saved to the debug/artifacts directory:
+- BooleanLoftTest.FCStd
+- CameraTest.FCStd
+- CircleSketch1.FCStd
+- CompoundTest.FCStd
+- ConstructionTest.FCStd
+- DatumTest.FCStd
+- DraftTextTest.FCStd
+- ExportTest.FCStd
+- ExternalGeometryTest.FCStd
+- FeatureTest2.FCStd
+- ImportTest.FCStd
+- ObjectMgmtTest.FCStd
+- PartDesignTest.FCStd
+- PatternTest.FCStd
+- PatternTest2.FCStd
+- PrimitiveTest.FCStd
+- SelectionTest.FCStd
+- ShapeTest.FCStd
+- ShellOffsetTest.FCStd
+- SketchGeometryTest.FCStd
+- SketchToolsTest3.FCStd
+- StepExportTest.FCStd
+- TextOnSurfaceTest.FCStd
+- TransformTest.FCStd
+- UtilityTest.FCStd
+- ViewTest.FCStd
+- WireFaceTest.FCStd
+
 Most tools are working correctly. The sketch was created successfully with a circle of radius 50mm on YZ plane. The document "CircleSketch1" contains the PartDesign body and sketch as expected.
