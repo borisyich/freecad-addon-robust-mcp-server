@@ -525,29 +525,57 @@ obj = doc.getObject({obj_name!r})
 if obj is None:
     raise ValueError(f"Object not found: {obj_name!r}")
 
+# Build a JSON-safe representation of a value
+def _safe(v):
+    if isinstance(v, (str, int, float, bool)) or v is None:
+        return v
+    if isinstance(v, (list, tuple)) or (hasattr(v, '__iter__') and not isinstance(v, (str, bytes, dict))):
+        try:
+            return [_safe(x) for x in v]
+        except Exception:
+            return str(v)
+    if isinstance(v, dict):
+        return {{k: _safe(val) for k, val in v.items()}}
+    return str(v)
+
 props = {{}}
 for prop in obj.PropertiesList:
     try:
-        val = getattr(obj, prop)
-        if hasattr(val, '__class__') and val.__class__.__module__ != 'builtins':
-            val = str(val)
-        props[prop] = val
+        props[prop] = _safe(getattr(obj, prop))
     except Exception:
         props[prop] = "<unreadable>"
 
 shape_info = None
 if hasattr(obj, "Shape"):
-    shape = obj.Shape
-    shape_info = {{
-        "shape_type": shape.ShapeType,
-        "volume": shape.Volume if hasattr(shape, "Volume") else None,
-        "area": shape.Area if hasattr(shape, "Area") else None,
-        "is_valid": shape.isValid(),
-        "is_closed": shape.isClosed() if hasattr(shape, "isClosed") else False,
-        "vertex_count": len(shape.Vertexes) if hasattr(shape, "Vertexes") else 0,
-        "edge_count": len(shape.Edges) if hasattr(shape, "Edges") else 0,
-        "face_count": len(shape.Faces) if hasattr(shape, "Faces") else 0,
-    }}
+    try:
+        shape = obj.Shape
+        is_null_fn = getattr(shape, "isNull", None)
+        is_null = is_null_fn() if is_null_fn else True
+
+        if shape and not is_null:
+            shape_info = {{
+                "shape_type": getattr(shape, "ShapeType", None),
+                "volume": shape.Volume if hasattr(shape, "Volume") else None,
+                "area": shape.Area if hasattr(shape, "Area") else None,
+                "is_valid": shape.isValid() if hasattr(shape, "isValid") else False,
+                "is_closed": shape.isClosed() if hasattr(shape, "isClosed") else False,
+                "vertex_count": len(shape.Vertexes) if hasattr(shape, "Vertexes") else 0,
+                "edge_count": len(shape.Edges) if hasattr(shape, "Edges") else 0,
+                "face_count": len(shape.Faces) if hasattr(shape, "Faces") else 0,
+            }}
+        else:
+            shape_info = {{
+                "shape_type": "Empty",
+                "volume": None,
+                "area": None,
+                "is_valid": None,
+                "is_closed": None,
+                "vertex_count": 0,
+                "edge_count": 0,
+                "face_count": 0,
+            }}
+    except Exception as e:
+        shape_info = {{"error": "Failed to read shape: " + str(e)}}
 
 _result_ = {{
     "name": obj.Name,

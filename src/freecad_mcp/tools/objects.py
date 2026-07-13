@@ -68,9 +68,19 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
                 - parents: List of parent object names
                 - visibility: Whether object is visible
         """
-        bridge = await get_bridge()
-        obj = await bridge.get_object(object_name, doc_name)
+        try:
+            bridge = await get_bridge()
+            obj = await bridge.get_object(object_name, doc_name)
+        except Exception as e:
+            return {
+                "error": f"Failed to retrieve object '{object_name}' from FreeCAD: {str(e)}",
+                "success": False
+            }
 
+        if not obj:
+            return {"error": f"Object '{object_name}' not found", "success": False}
+
+        # obj is an ObjectInfo dataclass returned by the bridge
         result = {
             "name": obj.name,
             "label": obj.label,
@@ -83,7 +93,7 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
         if include_properties:
             result["properties"] = obj.properties
 
-        if include_shape and obj.shape_info:
+        if include_shape:
             result["shape_info"] = obj.shape_info
 
         return result

@@ -100,9 +100,15 @@ try:
         # Check which property exists and use the appropriate one
         plane = {plane!r}
         if plane in ["XY_Plane", "XZ_Plane", "YZ_Plane"]:
-            plane_obj = body.Origin.getObject(plane)
+            plane_obj = None
+            origin_objs = body.Origin.OriginFeatures
+            for obj in origin_objs:
+                if obj.Name.startswith(plane):
+                    plane_obj = obj
+                    break
+            
             if hasattr(sketch, "AttachmentSupport"):
-                sketch.AttachmentSupport = [(plane_obj, "")]
+                sketch.AttachmentSupport = [(plane_obj, [""])]
             else:
                 sketch.Support = (plane_obj, [""])
             sketch.MapMode = "FlatFace"
@@ -325,7 +331,9 @@ try:
     pad = body.newObject("PartDesign::Pad", pad_name)
     pad.Profile = sketch
     pad.Length = {length}
-    pad.Symmetric = {symmetric}
+    # FreeCAD 1.0 uses Midplane instead of Symmetric
+    if {symmetric}:
+        pad.Midplane = True
     pad.Reversed = {reversed}
 
     doc.recompute()
@@ -655,14 +663,39 @@ try:
     rev = body.newObject("PartDesign::Revolution", rev_name)
     rev.Profile = sketch
     rev.Angle = {angle}
-    rev.Symmetric = {symmetric}
+    # FreeCAD 1.0 uses Midplane instead of Symmetric
+    if {symmetric}:
+        rev.Midplane = True
     rev.Reversed = {reversed}
 
     # Set axis reference
     axis_name = {axis!r}
     if axis_name.startswith("Base_"):
         axis_ref = axis_name.replace("Base_", "")
-        rev.ReferenceAxis = (body.Origin.getObject(f"{{axis_ref}}_Axis"), [""])
+        # Find axis in OriginFeatures (getObject doesn't work on Origin)
+        axis_obj = None
+        for obj in body.Origin.OriginFeatures:
+            if obj.Name == f"{{axis_ref}}_Axis":
+                axis_obj = obj
+                break
+        if axis_obj is None:
+            raise ValueError(f"Axis not found: {{axis_ref}}_Axis")
+
+        # Validate axis is not perpendicular to the sketch plane
+        sketch_normal = sketch.AttachmentOffset.Rotation.multVec(FreeCAD.Vector(0, 0, 1))
+        axis_direction_map = {{"X": FreeCAD.Vector(1, 0, 0), "Y": FreeCAD.Vector(0, 1, 0), "Z": FreeCAD.Vector(0, 0, 1)}}
+        axis_dir = axis_direction_map[axis_ref]
+        dot = abs(sketch_normal.dot(axis_dir))
+        if dot > 0.9999:
+            raise ValueError(
+                f"Axis '{{axis_name}}' is perpendicular to the sketch plane. "
+                f"Revolution axis must lie in (be parallel to) the sketch plane. "
+                f"For a sketch on XY plane, use Base_X or Base_Y (not Base_Z). "
+                f"For a sketch on XZ plane, use Base_X or Base_Z (not Base_Y). "
+                f"For a sketch on YZ plane, use Base_Y or Base_Z (not Base_X)."
+            )
+
+        rev.ReferenceAxis = (axis_obj, [""])
     elif axis_name.startswith("Sketch_"):
         if axis_name == "Sketch_V":
             rev.ReferenceAxis = (sketch, ["V_Axis"])
@@ -670,6 +703,26 @@ try:
             rev.ReferenceAxis = (sketch, ["H_Axis"])
 
     doc.recompute()
+
+    # Post-validation: check if the result has a valid shape
+    # FreeCAD loggs errors to console but does not raise Python exceptions on recompute
+    if not hasattr(rev, "Shape") or rev.Shape.isNull() or not rev.Shape.isValid():
+        # Collect errors from FreeCAD console
+        import PySide
+        _errors = []
+        if hasattr(FreeCAD, "Console") and hasattr(FreeCAD.Console, "GetError"):
+            _err_text = FreeCAD.Console.GetError()
+            if _err_text:
+                _errors.append(_err_text.strip())
+        if not _errors:
+            # Fallback: check for common error patterns in log
+            _errors.append(
+                "Revolution result has invalid shape. Check FreeCAD console for details. "
+                "Common causes: axis perpendicular to sketch plane, "
+                "wire not closed, or profile crossing the axis."
+            )
+        raise ValueError("Revolution failed: " + " ".join(_errors))
+
     doc.commitTransaction()
 except Exception:
     doc.abortTransaction()
@@ -749,14 +802,39 @@ try:
     groove = body.newObject("PartDesign::Groove", groove_name)
     groove.Profile = sketch
     groove.Angle = {angle}
-    groove.Symmetric = {symmetric}
+    # FreeCAD 1.0 uses Midplane instead of Symmetric
+    if {symmetric}:
+        groove.Midplane = True
     groove.Reversed = {reversed}
 
     # Set axis reference
     axis_name = {axis!r}
     if axis_name.startswith("Base_"):
         axis_ref = axis_name.replace("Base_", "")
-        groove.ReferenceAxis = (body.Origin.getObject(f"{{axis_ref}}_Axis"), [""])
+        # Find axis in OriginFeatures (getObject doesn't work on Origin)
+        axis_obj = None
+        for obj in body.Origin.OriginFeatures:
+            if obj.Name == f"{{axis_ref}}_Axis":
+                axis_obj = obj
+                break
+        if axis_obj is None:
+            raise ValueError(f"Axis not found: {{axis_ref}}_Axis")
+
+        # Validate axis is not perpendicular to the sketch plane
+        sketch_normal = sketch.AttachmentOffset.Rotation.multVec(FreeCAD.Vector(0, 0, 1))
+        axis_direction_map = {{"X": FreeCAD.Vector(1, 0, 0), "Y": FreeCAD.Vector(0, 1, 0), "Z": FreeCAD.Vector(0, 0, 1)}}
+        axis_dir = axis_direction_map[axis_ref]
+        dot = abs(sketch_normal.dot(axis_dir))
+        if dot > 0.9999:
+            raise ValueError(
+                f"Axis '{{axis_name}}' is perpendicular to the sketch plane. "
+                f"Groove axis must lie in (be parallel to) the sketch plane. "
+                f"For a sketch on XY plane, use Base_X or Base_Y (not Base_Z). "
+                f"For a sketch on XZ plane, use Base_X or Base_Z (not Base_Y). "
+                f"For a sketch on YZ plane, use Base_Y or Base_Z (not Base_X)."
+            )
+
+        groove.ReferenceAxis = (axis_obj, [""])
     elif axis_name.startswith("Sketch_"):
         if axis_name == "Sketch_V":
             groove.ReferenceAxis = (sketch, ["V_Axis"])
@@ -764,6 +842,24 @@ try:
             groove.ReferenceAxis = (sketch, ["H_Axis"])
 
     doc.recompute()
+
+    # Post-validation: check if the result has a valid shape
+    # FreeCAD loggs errors to console but does not raise Python exceptions on recompute
+    if not hasattr(groove, "Shape") or groove.Shape.isNull() or not groove.Shape.isValid():
+        import PySide
+        _errors = []
+        if hasattr(FreeCAD, "Console") and hasattr(FreeCAD.Console, "GetError"):
+            _err_text = FreeCAD.Console.GetError()
+            if _err_text:
+                _errors.append(_err_text.strip())
+        if not _errors:
+            _errors.append(
+                "Groove result has invalid shape. Check FreeCAD console for details. "
+                "Common causes: axis perpendicular to sketch plane, "
+                "wire not closed, or profile crossing the axis."
+            )
+        raise ValueError("Groove failed: " + " ".join(_errors))
+
     doc.commitTransaction()
 except Exception:
     doc.abortTransaction()
@@ -944,7 +1040,15 @@ try:
 
     # Set direction
     dir_name = {direction!r}
-    pattern.Direction = (body.Origin.getObject(f"{{dir_name}}_Axis"), [""])
+    # Find axis in OriginFeatures (getObject doesn't work on Origin)
+    axis_obj = None
+    for obj in body.Origin.OriginFeatures:
+        if obj.Name == f"{{dir_name}}_Axis":
+            axis_obj = obj
+            break
+    if axis_obj is None:
+        raise ValueError(f"Axis not found: {{dir_name}}_Axis")
+    pattern.Direction = (axis_obj, [""])
 
     doc.recompute()
     doc.commitTransaction()
@@ -1023,7 +1127,15 @@ try:
 
     # Set axis
     axis_name = {axis!r}
-    pattern.Axis = (body.Origin.getObject(f"{{axis_name}}_Axis"), [""])
+    # Find axis in OriginFeatures (getObject doesn't work on Origin)
+    axis_obj = None
+    for obj in body.Origin.OriginFeatures:
+        if obj.Name == f"{{axis_name}}_Axis":
+            axis_obj = obj
+            break
+    if axis_obj is None:
+        raise ValueError(f"Axis not found: {{axis_name}}_Axis")
+    pattern.Axis = (axis_obj, [""])
 
     doc.recompute()
     doc.commitTransaction()
@@ -1104,7 +1216,15 @@ try:
     mirror_name = {name!r} or "Mirrored"
     mirror = body.newObject("PartDesign::Mirrored", mirror_name)
     mirror.Originals = [feature]
-    mirror.MirrorPlane = (body.Origin.getObject({plane_ref!r}), [""])
+    # Find plane in OriginFeatures (getObject doesn't work on Origin)
+    plane_obj = None
+    for obj in body.Origin.OriginFeatures:
+        if obj.Name == {plane_ref!r}:
+            plane_obj = obj
+            break
+    if plane_obj is None:
+        raise ValueError(f"Plane not found: {{plane_ref}}")
+    mirror.MirrorPlane = (plane_obj, [""])
 
     doc.recompute()
     doc.commitTransaction()
@@ -1537,7 +1657,14 @@ try:
 
     # Set reference plane
     plane = {base_plane!r}
-    plane_obj = body.Origin.getObject(plane)
+    # Find plane in OriginFeatures (getObject doesn't work on Origin)
+    plane_obj = None
+    for obj in body.Origin.OriginFeatures:
+        if obj.Name == plane:
+            plane_obj = obj
+            break
+    if plane_obj is None:
+        raise ValueError(f"Plane not found: {{plane}}")
     datum.AttachmentSupport = [(plane_obj, "")]
     datum.MapMode = "FlatFace"
     datum.MapPathParameter = 0
@@ -1607,7 +1734,14 @@ try:
 
     # Set reference axis
     axis = {base_axis!r}
-    axis_obj = body.Origin.getObject(axis)
+    # Find axis in OriginFeatures (getObject doesn't work on Origin)
+    axis_obj = None
+    for obj in body.Origin.OriginFeatures:
+        if obj.Name == axis:
+            axis_obj = obj
+            break
+    if axis_obj is None:
+        raise ValueError(f"Axis not found: {{axis}}")
     datum.AttachmentSupport = [(axis_obj, "")]
     datum.MapMode = "ObjectXY"
 
@@ -1672,7 +1806,14 @@ try:
     datum = body.newObject("PartDesign::Point", datum_name)
 
     # Set offset from origin
-    origin_point = body.Origin.getObject("Point")
+    # Find Point in OriginFeatures (getObject doesn't work on Origin)
+    origin_point = None
+    for obj in body.Origin.OriginFeatures:
+        if obj.Name == "Point":
+            origin_point = obj
+            break
+    if origin_point is None:
+        raise ValueError("Point not found in Origin")
     datum.AttachmentSupport = [(origin_point, "")]
     datum.MapMode = "ObjectOrigin"
     datum.AttachmentOffset = FreeCAD.Placement(
@@ -1772,7 +1913,14 @@ try:
     plane_name = {plane!r}
     plane_map = {{"XY": "XY_Plane", "XZ": "XZ_Plane", "YZ": "YZ_Plane"}}
     if plane_name in plane_map:
-        plane_obj = body.Origin.getObject(plane_map[plane_name])
+        # Find plane in OriginFeatures (getObject doesn't work on Origin)
+        plane_obj = None
+        for obj in body.Origin.OriginFeatures:
+            if obj.Name == plane_map[plane_name]:
+                plane_obj = obj
+                break
+        if plane_obj is None:
+            raise ValueError(f"Plane not found: {{plane_map[plane_name]}}")
         draft.NeutralPlane = (plane_obj, "")
 
     doc.recompute()
@@ -3022,7 +3170,7 @@ _result_ = {{
     "label": sketch.Label,
     "geometry_count": sketch.GeometryCount,
     "constraint_count": sketch.ConstraintCount,
-    "external_geometry_count": sketch.ExternalGeometryCount,
+    "external_geometry_count": len(sketch.ExternalGeometry),
     "fully_constrained": sketch.FullyConstrained if hasattr(sketch, "FullyConstrained") else None,
     "dof": sketch.solve() if hasattr(sketch, "solve") else None,
 }}

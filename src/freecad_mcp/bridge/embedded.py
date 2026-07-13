@@ -247,32 +247,62 @@ obj = doc.getObject({obj_name!r})
 if obj is None:
     raise ValueError(f"Object not found: {obj_name!r}")
 
+# Build a JSON-safe representation of a value
+def _safe(v):
+    if isinstance(v, (str, int, float, bool)) or v is None:
+        return v
+    if isinstance(v, (list, tuple)) or (hasattr(v, '__iter__') and not isinstance(v, (str, bytes, dict))):
+        try:
+            return [_safe(x) for x in v]
+        except Exception:
+            return str(v)
+    if isinstance(v, dict):
+        return {{k: _safe(val) for k, val in v.items()}}
+    return str(v)
+
 props = {{}}
 for prop in obj.PropertiesList:
     try:
-        val = getattr(obj, prop)
-        if hasattr(val, '__class__') and val.__class__.__module__ != 'builtins':
-            val = str(val)
-        props[prop] = val
+        props[prop] = _safe(getattr(obj, prop))
     except Exception:
         props[prop] = "<unreadable>"
 
 shape_info = None
 if hasattr(obj, "Shape"):
-    shape = obj.Shape
-    shape_info = {{
-        "type": shape.ShapeType,
-        "volume": shape.Volume if hasattr(shape, "Volume") else None,
-        "area": shape.Area if hasattr(shape, "Area") else None,
-        "is_valid": shape.isValid(),
-    }}
+    try:
+        shape = obj.Shape
+        is_null_fn = getattr(shape, "isNull", None)
+        is_null = is_null_fn() if is_null_fn else True
+
+        if shape and not is_null:
+            shape_type = None
+            try:
+                shape_type = getattr(shape, "ShapeType", None)
+            except Exception:
+                shape_type = "NullShape"
+
+            shape_info = {{
+                "type": shape_type,
+                "volume": shape.Volume if hasattr(shape, "Volume") else None,
+                "area": shape.Area if hasattr(shape, "Area") else None,
+                "is_valid": shape.isValid() if hasattr(shape, "isValid") else None,
+            }}
+        else:
+            shape_info = {{
+                "type": "Empty",
+                "volume": None,
+                "area": None,
+                "is_valid": None,
+            }}
+    except Exception as e:
+        shape_info = {{"error": "Failed to parse shape structures: " + str(e)}}
 
 _result_ = {{
     "name": obj.Name,
     "label": obj.Label,
     "type_id": obj.TypeId,
     "properties": props,
-    "shape_info": shape_info,
+    "shape_info": shape_info or None,
     "children": [c.Name for c in obj.OutList] if hasattr(obj, "OutList") else [],
 }}
 """
