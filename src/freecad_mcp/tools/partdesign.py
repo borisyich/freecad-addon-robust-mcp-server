@@ -137,11 +137,22 @@ except Exception:
     doc.abortTransaction()
     raise
 
+# Extract support name
+support_info = None
+if hasattr(sketch, "AttachmentSupport") and sketch.AttachmentSupport:
+    # Structure: [(Object, ('SubElement', ...))]
+    supp_obj, sub_elems = sketch.AttachmentSupport[0]
+    support_info = f"{{supp_obj.Name}}.{{sub_elems[0]}}" if sub_elems and sub_elems[0] else supp_obj.Name
+elif hasattr(sketch, "Support") and sketch.Support:
+    # Structure: (Object, ['SubElement'])
+    supp_obj, sub_elems = sketch.Support
+    support_info = f"{{supp_obj.Name}}.{{sub_elems[0]}}" if sub_elems and sub_elems[0] else supp_obj.Name
+
 _result_ = {{
     "name": sketch.Name,
     "label": sketch.Label,
     "type_id": sketch.TypeId,
-    "support": str(sketch.AttachmentSupport) if hasattr(sketch, "AttachmentSupport") else (str(sketch.Support) if hasattr(sketch, "Support") else None),
+    "support": support_info,
 }}
 """
         result = await bridge.execute_python(code)
@@ -919,7 +930,8 @@ _result_ = {{
 doc = (
     FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
     else FreeCAD.ActiveDocument
-) or FreeCAD.newDocument({doc_name!r} or "Untitled")sketch = doc.getObject({sketch_name!r})
+) or FreeCAD.newDocument({doc_name!r} or "Untitled")
+sketch = doc.getObject({sketch_name!r})
 if sketch is None:
     raise ValueError(
         f"Sketch not found: {sketch_name!r}",
