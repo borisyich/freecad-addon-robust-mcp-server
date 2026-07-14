@@ -215,7 +215,7 @@ Create a parametric mounting plate:
 1. `create_sketch(body_name="Body", plane="XY_Plane")` - Creates attached sketch
 1. `add_sketch_rectangle(...)` - Adds the profile geometry
 1. `pad_sketch(sketch_name="Sketch", length=8)` - Extrudes to solid
-1. Creates new sketches with points for hole locations
+1. Creates new sketches with circles at each hole location
 1. `create_hole(...)` for each mounting hole
 1. `fillet_edges(...)` - Rounds the edges
 
@@ -307,9 +307,10 @@ pad_sketch(sketch_name="SupportSketch", length=60)
 
 # 4. Add mounting holes
 create_sketch(body_name="Body", plane="XY_Plane", name="HoleSketch")
-add_sketch_point(sketch_name="HoleSketch", x=15, y=30)
-add_sketch_point(sketch_name="HoleSketch", x=65, y=30)
-create_hole(sketch_name="HoleSketch", diameter=6, hole_type="ThroughAll")
+add_sketch_circle(sketch_name="HoleSketch", center_x=15, center_y=30, radius=3)
+add_sketch_circle(sketch_name="HoleSketch", center_x=65, center_y=30, radius=3)
+hole = create_hole(sketch_name="HoleSketch", diameter=6, hole_type="ThroughAll")
+# Continue only when hole["validated"] is true and hole["removed_volume"] > 0.
 
 # 5. Add slot (as pocket)
 create_sketch(body_name="Body", plane="Face...", name="SlotSketch")

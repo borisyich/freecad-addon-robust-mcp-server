@@ -551,7 +551,7 @@ add_sketch_arc(
 
 #### add_sketch_point
 
-Add a point to a sketch (useful for hole centers).
+Add a reference point to a sketch. For `create_hole`, use circles instead.
 
 ```python
 add_sketch_point(
@@ -656,17 +656,18 @@ groove_sketch(
 
 #### create_hole
 
-Create parametric holes with optional threading.
+Create parametric holes with optional threading and strict post-validation. The call fails and rolls back if the result is invalid, does not reduce body volume, or does not produce one independent cut per profile circle. A sketch can be consumed only once.
 
 ```python
 create_hole(
-    sketch_name: str,        # Sketch with center point(s)
+    sketch_name: str,        # Unused sketch with non-construction circles
     diameter: float = 6.0,
     depth: float = 10.0,
-    hole_type: str = "Dimension",  # "Dimension", "ThroughAll", "UpToFirst"
+    hole_type: str = "Dimension",  # "Dimension" or "ThroughAll"
     threaded: bool = False,
-    thread_type: str = "ISO",  # "ISO", "UNC", "UNF"
+    thread_type: str = "ISO",  # "ISO", "ISO_FINE", "UNC", "UNF"
     thread_size: str = "M6",
+    reversed: bool | None = None,  # None = try both directions automatically
     name: str | None = None,
     doc_name: str | None = None
 ) -> dict

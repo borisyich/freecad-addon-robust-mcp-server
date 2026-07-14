@@ -334,7 +334,14 @@ class TestPartDesignTools:
         mock_bridge.execute_python = AsyncMock(
             return_value=ExecutionResult(
                 success=True,
-                result={"name": "Hole", "label": "Hole", "type_id": "PartDesign::Hole"},
+                result={
+                    "name": "Hole",
+                    "label": "Hole",
+                    "type_id": "PartDesign::Hole",
+                    "validated": True,
+                    "shape_valid": True,
+                    "removed_volume": 100.0,
+                },
                 stdout="",
                 stderr="",
                 execution_time_ms=15.0,
@@ -346,6 +353,125 @@ class TestPartDesignTools:
 
         assert result["name"] == "Hole"
         mock_bridge.execute_python.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_create_hole_rejects_object_only_success_payload(
+        self, register_tools, mock_bridge
+    ):
+        """An existing Hole object is not proof of successful geometry."""
+        mock_bridge.execute_python = AsyncMock(
+            return_value=ExecutionResult(
+                success=True,
+                result={
+                    "name": "Hole",
+                    "label": "Hole",
+                    "type_id": "PartDesign::Hole",
+                },
+                stdout="",
+                stderr="",
+                execution_time_ms=15.0,
+            )
+        )
+
+        create_hole = register_tools["create_hole"]
+        with pytest.raises(ValueError, match="validation contract"):
+            await create_hole(sketch_name="HoleSketch")
+
+    @pytest.mark.asyncio
+    async def test_create_hole_embeds_strict_freecad_validation(
+        self, register_tools, mock_bridge
+    ):
+        """create_hole should validate geometry, history, and actual subtraction."""
+        mock_bridge.execute_python = AsyncMock(
+            return_value=ExecutionResult(
+                success=True,
+                result={
+                    "name": "Hole",
+                    "validated": True,
+                    "removed_volume": 100.0,
+                    "shape_valid": True
+                },
+                stdout="",
+                stderr="",
+                execution_time_ms=15.0,
+            )
+        )
+
+        create_hole = register_tools["create_hole"]
+        result = await create_hole(
+            sketch_name="HoleSketch",
+            diameter=5.0,
+            hole_type="ThroughAll",
+            doc_name="HoleTest",
+        )
+
+        assert result["validated"] is True
+        generated_code = mock_bridge.execute_python.await_args.args[0]
+        assert "Hole sketch contains no non-construction circles" in generated_code
+        assert "Sketch is already consumed by PartDesign feature(s)" in generated_code
+        assert "body volume did not decrease" in generated_code
+        assert "expected {profile_circle_count} independent hole cut(s)" in generated_code
+        assert "directions_to_try" in generated_code
+        assert "doc.abortTransaction()" in generated_code
+        assert "doc.removeObject(created_hole_name)" in generated_code
+
+    @pytest.mark.asyncio
+    async def test_create_hole_rejects_unsupported_depth_type(
+        self, register_tools, mock_bridge
+    ):
+        """create_hole should reject depth modes unavailable in FreeCAD 1.0."""
+        create_hole = register_tools["create_hole"]
+
+        with pytest.raises(ValueError, match=r"Dimension.*ThroughAll"):
+            await create_hole(sketch_name="HoleSketch", hole_type="UpToFirst")
+
+        mock_bridge.execute_python.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_create_hole_rejects_invalid_dimensions(
+        self, register_tools, mock_bridge
+    ):
+        """create_hole should reject non-positive diameter and depth early."""
+        create_hole = register_tools["create_hole"]
+
+        with pytest.raises(ValueError, match="diameter"):
+            await create_hole(sketch_name="HoleSketch", diameter=0)
+        with pytest.raises(ValueError, match="depth"):
+            await create_hole(sketch_name="HoleSketch", depth=-1)
+
+        mock_bridge.execute_python.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_create_hole_maps_thread_profile_and_auto_direction(
+        self, register_tools, mock_bridge
+    ):
+        """create_hole should map ISO aliases and try both directions by default."""
+        mock_bridge.execute_python = AsyncMock(
+            return_value=ExecutionResult(
+                success=True,
+                result={
+                    "name": "Hole",
+                    "validated": True,
+                    "shape_valid": True,
+                    "removed_volume": 100.0,
+                },
+                stdout="",
+                stderr="",
+                execution_time_ms=15.0,
+            )
+        )
+        create_hole = register_tools["create_hole"]
+
+        await create_hole(
+            sketch_name="HoleSketch",
+            threaded=True,
+            thread_type="ISO",
+            thread_size="M6",
+        )
+
+        generated_code = mock_bridge.execute_python.await_args.args[0]
+        assert "resolved_thread_profile = 'ISOMetricProfile'" in generated_code
+        assert "[False, True]" in generated_code
 
     @pytest.mark.asyncio
     async def test_linear_pattern(self, register_tools, mock_bridge):

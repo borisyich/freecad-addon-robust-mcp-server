@@ -920,7 +920,7 @@ Check with: sketch.solve() returns DoF count (0 = fully constrained)""",
                         },
                         {
                             "name": "add_sketch_point",
-                            "description": "Add point to sketch (for holes)",
+                            "description": "Add reference point to sketch",
                             "key_params": ["sketch_name", "x", "y"],
                         },
                         {
@@ -1004,7 +1004,7 @@ Check with: sketch.solve() returns DoF count (0 = fully constrained)""",
                         },
                         {
                             "name": "create_hole",
-                            "description": "Create parametric hole feature",
+                            "description": "Create and validate subtractive hole feature",
                             "key_params": ["sketch_name", "diameter", "depth"],
                         },
                         {

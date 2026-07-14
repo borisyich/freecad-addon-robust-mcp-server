@@ -250,7 +250,7 @@ All sketch operations are wrapped in transactions - use `undo()` to revert any o
 - `add_sketch_circle(sketch_name, center_x, center_y, radius)`
 - `add_sketch_line(sketch_name, x1, y1, x2, y2)`
 - `add_sketch_arc(sketch_name, center_x, center_y, radius, start_angle, end_angle)`
-- `add_sketch_point(sketch_name, x, y)` - for hole placement
+- `add_sketch_point(sketch_name, x, y)`
 - `add_sketch_ellipse(sketch_name, center_x, center_y, major_radius, minor_radius)`
 - `add_sketch_polygon(sketch_name, center_x, center_y, sides, radius)`
 - `add_sketch_slot(sketch_name, x1, y1, x2, y2, width)` - rounded rectangle
@@ -279,7 +279,9 @@ For Pad/Pocket operations, sketches must be closed:
 ## Tips
 - Start simple: rectangle or circle first
 - Build complex shapes with multiple sketch elements
-- Use `add_sketch_point` for hole features (then `create_hole`)
+- For `create_hole`, use one or more non-construction circles via `add_sketch_circle`; do not use sketch points
+- Treat a PartDesign profile sketch as single-use: create a new sketch for each separate feature
+- A hole is successful only when `create_hole` returns `validated: true` and positive `removed_volume`
 - Use `get_sketch_info` to check if fully constrained (0 DOF)
 - Use `toggle_construction` for reference geometry""",
             "boolean": """# Boolean Operations Guidance

@@ -896,101 +896,387 @@ _result_ = {{
         threaded: bool = False,
         thread_type: str = "ISO",
         thread_size: str = "M6",
+        reversed: bool | None = None,
         name: str | None = None,
         doc_name: str | None = None,
     ) -> dict[str, Any]:
-        """Create a Hole feature from a sketch containing point(s).
+        """Create a validated Hole feature from a sketch containing circles.
 
-        Creates parametric holes with optional threading. The sketch should
-        contain points defining hole center locations.
+        The sketch must contain one or more non-construction circles. One sketch
+        may be consumed by only one PartDesign feature. The operation succeeds
+        only when FreeCAD produces one valid solid and the body's volume is
+        measurably reduced. If the default direction does not cut the body, the
+        opposite direction is tried automatically unless ``reversed`` is set.
 
         Args:
-            sketch_name: Name of the sketch with hole center point(s).
-            diameter: Hole diameter (for non-threaded). Defaults to 6.0.
-            depth: Hole depth. Defaults to 10.0.
-            hole_type: Hole depth type. Options:
-                - "Dimension" - Specific depth
-                - "ThroughAll" - Through entire part
-                - "UpToFirst" - Up to first face
-            threaded: Whether hole is threaded. Defaults to False.
-            thread_type: Thread standard. Options: "ISO", "UNC", "UNF".
-            thread_size: Thread size (e.g., "M6", "M8", "#10", "1/4").
+            sketch_name: Name of an unused sketch with hole-location circles.
+            diameter: Hole diameter for non-threaded holes. Defaults to 6.0.
+            depth: Hole depth for ``Dimension`` holes. Defaults to 10.0.
+            hole_type: Depth type: ``Dimension`` or ``ThroughAll``.
+            threaded: Whether to create a threaded hole definition.
+            thread_type: Thread profile: ``ISO``, ``ISO_FINE``, ``UNC``, or ``UNF``.
+            thread_size: Thread designation, for example ``M6`` or ``1/4``.
+            reversed: Explicit cutting direction. If None, both directions are
+                tried and the first valid subtractive result is retained.
             name: Hole feature name. Auto-generated if None.
-            doc_name: Document containing the sketch. Uses active document if None.
+            doc_name: Existing document containing the sketch. Uses the active
+                document if None. A missing document is never created silently.
 
         Returns:
-            Dictionary with created hole information:
-                - name: Hole name
-                - label: Hole label
-                - type_id: Object type
+            Dictionary describing the validated feature, including removed
+            volume, selected direction, profile circle count, and shape status.
         """
+        if diameter <= 0:
+            raise ValueError("Hole diameter must be greater than zero")
+        if depth <= 0:
+            raise ValueError("Hole depth must be greater than zero")
+
+        normalized_hole_type = hole_type.strip().lower().replace("_", "")
+        hole_type_map = {
+            "dimension": "Dimension",
+            "throughall": "ThroughAll",
+        }
+        if normalized_hole_type not in hole_type_map:
+            raise ValueError(
+                "Unsupported hole_type. Use 'Dimension' or 'ThroughAll'. "
+                "FreeCAD 1.0 does not expose UpToFirst for PartDesign::Hole."
+            )
+        depth_type = hole_type_map[normalized_hole_type]
+
+        normalized_thread_type = (
+            thread_type.strip().upper().replace(" ", "").replace("-", "")
+        )
+        thread_type_map = {
+            "ISO": "ISOMetricProfile",
+            "ISOMETRICPROFILE": "ISOMetricProfile",
+            "ISOFINE": "ISOMetricFineProfile",
+            "ISOMETRICFINEPROFILE": "ISOMetricFineProfile",
+            "UNC": "UNC",
+            "UNF": "UNF",
+        }
+        if threaded and normalized_thread_type not in thread_type_map:
+            raise ValueError(
+                "Unsupported thread_type. Use ISO, ISO_FINE, UNC, or UNF."
+            )
+        resolved_thread_type = thread_type_map.get(
+            normalized_thread_type, "ISOMetricProfile"
+        )
+
         bridge = await get_bridge()
 
         code = f"""
+requested_doc_name = {doc_name!r}
 doc = (
-    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
+    FreeCAD.listDocuments().get(requested_doc_name)
+    if requested_doc_name is not None
     else FreeCAD.ActiveDocument
-) or FreeCAD.newDocument({doc_name!r} or "Untitled")
-sketch = doc.getObject({sketch_name!r})
-if sketch is None:
+)
+if doc is None:
     raise ValueError(
-        f"Sketch not found: {sketch_name!r}",
-        "Firstly you need to create sketch by tool `create_sketch`"
+        "Document not found. create_hole requires an existing document; "
+        "it will not create one implicitly."
     )
 
-# Find the body containing this sketch
-body = None
+sketch = doc.getObject({sketch_name!r})
+if sketch is None:
+    raise ValueError(f"Sketch not found: {sketch_name!r}")
+if sketch.TypeId != "Sketcher::SketchObject":
+    raise ValueError(
+        f"Object {sketch_name!r} is not a Sketcher::SketchObject: {{sketch.TypeId}}"
+    )
+
+# Find the unique PartDesign Body containing the sketch.
+bodies = []
 for obj in doc.Objects:
-    if obj.TypeId == "PartDesign::Body":
-        if hasattr(obj, "Group") and sketch in obj.Group:
-            body = obj
+    if obj.TypeId == "PartDesign::Body" and hasattr(obj, "Group"):
+        if sketch in obj.Group:
+            bodies.append(obj)
+if len(bodies) != 1:
+    raise ValueError(
+        f"Sketch must belong to exactly one PartDesign Body; found {{len(bodies)}}"
+    )
+body = bodies[0]
+
+# A profile sketch is single-use in a PartDesign history. Reusing it creates
+# ambiguous dependencies and frequently leaves invalid/no-op Hole features.
+consumers = []
+for obj in doc.Objects:
+    if obj is sketch or obj is body or not hasattr(obj, "Profile"):
+        continue
+    try:
+        profile = obj.Profile
+        profile_obj = profile[0] if isinstance(profile, (tuple, list)) else profile
+        if profile_obj is sketch:
+            consumers.append(obj.Name)
+    except Exception:
+        pass
+if consumers:
+    raise ValueError(
+        "Sketch is already consumed by PartDesign feature(s): "
+        + ", ".join(consumers)
+        + ". Create a new sketch for another hole operation."
+    )
+
+# FreeCAD 1.0 Hole uses circle/arc centers. This MCP tool deliberately accepts
+# only full circles: they are deterministic and do not require contour analysis.
+profile_circle_count = 0
+unsupported_geometry = []
+for index, geometry in enumerate(sketch.Geometry):
+    try:
+        if sketch.getConstruction(index):
+            continue
+    except Exception:
+        pass
+    geometry_type = getattr(geometry, "TypeId", type(geometry).__name__)
+    if geometry_type == "Part::GeomCircle":
+        profile_circle_count += 1
+    else:
+        unsupported_geometry.append(f"{{index}}:{{geometry_type}}")
+if profile_circle_count == 0:
+    raise ValueError(
+        "Hole sketch contains no non-construction circles. "
+        "Use add_sketch_circle for each hole location; sketch points are not "
+        "a reliable PartDesign::Hole profile in FreeCAD 1.0.x."
+    )
+if unsupported_geometry:
+    raise ValueError(
+        "Hole sketch must contain only non-construction circles. Unsupported "
+        "geometry: " + ", ".join(unsupported_geometry)
+    )
+
+# Locate the most recent valid solid feature preceding the sketch in the Body.
+group = list(body.Group)
+try:
+    sketch_index = group.index(sketch)
+except ValueError as exc:
+    raise ValueError("Sketch is not present in its Body history") from exc
+
+base_feature = None
+for candidate in reversed(group[:sketch_index]):
+    if not hasattr(candidate, "Shape"):
+        continue
+    try:
+        candidate_shape = candidate.Shape
+        if (
+            not candidate_shape.isNull()
+            and candidate_shape.isValid()
+            and len(candidate_shape.Solids) == 1
+        ):
+            base_feature = candidate
             break
+    except Exception:
+        pass
+if base_feature is None:
+    raise ValueError(
+        "No valid single-solid feature exists before the hole sketch. "
+        "Create a Pad or another solid feature first."
+    )
 
-if body is None:
-    raise ValueError("Sketch must be inside a PartDesign Body for Hole operation")
+base_shape = base_feature.Shape.copy()
+base_volume = float(base_shape.Volume)
+if base_volume <= 0:
+    raise ValueError("Base feature has zero volume")
+volume_tolerance = max(1e-7, abs(base_volume) * 1e-9)
 
-# Wrap in transaction for undo support
-doc.openTransaction("Create Hole")
+
+def _status_strings(feature):
+    try:
+        return [str(item) for item in feature.getStatusString()]
+    except Exception:
+        try:
+            return [str(item) for item in feature.State]
+        except Exception:
+            return []
+
+
+def _check_result(feature):
+    reasons = []
+    shape = getattr(feature, "Shape", None)
+    result_volume = None
+    solid_count = 0
+    removed_solid_count = 0
+    if shape is None or shape.isNull():
+        reasons.append("result shape is null")
+    else:
+        if not shape.isValid():
+            reasons.append("result shape is invalid")
+        try:
+            solid_count = len(shape.Solids)
+        except Exception:
+            solid_count = 0
+        if solid_count != 1:
+            reasons.append(f"expected one solid, got {{solid_count}}")
+        result_volume = float(shape.Volume)
+        removed_volume = base_volume - result_volume
+        if removed_volume <= volume_tolerance:
+            reasons.append(
+                f"body volume did not decrease: base={{base_volume:.9g}}, "
+                f"result={{result_volume:.9g}}"
+            )
+        else:
+            try:
+                removed_shape = base_shape.cut(shape)
+                removed_solid_count = len(removed_shape.Solids)
+                if removed_solid_count != profile_circle_count:
+                    reasons.append(
+                        f"expected {{profile_circle_count}} independent hole cut(s), "
+                        f"got {{removed_solid_count}}. A circle may be outside the "
+                        "solid or multiple hole cuts may overlap."
+                    )
+            except Exception as exc:
+                reasons.append(f"could not validate removed material: {{exc}}")
+    if body.Tip is not feature:
+        reasons.append(
+            f"Body Tip is {{getattr(body.Tip, 'Name', None)!r}}, not {{feature.Name!r}}"
+        )
+    status = _status_strings(feature)
+    error_status = [
+        item for item in status
+        if "error" in item.lower() or "invalid" in item.lower()
+    ]
+    if error_status:
+        reasons.append("feature status: " + ", ".join(error_status))
+    return (
+        not reasons, reasons, result_volume, solid_count,
+        removed_solid_count, status
+    )
+
+
+hole = None
+created_hole_name = None
+original_tip_name = getattr(body.Tip, "Name", None)
+doc.openTransaction("Create validated Hole")
 try:
     hole_name = {name!r} or "Hole"
     hole = body.newObject("PartDesign::Hole", hole_name)
+    created_hole_name = hole.Name
     hole.Profile = sketch
-    hole.Depth = {depth}
+    hole.DepthType = {depth_type!r}
+    if {depth_type!r} == "Dimension":
+        hole.Depth = {depth}
 
-    # Set hole type
-    hole_type = {hole_type!r}
-    if hole_type == "ThroughAll":
-        hole.DepthType = 1
-    elif hole_type == "UpToFirst":
-        hole.DepthType = 2
-    else:
-        hole.DepthType = 0  # Dimension
-
-    # Set threading
     if {threaded}:
+        resolved_thread_profile = {resolved_thread_type!r}
+        hole.ThreadType = resolved_thread_profile
+        requested_size = {thread_size!r}.strip()
+        available_sizes = []
+        try:
+            available_sizes = list(hole.getEnumerationsOfProperty("ThreadSize"))
+        except Exception:
+            pass
+
+        resolved_size = requested_size
+        if available_sizes and requested_size not in available_sizes:
+            request_lower = requested_size.lower()
+            candidates = [
+                option for option in available_sizes
+                if option.lower() == request_lower
+                or option.lower().startswith(request_lower + "x")
+            ]
+            if len(candidates) == 1:
+                resolved_size = candidates[0]
+            else:
+                raise ValueError(
+                    f"Unsupported thread_size {{requested_size!r}} for "
+                    f"{{resolved_thread_profile}}. Available examples: "
+                    + ", ".join(available_sizes[:12])
+                )
+        hole.ThreadSize = resolved_size
         hole.Threaded = True
-        hole.ThreadType = {thread_type!r}
-        hole.ThreadSize = {thread_size!r}
     else:
+        hole.ThreadType = "None"
         hole.Threaded = False
         hole.Diameter = {diameter}
 
-    doc.recompute()
+    requested_reversed = {reversed!r}
+    directions_to_try = (
+        [requested_reversed] if requested_reversed is not None else [False, True]
+    )
+    attempts = []
+    selected = None
+    for direction in directions_to_try:
+        hole.Reversed = bool(direction)
+        doc.recompute()
+        (
+            ok, reasons, result_volume, solid_count,
+            removed_solid_count, status
+        ) = _check_result(hole)
+        attempts.append({{
+            "reversed": bool(direction),
+            "ok": ok,
+            "reasons": reasons,
+            "status": status,
+        }})
+        if ok:
+            selected = {{
+                "reversed": bool(direction),
+                "result_volume": result_volume,
+                "solid_count": solid_count,
+                "removed_solid_count": removed_solid_count,
+            }}
+            break
+
+    if selected is None:
+        details = "; ".join(
+            f"reversed={{attempt['reversed']}}: "
+            + (", ".join(attempt["reasons"]) or "unknown failure")
+            for attempt in attempts
+        )
+        raise ValueError(
+            "Hole produced no valid subtractive result in the tested direction(s). "
+            "Check that every circle center lies over the existing solid and that "
+            "the sketch plane intersects the body. " + details
+        )
+
+    removed_volume = base_volume - selected["result_volume"]
     doc.commitTransaction()
 except Exception:
-    doc.abortTransaction()
+    try:
+        doc.abortTransaction()
+    finally:
+        # Some FreeCAD builds can leave a failed feature after abortTransaction.
+        # Remove only the object created by this call and restore a clean history.
+        if created_hole_name:
+            leftover = doc.getObject(created_hole_name)
+            if leftover is not None:
+                try:
+                    doc.removeObject(created_hole_name)
+                    if original_tip_name:
+                        original_tip = doc.getObject(original_tip_name)
+                        if original_tip is not None:
+                            body.Tip = original_tip
+                    doc.recompute()
+                except Exception:
+                    pass
     raise
 
 _result_ = {{
     "name": hole.Name,
     "label": hole.Label,
     "type_id": hole.TypeId,
+    "validated": True,
+    "shape_valid": hole.Shape.isValid(),
+    "base_feature": base_feature.Name,
+    "removed_volume": removed_volume,
+    "reversed": selected["reversed"],
 }}
 """
         result = await bridge.execute_python(code)
-        if result.success:
-            return result.result
-        raise ValueError(result.error_traceback or "Hole creation failed")
+        if not result.success:
+            raise ValueError(result.error_traceback or "Hole creation failed")
+
+        payload = result.result
+        if not isinstance(payload, dict):
+            raise ValueError("Hole validation returned an invalid response payload")
+        if (
+            payload.get("validated") is not True
+            or payload.get("shape_valid") is not True
+            or float(payload.get("removed_volume", 0.0)) <= 0.0
+        ):
+            raise ValueError(
+                "Hole validation contract was not satisfied: " + repr(payload)
+            )
+        return payload
 
     @mcp.tool()
     async def linear_pattern(
@@ -1398,7 +1684,7 @@ _result_ = {{
     ) -> dict[str, Any]:
         """Add a point to a sketch.
 
-        Points are useful for defining hole centers and reference locations.
+        Points are useful as reference locations. For create_hole on FreeCAD 1.0.x, use non-construction circles instead.
 
         Args:
             sketch_name: Name of the sketch to add point to.
