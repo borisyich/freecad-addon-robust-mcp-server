@@ -59,14 +59,17 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
 
         Returns:
             Dictionary containing comprehensive object information:
-                - name: Object name
-                - label: Object label
-                - type_id: FreeCAD type identifier
-                - properties: Dictionary of property names and values (if requested)
-                - shape_info: Shape details (if requested and object has shape)
-                - children: List of child object names
-                - parents: List of parent object names
-                - visibility: Whether object is visible
+                - name, label, type_id: Object identity
+                - properties: Each property contains its FreeCAD type, group,
+                  status flags, and a structured JSON-safe value
+                - shape_info: Topology, validity, dimensions, mass center, and bounds
+                - children, parents: Linked object names
+                - visibility: Current view visibility
+
+            Complex FreeCAD values are converted to semantic structures:
+            placements become position/rotation data, linked objects become
+            name/label/type_id references, quantities include value and unit,
+            and TopoShapes become geometry summaries instead of pointer strings.
         """
         try:
             bridge = await get_bridge()
@@ -74,7 +77,7 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
         except Exception as e:
             return {
                 "error": f"Failed to retrieve object '{object_name}' from FreeCAD: {str(e)}",
-                "success": False
+                "success": False,
             }
 
         if not obj:
@@ -91,7 +94,12 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
         }
 
         if include_properties:
-            result["properties"] = obj.properties
+            properties = dict(obj.properties)
+            if include_shape and obj.shape_info is not None and "Shape" in properties:
+                shape_property = dict(properties["Shape"])
+                shape_property["value"] = {"summary_ref": "shape_info"}
+                properties["Shape"] = shape_property
+            result["properties"] = properties
 
         if include_shape:
             result["shape_info"] = obj.shape_info

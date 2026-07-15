@@ -23,16 +23,16 @@
 ### Part Design Tools
 | Tool | Expected | Result | Notes |
 |------|----------|--------|-------|
-| create_partdesign_body | Create body | ✅ SUCCESS | Created "PartDesign__Body" |
-| create_sketch | Create sketch on YZ | ✅ SUCCESS | Created "Sketch" on YZ_Plane |
-| add_sketch_circle | Add circle | ✅ SUCCESS | Added at geometry_index 0 |
-| constrain_radius | Constrain radius | ✅ SUCCESS | Added constraint for 50mm |
-| get_sketch_info | Sketch details | ✅ SUCCESS | geometry_count=1, constraint_count=1 |
-| pad_sketch | Pad sketch | ❌ FAILED | Bug: AttributeError 'Symmetric' |
-| pocket_sketch | Pocket sketch | ✅ SUCCESS | Created "Pocket" feature |
-| revolution_sketch | Revolve sketch | ❌ FAILED | Bug: AttributeError 'Symmetric' |
-| groove_sketch | Groove sketch | ❌ FAILED | Bug: AttributeError 'Symmetric' |
-| create_hole | Create hole | ❌ FAILED | Requires PartDesign sketch support |
+| create_partdesign_body | Create body | ✅ SUCCESS | Re-tested with multiple bodies: `Body_Main`, `Body_Secondary`, `Body_HoleTests` |
+| create_sketch | Create sketch on body plane/face | ✅ SUCCESS | Re-tested on base planes and attached faces (`XY_Plane`, `XZ_Plane001`, `Body_Main.Face3`) |
+| add_sketch_circle | Add circle | ✅ SUCCESS | Re-tested on multiple PartDesign sketches with different radii and placements |
+| constrain_radius | Constrain radius | ✅ SUCCESS | Re-tested on circle profiles; valid constraint indices returned |
+| get_sketch_info | Sketch details | ⚠️ MIXED | Works, but `dof=0` may coexist with `fully_constrained=false`; empty sketches can report `fully_constrained=true` |
+| pad_sketch | Pad sketch | ✅ SUCCESS | Re-tested successfully: `Pad_Cylinder`, valid solid, volume `9047.786842338604` |
+| pocket_sketch | Pocket sketch | ✅ SUCCESS | Re-tested successfully; created valid cut, but object may remain `Touched` and require recompute |
+| revolution_sketch | Revolve sketch | ⚠️ MIXED | Works with `axis="Sketch_V"`; `axis="Base_Z"` failed in one scenario with `Axis not found: Z_Axis` |
+| groove_sketch | Groove sketch | ✅ SUCCESS | Re-tested successfully with `axis="Sketch_V"`; valid resulting feature |
+| create_hole | Create hole | ✅ SUCCESS | Re-tested successfully on face-attached circle sketches for both `Dimension` and `ThroughAll`; some results still required recompute |
 | fillet_edges | Add fillet | ✅ SUCCESS | Created "Fillet" on BaseBox |
 | chamfer_edges | Add chamfer | ✅ SUCCESS | Created "Chamfer" on BaseBox |
 | draft_feature | Add draft | ❌ FAILED | Requires PartDesign Body object |
@@ -1235,3 +1235,276 @@ Per user instruction, the docstring was kept (point-based) and the **function bo
 - TestThickness (thickness testing)
 - TestDraft2 (draft in body testing)
 - TestHoleFixed (verification after fix)
+
+
+## PartDesign MCP Scenario Validation (2026-07-14)
+codex:gpt-5.4
+
+### Scope
+Validated these tools with `freecad-mcp` in document `PartDesignToolScenarios`:
+
+- `create_partdesign_body`
+- `create_sketch`
+- `add_sketch_circle`
+- `constrain_radius`
+- `get_sketch_info`
+- `pad_sketch`
+- `pocket_sketch`
+- `revolution_sketch`
+- `groove_sketch`
+- `create_hole`
+
+Validation relied not only on tool return payloads, but also on:
+
+- `validate_object`
+- `inspect_object`
+- `validate_document`
+- `recompute_document`
+- volume/area deltas
+- sketch DOF / constraint counters
+
+### 1) create_partdesign_body
+
+Scenarios:
+- `Body_Main`
+- `Body_Secondary`
+- `Body_HoleTests`
+
+Result:
+- ✅ All bodies created successfully.
+- `inspect_object` confirmed expected `PartDesign::Body` type and child/origin structure.
+
+### 2) create_sketch
+
+Scenarios:
+- sketch on body base plane: `Sketch_Pad_Base` on `Body_Main / XY_Plane`
+- second base-plane sketch: `Sketch_Holes` on `Body_Main / XY_Plane`
+- sketch on alternate plane: `Sketch_Revolve_Profile` on `Body_Secondary / XZ_Plane`
+- sketch on attached face: `Sketch_Pocket_Top` on `Body_Main.Face3`
+- hole-center sketches on `Body_HoleTests.Face3`
+
+Result:
+- ✅ All sketches created.
+- Support values were meaningful, e.g. `XY_Plane`, `XZ_Plane001`, `Body_Main.Face3`, `Body_HoleTests.Face3`.
+
+### 3) add_sketch_circle + constrain_radius + get_sketch_info
+
+Scenarios:
+- `Sketch_Pad_Base`: circle `(0,0), r=12`, then `constrain_radius(12)`
+- `Sketch_Pocket_Top`: circle `(0,0), r=4`, then `constrain_radius(4)`
+- `Sketch_Revolve_Profile`: circle `(18,0), r=4`
+- `Sketch_Groove_Profile`: circle `(18,0), r=1.5`
+- `Sketch_HoleBase`: circle `(0,0), r=10`
+- `Sketch_HoleCenters_A`: circle `(0,0), r=2.5`
+- `Sketch_HoleCenters_B`: circle `(3,0), r=1.5`
+
+Observations:
+- ✅ Circle creation worked in all tested profiles.
+- ✅ `constrain_radius` worked in both explicit scenarios and returned valid constraint indices.
+- ⚠️ `get_sketch_info` showed an important nuance:
+  - For circle-only sketches with one radius constraint, `dof=0`
+  - But `fully_constrained=false`
+- This means these fields should not be treated as interchangeable truth indicators.
+
+Concrete examples:
+- `Sketch_Pad_Base`: `geometry_count=1`, `constraint_count=1`, `dof=0`, `fully_constrained=false`
+- `Sketch_Pocket_Top`: `geometry_count=1`, `constraint_count=1`, `dof=0`, `fully_constrained=false`
+- Empty sketches for revolve/groove initially reported `fully_constrained=true`, `dof=0`, which is also misleading without geometry.
+
+### 4) pad_sketch
+
+Scenario A:
+- `Sketch_Pad_Base` → `Pad_Cylinder`, `length=20`
+
+Result:
+- ✅ Tool returned `PartDesign::Pad`
+- ✅ `validate_object(Pad_Cylinder)`:
+  - `valid=true`
+  - `shape_valid=true`
+  - `volume=9047.786842338604`
+  - `face_count=3` (via `inspect_object`)
+- ⚠️ Warning present: `PartDesign feature has no base feature`
+
+Interpretation:
+- The feature is geometrically valid and usable.
+- The warning did not invalidate the solid in this scenario.
+
+### 5) pocket_sketch
+
+Scenario A:
+- `Sketch_Pocket_Top` attached to `Body_Main.Face3`
+- `pocket_sketch(length=6, type="Length")` → `Pocket_Top_Center`
+
+Result:
+- ✅ Feature created.
+- ✅ Volume decreased from `9047.786842338604` to `8746.193947593983`.
+- ⚠️ `validate_object(Pocket_Top_Center)` reported:
+  - `valid=true`
+  - `shape_valid=true`
+  - `state=["Touched"]`
+  - `recompute_needed=true`
+
+Interpretation:
+- Pocket creation works.
+- Success return is not sufficient; the object may still require recompute afterward.
+
+### 6) revolution_sketch
+
+Scenario A — failing axis resolution:
+- `Sketch_Revolve_Profile`
+- `revolution_sketch(angle=360, axis="Base_Z")`
+
+Result:
+- ❌ Failed with:
+  - `ValueError: Axis not found: Z_Axis`
+
+Investigation:
+- Python inspection of `Body_Secondary.Origin` showed axes were named:
+  - `X_Axis001`
+  - `Y_Axis001`
+  - `Z_Axis001`
+- This suggests the tool attempted to resolve unsuffixed `Z_Axis` and did not handle suffixed body-origin axes correctly in this case.
+
+Scenario B — working alternative:
+- `revolution_sketch(angle=270, axis="Sketch_V")` → `Revolve_Profile_VAxis`
+
+Result:
+- ✅ Feature created successfully.
+- ✅ `validate_object(Revolve_Profile_VAxis)`:
+  - `valid=true`
+  - `shape_valid=true`
+  - `recompute_needed=false`
+  - `volume=4263.6691012706015`
+- ⚠️ Warning present: `PartDesign feature has no base feature`
+
+Interpretation:
+- The revolution operation itself works.
+- There is a specific axis-resolution problem for `Base_Z` in this body/origin naming scenario.
+
+### 7) groove_sketch
+
+Scenario A:
+- `Sketch_Groove_Profile`
+- `groove_sketch(angle=180, axis="Sketch_V")` → `Groove_Profile_VAxis`
+
+Result:
+- ✅ Feature created successfully.
+- ✅ `validate_object(Groove_Profile_VAxis)`:
+  - `valid=true`
+  - `shape_valid=true`
+  - `recompute_needed=false`
+  - `volume=4221.923903225151`
+
+Interpretation:
+- Groove works on the tested sketch-axis path.
+- In this run there was no equivalent runtime failure once `Sketch_V` was used.
+
+### 8) create_hole
+
+Separate dedicated body used: `Body_HoleTests`
+
+Base solid:
+- `Sketch_HoleBase` circle `(0,0), r=10`
+- `Pad_HoleBase`, `length=15`
+- Base volume from `inspect_object`: `4712.38898038469`
+
+Scenario A — finite-depth hole:
+- `Sketch_HoleCenters_A` on `Body_HoleTests.Face3`
+- circle `(0,0), r=2.5`
+- `create_hole(diameter=5, depth=8, hole_type="Dimension", threaded=false)` → `Hole_Dimension_A`
+
+Result:
+- ✅ Tool returned validated feature:
+  - `validated=true`
+  - `shape_valid=true`
+  - `base_feature="Pad_HoleBase"`
+  - `removed_volume=166.9111915678668`
+  - `reversed=false`
+- ✅ `validate_object(Hole_Dimension_A)`:
+  - `valid=true`
+  - `volume=4545.477788816823`
+
+Scenario B — through-all hole:
+- `Sketch_HoleCenters_B` on `Body_HoleTests.Face3`
+- circle `(3,0), r=1.5`
+- `create_hole(diameter=3, depth=10, hole_type="ThroughAll", threaded=false)` → `Hole_ThroughAll_B`
+
+Result:
+- ✅ Tool returned validated feature:
+  - `validated=true`
+  - `shape_valid=true`
+  - `base_feature="Hole_Dimension_A"`
+  - `removed_volume=91.76173210389243`
+  - `reversed=false`
+- ⚠️ `validate_object(Hole_ThroughAll_B)`:
+  - `valid=true`
+  - `shape_valid=true`
+  - `state=["Touched"]`
+  - `recompute_needed=true`
+  - `volume=4453.71605671293`
+
+Interpretation:
+- `create_hole` worked well in both `Dimension` and `ThroughAll` scenarios when the sketch was attached to a PartDesign face and used circle geometry.
+- As with `pocket_sketch`, post-creation recompute status can remain non-clean.
+
+### 9) Document-level validation
+
+After recompute + document validation:
+
+- `recompute_document("PartDesignToolScenarios")` → success
+- `validate_document("PartDesignToolScenarios")` returned:
+  - `valid=false`
+  - `invalid_objects=["Sketch_Holes"]`
+  - `objects_needing_recompute=["Body_Main", "Pocket_Top_Center", "Sketch_HoleCenters_A", "Sketch_HoleCenters_B", "Hole_ThroughAll_B"]`
+
+Interpretation:
+- Even when individual tool calls return successful payloads, document-level health may still reveal residual issues.
+- The unused `Sketch_Holes` became the only explicitly invalid object in the final document summary.
+
+### Final assessment
+
+#### Clearly working in tested scenarios
+- `create_partdesign_body`
+- `create_sketch`
+- `add_sketch_circle`
+- `constrain_radius`
+- `pad_sketch`
+- `pocket_sketch`
+- `revolution_sketch` (with `Sketch_V`)
+- `groove_sketch` (with `Sketch_V`)
+- `create_hole` (`Dimension` and `ThroughAll` on attached face sketches)
+
+#### Important caveats / suspicious behavior
+1. `get_sketch_info` can report:
+   - `dof=0` while `fully_constrained=false`
+   - `fully_constrained=true` on empty sketches
+   - therefore these fields require interpretation, not blind trust.
+
+2. `pocket_sketch` and `create_hole` may create valid geometry while still leaving:
+   - `state=["Touched"]`
+   - `recompute_needed=true`
+
+3. `revolution_sketch(axis="Base_Z")` failed on a body where origin axes existed only as suffixed names like `Z_Axis001`.
+   - This appears to be an axis lookup/resolution edge case.
+
+4. Document-level validation remained non-clean at the end despite many individually valid features.
+   - Final global result should therefore be considered **mixed but mostly functional**.
+
+### Practical conclusion
+
+These PartDesign tools are generally operational in realistic scenarios, especially when:
+- sketches are attached to bodies/faces correctly,
+- validation is checked after creation,
+- and recompute/document health is verified afterward.
+
+However, for robust automation it is **not enough** to rely only on returned feature names or a nominal success-like payload. Recommended verification chain:
+
+1. create feature
+2. `validate_object(...)`
+3. compare volume / shape status
+4. `recompute_document(...)`
+5. `validate_document(...)`
+
+This run specifically exposed:
+- a likely `Base_Z` axis-resolution issue for `revolution_sketch`,
+- and multiple cases where valid shapes still required recompute or left document-level issues behind.

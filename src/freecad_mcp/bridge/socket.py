@@ -16,6 +16,9 @@ import time
 import uuid
 from typing import Any
 
+from freecad_mcp.bridge._object_inspection_runtime import (
+    build_object_inspection_code,
+)
 from freecad_mcp.bridge.base import (
     ConnectionStatus,
     DocumentInfo,
@@ -515,80 +518,10 @@ _result_ = objects
         obj_name: str,
         doc_name: str | None = None,
     ) -> ObjectInfo:
-        """Get detailed object information."""
-        code = f"""
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
-if doc is None:
-    raise ValueError("No document found")
-
-obj = doc.getObject({obj_name!r})
-if obj is None:
-    raise ValueError(f"Object not found: {obj_name!r}")
-
-# Build a JSON-safe representation of a value
-def _safe(v):
-    if isinstance(v, (str, int, float, bool)) or v is None:
-        return v
-    if isinstance(v, (list, tuple)) or (hasattr(v, '__iter__') and not isinstance(v, (str, bytes, dict))):
-        try:
-            return [_safe(x) for x in v]
-        except Exception:
-            return str(v)
-    if isinstance(v, dict):
-        return {{k: _safe(val) for k, val in v.items()}}
-    return str(v)
-
-props = {{}}
-for prop in obj.PropertiesList:
-    try:
-        props[prop] = _safe(getattr(obj, prop))
-    except Exception:
-        props[prop] = "<unreadable>"
-
-shape_info = None
-if hasattr(obj, "Shape"):
-    try:
-        shape = obj.Shape
-        is_null_fn = getattr(shape, "isNull", None)
-        is_null = is_null_fn() if is_null_fn else True
-
-        if shape and not is_null:
-            shape_info = {{
-                "shape_type": getattr(shape, "ShapeType", None),
-                "volume": shape.Volume if hasattr(shape, "Volume") else None,
-                "area": shape.Area if hasattr(shape, "Area") else None,
-                "is_valid": shape.isValid() if hasattr(shape, "isValid") else False,
-                "is_closed": shape.isClosed() if hasattr(shape, "isClosed") else False,
-                "vertex_count": len(shape.Vertexes) if hasattr(shape, "Vertexes") else 0,
-                "edge_count": len(shape.Edges) if hasattr(shape, "Edges") else 0,
-                "face_count": len(shape.Faces) if hasattr(shape, "Faces") else 0,
-            }}
-        else:
-            shape_info = {{
-                "shape_type": "Empty",
-                "volume": None,
-                "area": None,
-                "is_valid": None,
-                "is_closed": None,
-                "vertex_count": 0,
-                "edge_count": 0,
-                "face_count": 0,
-            }}
-    except Exception as e:
-        shape_info = {{"error": "Failed to read shape: " + str(e)}}
-
-_result_ = {{
-    "name": obj.Name,
-    "label": obj.Label,
-    "type_id": obj.TypeId,
-    "properties": props,
-    "shape_info": shape_info,
-    "children": [c.Name for c in obj.OutList] if hasattr(obj, "OutList") else [],
-    "parents": [p.Name for p in obj.InList] if hasattr(obj, "InList") else [],
-    "visibility": obj.ViewObject.Visibility if hasattr(obj, "ViewObject") and obj.ViewObject else True,
-}}
-"""
-        result = await self.execute_python(code)
+        """Get detailed object information with structured FreeCAD values."""
+        result = await self.execute_python(
+            build_object_inspection_code(obj_name, doc_name)
+        )
 
         if result.success and result.result:
             return ObjectInfo(**result.result)

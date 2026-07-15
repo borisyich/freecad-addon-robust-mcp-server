@@ -283,3 +283,286 @@ FEATURE_VALIDATION_RUNTIME_HELPERS = _runtime_code(
         return validation
     '''
 )
+
+
+SKETCH_ANALYSIS_RUNTIME_HELPERS = _runtime_code(
+    r'''
+    def _sketch_point_name(position):
+        try:
+            position = int(position)
+        except Exception:
+            return str(position)
+        return {
+            1: "start",
+            2: "end",
+            3: "center",
+        }.get(position, "geometry")
+
+
+    def _sketch_index_pairs(values):
+        """Normalize FreeCAD geometry/point pairs to compact dictionaries."""
+        normalized = []
+        for item in values or []:
+            try:
+                geometry_index = int(item[0])
+                point_position = item[1] if len(item) > 1 else -1
+            except Exception:
+                continue
+            normalized.append(
+                {
+                    "geometry_index": geometry_index,
+                    "point": _sketch_point_name(point_position),
+                }
+            )
+        return normalized
+
+
+    def _group_unconstrained_geometry(values):
+        grouped = {}
+        for item in values:
+            geometry_index = item["geometry_index"]
+            point = item["point"]
+            grouped.setdefault(geometry_index, [])
+            if point not in grouped[geometry_index]:
+                grouped[geometry_index].append(point)
+        return [
+            {
+                "geometry_index": geometry_index,
+                "elements": grouped[geometry_index],
+            }
+            for geometry_index in sorted(grouped)
+        ]
+
+
+    def _sketch_solver_state(sketch):
+        solve_code = None
+        try:
+            solve_code = int(sketch.solve())
+        except Exception:
+            pass
+
+        solver_message = None
+        status_getter = getattr(sketch, "getStatusString", None)
+        if callable(status_getter):
+            try:
+                raw_message = status_getter()
+                if isinstance(raw_message, (list, tuple)):
+                    raw_message = "; ".join(str(item) for item in raw_message if item)
+                if raw_message:
+                    solver_message = str(raw_message)
+            except Exception:
+                pass
+
+        fully_constrained = None
+        try:
+            fully_constrained = bool(sketch.FullyConstrained)
+        except Exception:
+            pass
+
+        remaining_dof = None
+        try:
+            remaining_dof = int(sketch.DoF)
+        except Exception:
+            pass
+
+        status_by_code = {
+            -4: "over_constrained",
+            -3: "conflicting",
+            -2: "redundant",
+            -1: "solver_error",
+        }
+        if solve_code in status_by_code:
+            status = status_by_code[solve_code]
+            fully_constrained = False
+        elif fully_constrained is True or remaining_dof == 0:
+            status = "fully_constrained"
+            fully_constrained = True
+        elif solve_code == 0:
+            status = "under_constrained"
+            fully_constrained = False
+        else:
+            status = "unknown"
+
+        result = {
+            "status": status,
+            "solve_code": solve_code,
+            "fully_constrained": fully_constrained,
+            "remaining_dof": remaining_dof,
+        }
+        if solver_message:
+            result["message"] = solver_message
+        return result
+
+
+    def _sketch_open_vertex_value(value):
+        try:
+            return {
+                "x": float(value.x),
+                "y": float(value.y),
+                "z": float(value.z),
+            }
+        except Exception:
+            pass
+        try:
+            coordinates = list(value)
+            return {
+                "x": float(coordinates[0]),
+                "y": float(coordinates[1]),
+                "z": float(coordinates[2]) if len(coordinates) > 2 else 0.0,
+            }
+        except Exception:
+            return None
+
+
+    def _sketch_profile_state(sketch, construction_geometry_count):
+        open_vertices = []
+        getter = getattr(sketch, "getOpenVertices", None)
+        if callable(getter):
+            try:
+                for value in getter() or []:
+                    serialized = _sketch_open_vertex_value(value)
+                    if serialized is not None:
+                        open_vertices.append(serialized)
+            except Exception:
+                pass
+
+        closed_wire_count = 0
+        open_wire_count = 0
+        shape_valid = None
+        shape = getattr(sketch, "Shape", None)
+        if shape is not None:
+            try:
+                if not shape.isNull():
+                    try:
+                        shape_valid = bool(shape.isValid())
+                    except Exception:
+                        pass
+                    for wire in getattr(shape, "Wires", []) or []:
+                        try:
+                            is_closed = bool(wire.isClosed())
+                        except Exception:
+                            is_closed = False
+                        if is_closed:
+                            closed_wire_count += 1
+                        else:
+                            open_wire_count += 1
+            except Exception:
+                pass
+
+        regular_geometry_count = max(
+            0,
+            int(getattr(sketch, "GeometryCount", 0)) - construction_geometry_count,
+        )
+        if regular_geometry_count == 0:
+            state = "empty"
+        elif shape_valid is False:
+            state = "invalid"
+        elif open_vertices or open_wire_count:
+            state = "open"
+        elif closed_wire_count > 0:
+            state = "closed"
+        else:
+            state = "non_profile_geometry"
+
+        return {
+            "state": state,
+            "closed": state == "closed",
+            "closed_wire_count": closed_wire_count,
+            "open_wire_count": open_wire_count,
+            "open_vertices": open_vertices,
+            "shape_valid": shape_valid,
+        }
+
+
+    def _analyze_sketch(sketch):
+        geometry_count = int(getattr(sketch, "GeometryCount", 0))
+        constraint_count = int(getattr(sketch, "ConstraintCount", 0))
+        external_geometry_count = len(getattr(sketch, "ExternalGeometry", []) or [])
+
+        construction_geometry_count = 0
+        construction_getter = getattr(sketch, "getConstruction", None)
+        if callable(construction_getter):
+            for index in range(geometry_count):
+                try:
+                    construction_geometry_count += int(bool(construction_getter(index)))
+                except Exception:
+                    pass
+
+        solver = _sketch_solver_state(sketch)
+        profile = _sketch_profile_state(sketch, construction_geometry_count)
+
+        dependent = []
+        dependent_getter = getattr(sketch, "getGeometryWithDependentParameters", None)
+        if callable(dependent_getter):
+            try:
+                dependent = _sketch_index_pairs(dependent_getter())
+            except Exception:
+                pass
+        unconstrained = _group_unconstrained_geometry(dependent)
+
+        issues = []
+        hints = []
+        solver_status = solver["status"]
+        if solver_status == "over_constrained":
+            issues.append("Sketch is over-constrained.")
+            hints.append("Remove or revise the most recently added constraint.")
+        elif solver_status == "conflicting":
+            issues.append("Sketch contains conflicting constraints.")
+            hints.append("Inspect the latest constraints and remove the conflicting one.")
+        elif solver_status == "redundant":
+            issues.append("Sketch contains a redundant constraint.")
+            hints.append("Remove the redundant constraint before adding more dimensions.")
+        elif solver_status == "solver_error":
+            issues.append("Sketch solver failed.")
+            hints.append("Undo the last edit and inspect the affected geometry and constraints.")
+        elif solver_status == "under_constrained":
+            remaining_dof = solver["remaining_dof"]
+            if remaining_dof is not None:
+                issues.append(f"Sketch has {remaining_dof} remaining degree(s) of freedom.")
+            else:
+                issues.append("Sketch is under-constrained.")
+            if unconstrained:
+                indices = [item["geometry_index"] for item in unconstrained]
+                hints.append(f"Constrain geometry indices {indices}.")
+            else:
+                hints.append("Add positional or dimensional constraints to remove remaining motion.")
+
+        if profile["state"] == "open":
+            count = len(profile["open_vertices"])
+            issues.append(
+                f"Profile is open with {count} detected open endpoint(s)."
+                if count
+                else "Profile contains open wire(s)."
+            )
+            hints.append("Add Coincident constraints between matching open endpoints.")
+        elif profile["state"] == "invalid":
+            issues.append("Sketch shape is geometrically invalid.")
+            hints.append("Check for self-intersections, overlapping edges, or zero-length geometry.")
+        elif profile["state"] == "non_profile_geometry":
+            issues.append("Sketch has no closed wire suitable for a profile operation.")
+            hints.append("Connect the regular geometry into at least one closed contour.")
+
+        solver_healthy = solver_status not in {
+            "over_constrained",
+            "conflicting",
+            "redundant",
+            "solver_error",
+        }
+        result = {
+            "geometry_count": geometry_count,
+            "constraint_count": constraint_count,
+            "construction_geometry_count": construction_geometry_count,
+            "external_geometry_count": external_geometry_count,
+            "solver": solver,
+            "profile": profile,
+            "profile_ready": bool(profile["closed"] and solver_healthy),
+        }
+        if unconstrained:
+            result["unconstrained"] = unconstrained
+        if issues:
+            result["issues"] = issues
+        if hints:
+            result["hints"] = hints
+        return result
+    '''
+)

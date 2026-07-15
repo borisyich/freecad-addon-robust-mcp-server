@@ -14,6 +14,7 @@ from freecad_mcp.tools._freecad_runtime_helpers import (
     BODY_RUNTIME_HELPERS,
     FEATURE_VALIDATION_RUNTIME_HELPERS,
     REVOLUTION_AXIS_RUNTIME_HELPERS,
+    SKETCH_ANALYSIS_RUNTIME_HELPERS,
 )
 
 
@@ -199,13 +200,15 @@ _result_ = {{
             doc_name: Document containing the sketch. Uses active document if None.
 
         Returns:
-            Dictionary with geometry info:
-                - constraint_count: Number of constraints in sketch
-                - geometry_count: Number of geometry elements
+            Compact edit result:
+                - geometry_indices: Indices of the four added lines
+                - sketch_status: Solver, constraint, and profile diagnostics
         """
         bridge = await get_bridge()
 
         code = f"""
+{SKETCH_ANALYSIS_RUNTIME_HELPERS}
+
 doc = (
     FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
     else FreeCAD.ActiveDocument
@@ -243,8 +246,8 @@ except Exception:
     raise
 
 _result_ = {{
-    "constraint_count": sketch.ConstraintCount,
-    "geometry_count": sketch.GeometryCount,
+    "geometry_indices": list(range(n, n + 4)),
+    "sketch_status": _analyze_sketch(sketch),
 }}
 """
         result = await bridge.execute_python(code)
@@ -270,13 +273,15 @@ _result_ = {{
             doc_name: Document containing the sketch. Uses active document if None.
 
         Returns:
-            Dictionary with geometry info:
+            Compact edit result:
                 - geometry_index: Index of the added circle
-                - geometry_count: Total geometry elements
+                - sketch_status: Solver, constraint, and profile diagnostics
         """
         bridge = await get_bridge()
 
         code = f"""
+{SKETCH_ANALYSIS_RUNTIME_HELPERS}
+
 doc = (
     FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
     else FreeCAD.ActiveDocument
@@ -299,7 +304,7 @@ except Exception:
 
 _result_ = {{
     "geometry_index": idx,
-    "geometry_count": sketch.GeometryCount,
+    "sketch_status": _analyze_sketch(sketch),
 }}
 """
         result = await bridge.execute_python(code)
@@ -1437,14 +1442,16 @@ _result_ = {{
             doc_name: Document containing the sketch. Uses active document if None.
 
         Returns:
-            Dictionary with geometry info:
+            Compact edit result:
                 - name: Sketch name
                 - geometry_index: Index of the added line
-                - geometry_count: Total geometry elements
+                - sketch_status: Solver, constraint, and profile diagnostics
         """
         bridge = await get_bridge()
 
         code = f"""
+{SKETCH_ANALYSIS_RUNTIME_HELPERS}
+
 doc = (
     FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
     else FreeCAD.ActiveDocument
@@ -1474,7 +1481,7 @@ except Exception:
 _result_ = {{
     "sketch_name": sketch.Name,
     "geometry_index": idx,
-    "geometry_count": sketch.GeometryCount,
+    "sketch_status": _analyze_sketch(sketch),
 }}
 """
         result = await bridge.execute_python(code)
@@ -1504,14 +1511,16 @@ _result_ = {{
             doc_name: Document containing the sketch. Uses active document if None.
 
         Returns:
-            Dictionary with geometry info:
+            Compact edit result:
                 - name: Sketch name
                 - geometry_index: Index of the added arc
-                - geometry_count: Total geometry elements
+                - sketch_status: Solver, constraint, and profile diagnostics
         """
         bridge = await get_bridge()
 
         code = f"""
+{SKETCH_ANALYSIS_RUNTIME_HELPERS}
+
 doc = (
     FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
     else FreeCAD.ActiveDocument
@@ -1545,7 +1554,7 @@ except Exception:
 _result_ = {{
     "name": sketch.Name,
     "geometry_index": idx,
-    "geometry_count": sketch.GeometryCount,
+    "sketch_status": _analyze_sketch(sketch),
 }}
 """
         result = await bridge.execute_python(code)
@@ -1571,14 +1580,16 @@ _result_ = {{
             doc_name: Document containing the sketch. Uses active document if None.
 
         Returns:
-            Dictionary with geometry info:
+            Compact edit result:
                 - name: Sketch name
                 - geometry_index: Index of the added point
-                - geometry_count: Total geometry elements
+                - sketch_status: Solver, constraint, and profile diagnostics
         """
         bridge = await get_bridge()
 
         code = f"""
+{SKETCH_ANALYSIS_RUNTIME_HELPERS}
+
 doc = (
     FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
     else FreeCAD.ActiveDocument
@@ -1602,7 +1613,7 @@ except Exception:
 _result_ = {{
     "name": sketch.Name,
     "geometry_index": idx,
-    "geometry_count": sketch.GeometryCount,
+    "sketch_status": _analyze_sketch(sketch),
 }}
 """
         result = await bridge.execute_python(code)
@@ -2362,14 +2373,16 @@ except Exception:
             doc_name: Document containing the sketch. Uses active document if None.
 
         Returns:
-            Dictionary with geometry info:
+            Compact edit result:
                 - name: Sketch name
                 - geometry_index: Index of the added ellipse
-                - geometry_count: Total geometry elements
+                - sketch_status: Solver, constraint, and profile diagnostics
         """
         bridge = await get_bridge()
 
         code = f"""
+{SKETCH_ANALYSIS_RUNTIME_HELPERS}
+
 doc = (
     FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
     else FreeCAD.ActiveDocument
@@ -2392,7 +2405,7 @@ try:
     _result_ = {{
         "name": sketch.Name,
         "geometry_index": idx,
-        "geometry_count": sketch.GeometryCount,
+        "sketch_status": _analyze_sketch(sketch),
     }}
 except Exception:
     doc.abortTransaction()
@@ -2423,14 +2436,16 @@ except Exception:
             doc_name: Document containing the sketch. Uses active document if None.
 
         Returns:
-            Dictionary with geometry info:
+            Compact edit result:
                 - name: Sketch name
-                - first_line_index: Index of the first line
-                - geometry_count: Total geometry elements
+                - geometry_indices: Indices of the added polygon edges
+                - sketch_status: Solver, constraint, and profile diagnostics
         """
         bridge = await get_bridge()
 
         code = f"""
+{SKETCH_ANALYSIS_RUNTIME_HELPERS}
+
 import math
 import Part
 import Sketcher
@@ -2476,8 +2491,8 @@ try:
 
     _result_ = {{
         "name": sketch.Name,
-        "first_line_index": first_idx,
-        "geometry_count": sketch.GeometryCount,
+        "geometry_indices": list(range(first_idx, sketch.GeometryCount)),
+        "sketch_status": _analyze_sketch(sketch),
     }}
 except Exception:
     doc.abortTransaction()
@@ -2512,14 +2527,16 @@ except Exception:
             doc_name: Document containing the sketch. Uses active document if None.
 
         Returns:
-            Dictionary with geometry info:
+            Compact edit result:
                 - name: Sketch name
-                - first_geometry_index: Index of first geometry element
-                - geometry_count: Total geometry elements
+                - geometry_indices: Indices of the added slot geometry
+                - sketch_status: Solver, constraint, and profile diagnostics
         """
         bridge = await get_bridge()
 
         code = f"""
+{SKETCH_ANALYSIS_RUNTIME_HELPERS}
+
 import math
 import Part
 import Sketcher
@@ -2590,8 +2607,8 @@ try:
 
     _result_ = {{
         "name": sketch.Name,
-        "first_geometry_index": first_idx,
-        "geometry_count": sketch.GeometryCount,
+        "geometry_indices": list(range(first_idx, sketch.GeometryCount)),
+        "sketch_status": _analyze_sketch(sketch),
     }}
 except Exception:
     doc.abortTransaction()
@@ -2618,14 +2635,16 @@ except Exception:
             doc_name: Document containing the sketch. Uses active document if None.
 
         Returns:
-            Dictionary with geometry info:
+            Compact edit result:
                 - name: Sketch name
                 - geometry_index: Index of the added B-spline
-                - geometry_count: Total geometry elements
+                - sketch_status: Solver, constraint, and profile diagnostics
         """
         bridge = await get_bridge()
 
         code = f"""
+{SKETCH_ANALYSIS_RUNTIME_HELPERS}
+
 import Part
 
 doc = (
@@ -2659,7 +2678,7 @@ try:
     _result_ = {{
         "name": sketch.Name,
         "geometry_index": idx,
-        "geometry_count": sketch.GeometryCount,
+        "sketch_status": _analyze_sketch(sketch),
     }}
 except Exception:
     doc.abortTransaction()
@@ -2706,13 +2725,16 @@ except Exception:
             doc_name: Document containing the sketch. Uses active document if None.
 
         Returns:
-            Dictionary with constraint info:
+            Compact edit result:
+                - name: Sketch name
                 - constraint_index: Index of the added constraint
-                - constraint_count: Total constraint count
+                - sketch_status: Solver, constraint, and profile diagnostics
         """
         bridge = await get_bridge()
 
         code = f"""
+{SKETCH_ANALYSIS_RUNTIME_HELPERS}
+
 import Sketcher
 
 doc = (
@@ -2778,8 +2800,9 @@ try:
     doc.commitTransaction()
 
     _result_ = {{
+        "name": sketch.Name,
         "constraint_index": idx,
-        "constraint_count": sketch.ConstraintCount,
+        "sketch_status": _analyze_sketch(sketch),
     }}
 except Exception:
     doc.abortTransaction()
@@ -2805,7 +2828,9 @@ except Exception:
 
         Returns:
             Dictionary with constraint info:
+                - name: Sketch name
                 - constraint_index: Index of the added constraint
+                - sketch_status: Solver, constraint, and profile diagnostics
         """
         return await add_sketch_constraint(
             sketch_name, "Horizontal", geometry_index, doc_name=doc_name
@@ -2826,7 +2851,9 @@ except Exception:
 
         Returns:
             Dictionary with constraint info:
+                - name: Sketch name
                 - constraint_index: Index of the added constraint
+                - sketch_status: Solver, constraint, and profile diagnostics
         """
         return await add_sketch_constraint(
             sketch_name, "Vertical", geometry_index, doc_name=doc_name
@@ -2853,7 +2880,9 @@ except Exception:
 
         Returns:
             Dictionary with constraint info:
+                - name: Sketch name
                 - constraint_index: Index of the added constraint
+                - sketch_status: Solver, constraint, and profile diagnostics
         """
         return await add_sketch_constraint(
             sketch_name,
@@ -2882,7 +2911,9 @@ except Exception:
 
         Returns:
             Dictionary with constraint info:
+                - name: Sketch name
                 - constraint_index: Index of the added constraint
+                - sketch_status: Solver, constraint, and profile diagnostics
         """
         return await add_sketch_constraint(
             sketch_name, "Parallel", geometry1, -1, geometry2, -1, doc_name=doc_name
@@ -2905,7 +2936,9 @@ except Exception:
 
         Returns:
             Dictionary with constraint info:
+                - name: Sketch name
                 - constraint_index: Index of the added constraint
+                - sketch_status: Solver, constraint, and profile diagnostics
         """
         return await add_sketch_constraint(
             sketch_name,
@@ -2934,7 +2967,9 @@ except Exception:
 
         Returns:
             Dictionary with constraint info:
+                - name: Sketch name
                 - constraint_index: Index of the added constraint
+                - sketch_status: Solver, constraint, and profile diagnostics
         """
         return await add_sketch_constraint(
             sketch_name, "Tangent", geometry1, -1, geometry2, -1, doc_name=doc_name
@@ -2957,7 +2992,9 @@ except Exception:
 
         Returns:
             Dictionary with constraint info:
+                - name: Sketch name
                 - constraint_index: Index of the added constraint
+                - sketch_status: Solver, constraint, and profile diagnostics
         """
         return await add_sketch_constraint(
             sketch_name, "Equal", geometry1, -1, geometry2, -1, doc_name=doc_name
@@ -2991,7 +3028,9 @@ except Exception:
 
         Returns:
             Dictionary with constraint info:
+                - name: Sketch name
                 - constraint_index: Index of the added constraint
+                - sketch_status: Solver, constraint, and profile diagnostics
         """
         return await add_sketch_constraint(
             sketch_name,
@@ -3023,7 +3062,9 @@ except Exception:
 
         Returns:
             Dictionary with constraint info:
+                - name: Sketch name
                 - constraint_index: Index of the added constraint
+                - sketch_status: Solver, constraint, and profile diagnostics
         """
         return await add_sketch_constraint(
             sketch_name, "DistanceX", geometry, point, -2, -1, distance, doc_name
@@ -3048,8 +3089,9 @@ except Exception:
 
         Returns:
             Dictionary with constraint info:
+                - name: Sketch name
                 - constraint_index: Index of the added constraint
-        """
+                - sketch_status: Solver, constraint, and profile diagnostics        """
         return await add_sketch_constraint(
             sketch_name, "DistanceY", geometry, point, -2, -1, distance, doc_name
         )
@@ -3071,8 +3113,9 @@ except Exception:
 
         Returns:
             Dictionary with constraint info:
+                - name: Sketch name
                 - constraint_index: Index of the added constraint
-        """
+                - sketch_status: Solver, constraint, and profile diagnostics        """
         return await add_sketch_constraint(
             sketch_name, "Radius", geometry_index, -1, -2, -1, radius, doc_name
         )
@@ -3096,8 +3139,9 @@ except Exception:
 
         Returns:
             Dictionary with constraint info:
+                - name: Sketch name
                 - constraint_index: Index of the added constraint
-        """
+                - sketch_status: Solver, constraint, and profile diagnostics        """
         return await add_sketch_constraint(
             sketch_name, "Angle", geometry1, -1, geometry2, -1, angle, doc_name
         )
@@ -3120,8 +3164,9 @@ except Exception:
 
         Returns:
             Dictionary with constraint info:
+                - name: Sketch name
                 - constraint_index: Index of the added constraint
-        """
+                - sketch_status: Solver, constraint, and profile diagnostics        """
         return await add_sketch_constraint(
             sketch_name, "Block", geometry_index, point_index, doc_name=doc_name
         )
@@ -3208,13 +3253,16 @@ except Exception:
             doc_name: Document containing the sketch. Uses active document if None.
 
         Returns:
-            Dictionary with result:
-                - success: Whether the deletion succeeded
-                - geometry_count: Remaining geometry count
+            Compact edit result:
+                - name: Sketch name
+                - deleted_geometry_index: Index that was deleted
+                - sketch_status: Solver, constraint, and profile diagnostics
         """
         bridge = await get_bridge()
 
         code = f"""
+{SKETCH_ANALYSIS_RUNTIME_HELPERS}
+
 doc = (
     FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
     else FreeCAD.ActiveDocument
@@ -3231,8 +3279,9 @@ try:
     doc.commitTransaction()
 
     _result_ = {{
-        "success": True,
-        "geometry_count": sketch.GeometryCount,
+        "name": sketch.Name,
+        "deleted_geometry_index": {geometry_index},
+        "sketch_status": _analyze_sketch(sketch),
     }}
 except Exception:
     doc.abortTransaction()
@@ -3257,13 +3306,16 @@ except Exception:
             doc_name: Document containing the sketch. Uses active document if None.
 
         Returns:
-            Dictionary with result:
-                - success: Whether the deletion succeeded
-                - constraint_count: Remaining constraint count
+            Compact edit result:
+                - name: Sketch name
+                - deleted_constraint_index: Index that was deleted
+                - sketch_status: Solver, constraint, and profile diagnostics
         """
         bridge = await get_bridge()
 
         code = f"""
+{SKETCH_ANALYSIS_RUNTIME_HELPERS}
+
 doc = (
     FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
     else FreeCAD.ActiveDocument
@@ -3280,8 +3332,9 @@ try:
     doc.commitTransaction()
 
     _result_ = {{
-        "success": True,
-        "constraint_count": sketch.ConstraintCount,
+        "name": sketch.Name,
+        "deleted_constraint_index": {constraint_index},
+        "sketch_status": _analyze_sketch(sketch),
     }}
 except Exception:
     doc.abortTransaction()
@@ -3306,15 +3359,17 @@ except Exception:
         Returns:
             Dictionary with sketch information:
                 - name: Sketch name
-                - geometry_count: Number of geometry elements
-                - constraint_count: Number of constraints
-                - external_geometry_count: Number of external geometry references
-                - fully_constrained: Whether sketch is fully constrained
-                - dof: Degrees of freedom remaining
+                - sketch_status: Structured dict containing:
+                    - geometry and constraint counts
+                    - solver status, solve code, and remaining DoF
+                    - closed/open profile state and open endpoints
+                    - unconstrained geometry plus actionable hints
         """
         bridge = await get_bridge()
 
         code = f"""
+{SKETCH_ANALYSIS_RUNTIME_HELPERS}
+
 doc = (
     FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
     else FreeCAD.ActiveDocument
@@ -3326,11 +3381,7 @@ if sketch is None:
 _result_ = {{
     "name": sketch.Name,
     "label": sketch.Label,
-    "geometry_count": sketch.GeometryCount,
-    "constraint_count": sketch.ConstraintCount,
-    "external_geometry_count": len(sketch.ExternalGeometry),
-    "fully_constrained": sketch.FullyConstrained if hasattr(sketch, "FullyConstrained") else None,
-    "dof": sketch.solve() if hasattr(sketch, "solve") else None,
+    "sketch_status": _analyze_sketch(sketch),
 }}
 """
         result = await bridge.execute_python(code)
@@ -3355,13 +3406,17 @@ _result_ = {{
             doc_name: Document containing the sketch. Uses active document if None.
 
         Returns:
-            Dictionary with result:
-                - success: Whether the operation succeeded
+            Compact edit result:
+                - name: Sketch name
+                - geometry_index: Modified geometry index
                 - is_construction: New construction state
+                - sketch_status: Solver, constraint, and profile diagnostics
         """
         bridge = await get_bridge()
 
         code = f"""
+{SKETCH_ANALYSIS_RUNTIME_HELPERS}
+
 doc = (
     FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
     else FreeCAD.ActiveDocument
@@ -3377,13 +3432,14 @@ try:
     doc.recompute()
     doc.commitTransaction()
 
-    # Check new state
-    geo = sketch.Geometry[{geometry_index}]
-    is_construction = geo.Construction if hasattr(geo, "Construction") else False
+    # Query construction state from SketchObject, not the geometry wrapper.
+    is_construction = bool(sketch.getConstruction({geometry_index}))
 
     _result_ = {{
-        "success": True,
+        "name": sketch.Name,
+        "geometry_index": {geometry_index},
         "is_construction": is_construction,
+        "sketch_status": _analyze_sketch(sketch),
     }}
 except Exception:
     doc.abortTransaction()

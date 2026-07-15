@@ -139,3 +139,120 @@ def test_single_solid_validation_rejects_stale_body_tip() -> None:
 
     assert result["ok"] is False
     assert any("Body Tip" in reason for reason in result["reasons"])
+
+
+class _Wire:
+    def __init__(self, closed: bool) -> None:
+        self._closed = closed
+
+    def isClosed(self) -> bool:
+        return self._closed
+
+
+class _SketchShape:
+    def __init__(self, wires: list[_Wire], valid: bool = True) -> None:
+        self.Wires = wires
+        self._valid = valid
+
+    def isNull(self) -> bool:
+        return False
+
+    def isValid(self) -> bool:
+        return self._valid
+
+
+class _Sketch:
+    GeometryCount = 1
+    ConstraintCount = 0
+    ExternalGeometry: tuple[object, ...] = ()
+    FullyConstrained = False
+    DoF = 3
+    Shape = _SketchShape([_Wire(True)])
+
+    def solve(self) -> int:
+        return 0
+
+    def getConstruction(self, _index: int) -> bool:
+        return False
+
+    def getOpenVertices(self) -> list[tuple[int, int]]:
+        return []
+
+    def getGeometryWithDependentParameters(self) -> list[tuple[int, int]]:
+        return [(0, 3), (0, -1)]
+
+
+def test_sketch_analysis_reports_closed_but_under_constrained_profile() -> None:
+    from freecad_mcp.tools._freecad_runtime_helpers import (
+        SKETCH_ANALYSIS_RUNTIME_HELPERS,
+    )
+
+    helpers = _load_helpers(SKETCH_ANALYSIS_RUNTIME_HELPERS)
+    analyze = helpers["_analyze_sketch"]
+
+    result = analyze(_Sketch())
+
+    assert result["solver"] == {
+        "status": "under_constrained",
+        "solve_code": 0,
+        "fully_constrained": False,
+        "remaining_dof": 3,
+    }
+    assert result["profile"]["state"] == "closed"
+    assert result["profile_ready"] is True
+    assert result["unconstrained"] == [
+        {"geometry_index": 0, "elements": ["center", "geometry"]}
+    ]
+    assert "3 remaining degree(s) of freedom" in result["issues"][0]
+
+
+def test_sketch_analysis_distinguishes_redundant_constraints() -> None:
+    from freecad_mcp.tools._freecad_runtime_helpers import (
+        SKETCH_ANALYSIS_RUNTIME_HELPERS,
+    )
+
+    class _RedundantSketch(_Sketch):
+        def solve(self) -> int:
+            return -2
+
+        def getStatusString(self) -> str:
+            return "Redundant constraint: 4"
+
+    helpers = _load_helpers(SKETCH_ANALYSIS_RUNTIME_HELPERS)
+    result = helpers["_analyze_sketch"](_RedundantSketch())
+
+    assert result["solver"]["status"] == "redundant"
+    assert result["solver"]["message"] == "Redundant constraint: 4"
+    assert result["profile_ready"] is False
+    assert result["issues"] == ["Sketch contains a redundant constraint."]
+
+
+def test_sketch_analysis_reports_open_endpoints() -> None:
+    from freecad_mcp.tools._freecad_runtime_helpers import (
+        SKETCH_ANALYSIS_RUNTIME_HELPERS,
+    )
+
+    class _OpenSketch(_Sketch):
+        GeometryCount = 2
+        DoF = 4
+        Shape = _SketchShape([_Wire(False)])
+
+        def getOpenVertices(self) -> list[object]:
+            class _Point:
+                def __init__(self, x: float, y: float) -> None:
+                    self.x = x
+                    self.y = y
+                    self.z = 0.0
+
+            return [_Point(0.0, 0.0), _Point(10.0, 5.0)]
+
+    helpers = _load_helpers(SKETCH_ANALYSIS_RUNTIME_HELPERS)
+    result = helpers["_analyze_sketch"](_OpenSketch())
+
+    assert result["profile"]["state"] == "open"
+    assert result["profile"]["open_vertices"] == [
+        {"x": 0.0, "y": 0.0, "z": 0.0},
+        {"x": 10.0, "y": 5.0, "z": 0.0},
+    ]
+    assert result["profile_ready"] is False
+    assert any("Coincident" in hint for hint in result["hints"])

@@ -114,7 +114,30 @@ class TestPartDesignTools:
         mock_bridge.execute_python = AsyncMock(
             return_value=ExecutionResult(
                 success=True,
-                result={"geometry_index": 0, "geometry_count": 1},
+                result={
+                    "geometry_index": 0,
+                    "sketch_status": {
+                        "geometry_count": 1,
+                        "constraint_count": 0,
+                        "construction_geometry_count": 0,
+                        "external_geometry_count": 0,
+                        "solver": {
+                            "status": "under_constrained",
+                            "solve_code": 0,
+                            "fully_constrained": False,
+                            "remaining_dof": 3,
+                        },
+                        "profile": {
+                            "state": "closed",
+                            "closed": True,
+                            "closed_wire_count": 1,
+                            "open_wire_count": 0,
+                            "open_vertices": [],
+                            "shape_valid": True,
+                        },
+                        "profile_ready": True,
+                    },
+                },
                 stdout="",
                 stderr="",
                 execution_time_ms=10.0,
@@ -127,6 +150,10 @@ class TestPartDesignTools:
         )
 
         assert result["geometry_index"] == 0
+        assert result["sketch_status"]["profile_ready"] is True
+        generated_code = mock_bridge.execute_python.await_args.args[0]
+        assert "_analyze_sketch(sketch)" in generated_code
+        assert '"sketch_status"' in generated_code
         mock_bridge.execute_python.assert_called_once()
 
     @pytest.mark.asyncio
@@ -264,8 +291,7 @@ class TestPartDesignTools:
         assert result["name"] == "Revolution"
         generated_code = mock_bridge.execute_python.call_args.args[0]
         assert (
-            '_resolve_body_origin_feature(body, f"{axis_ref}_Axis")'
-            in generated_code
+            '_resolve_body_origin_feature(body, f"{axis_ref}_Axis")' in generated_code
         )
         assert "getGlobalPlacement" in generated_code
         mock_bridge.execute_python.assert_called_once()
@@ -416,7 +442,7 @@ class TestPartDesignTools:
         )
 
         assert result["validated"] is True
-        generated_code = mock_bridge.execute_python.await_args.args[0]
+        mock_bridge.execute_python.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_create_hole_rejects_unsupported_depth_type(
@@ -1216,10 +1242,19 @@ class TestPartDesignTools:
                 success=True,
                 result={
                     "name": "Sketch",
-                    "geometry_count": 4,
-                    "constraint_count": 8,
-                    "is_fully_constrained": True,
-                    "degrees_of_freedom": 0,
+                    "label": "Sketch",
+                    "sketch_status": {
+                        "geometry_count": 4,
+                        "constraint_count": 8,
+                        "solver": {
+                            "status": "fully_constrained",
+                            "solve_code": 0,
+                            "fully_constrained": True,
+                            "remaining_dof": 0,
+                        },
+                        "profile": {"state": "closed", "closed": True},
+                        "profile_ready": True,
+                    },
                 },
                 stdout="",
                 stderr="",
@@ -1230,9 +1265,13 @@ class TestPartDesignTools:
         get_info = register_tools["get_sketch_info"]
         result = await get_info(sketch_name="Sketch")
 
-        assert result["geometry_count"] == 4
-        assert result["constraint_count"] == 8
-        assert result["is_fully_constrained"] is True
+        status = result["sketch_status"]
+        assert status["geometry_count"] == 4
+        assert status["constraint_count"] == 8
+        assert status["solver"]["fully_constrained"] is True
+        generated_code = mock_bridge.execute_python.await_args.args[0]
+        assert "sketch.solve()" in generated_code
+        assert "sketch.DoF" in generated_code
         mock_bridge.execute_python.assert_called_once()
 
     @pytest.mark.asyncio
@@ -1241,7 +1280,11 @@ class TestPartDesignTools:
         mock_bridge.execute_python = AsyncMock(
             return_value=ExecutionResult(
                 success=True,
-                result={"success": True, "is_construction": True},
+                result={
+                    "geometry_index": 0,
+                    "is_construction": True,
+                    "sketch_status": {"geometry_count": 1},
+                },
                 stdout="",
                 stderr="",
                 execution_time_ms=10.0,
@@ -1251,8 +1294,10 @@ class TestPartDesignTools:
         toggle = register_tools["toggle_construction"]
         result = await toggle(sketch_name="Sketch", geometry_index=0)
 
-        assert result["success"] is True
+        assert result["geometry_index"] == 0
         assert result["is_construction"] is True
+        generated_code = mock_bridge.execute_python.await_args.args[0]
+        assert "sketch.getConstruction(0)" in generated_code
         mock_bridge.execute_python.assert_called_once()
 
 

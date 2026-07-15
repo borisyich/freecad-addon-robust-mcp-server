@@ -118,6 +118,31 @@ class TestObjectTools:
         mock_bridge.get_object.assert_called_once_with("Box", None)
 
     @pytest.mark.asyncio
+    async def test_inspect_object_reuses_top_level_shape_summary(
+        self, register_tools, mock_bridge
+    ):
+        """The Shape property should not duplicate the full shape_info payload."""
+        mock_object = ObjectInfo(
+            name="Pad",
+            label="Pad",
+            type_id="PartDesign::Feature",
+            properties={
+                "Shape": {
+                    "type": "Part::PropertyPartShape",
+                    "group": "Data",
+                    "value": {"shape_type": "Solid", "volume": 100.0},
+                }
+            },
+            shape_info={"shape_type": "Solid", "volume": 100.0},
+        )
+        mock_bridge.get_object = AsyncMock(return_value=mock_object)
+
+        result = await register_tools["inspect_object"]("Pad")
+
+        assert result["properties"]["Shape"]["value"] == {"summary_ref": "shape_info"}
+        assert result["shape_info"]["volume"] == 100.0
+
+    @pytest.mark.asyncio
     async def test_inspect_object_without_properties(self, register_tools, mock_bridge):
         """inspect_object should exclude properties when not requested."""
         mock_object = ObjectInfo(
