@@ -80,6 +80,34 @@ BODY_RUNTIME_HELPERS = _runtime_code(
             f"Body={getattr(body, 'Name', '<unknown>')!r}; "
             f"available={available}"
         )
+
+
+    def _find_preceding_single_solid_feature(body, target):
+        """Return the nearest valid single-solid feature before target."""
+        group = list(getattr(body, "Group", []) or [])
+        try:
+            target_index = group.index(target)
+        except ValueError as exc:
+            raise ValueError(
+                f"Object {getattr(target, 'Name', '<unknown>')!r} is not "
+                f"present in Body {getattr(body, 'Name', '<unknown>')!r}"
+            ) from exc
+
+        for candidate in reversed(group[:target_index]):
+            shape = getattr(candidate, "Shape", None)
+            if shape is None:
+                continue
+            try:
+                if (
+                    not shape.isNull()
+                    and shape.isValid()
+                    and len(shape.Solids) == 1
+                    and float(shape.Volume) > 0
+                ):
+                    return candidate
+            except Exception:
+                continue
+        return None
     '''
 )
 

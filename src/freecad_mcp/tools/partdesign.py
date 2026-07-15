@@ -116,11 +116,27 @@ try:
                 sketch.Support = (plane_obj, [""])
             sketch.MapMode = "FlatFace"
         elif plane.startswith("Face"):
-            # Attach to face
+            # A face belongs to the current solid feature, not to the Body
+            # container. Attaching to Body produces a sketch object that exists
+            # but is not mapped to a real face, causing downstream null shapes.
+            support_feature = body.Tip
+            if support_feature is None or not hasattr(support_feature, "Shape"):
+                raise ValueError(
+                    f"Body {{body.Name!r}} has no solid Tip to provide {{plane}}"
+                )
+            try:
+                face_index = int(plane[4:])
+            except Exception as exc:
+                raise ValueError(f"Invalid face reference: {plane!r}") from exc
+            if face_index < 1 or face_index > len(support_feature.Shape.Faces):
+                raise ValueError(
+                    f"Face not found: {{support_feature.Name}}.{{plane}}. "
+                    f"Available faces: Face1..Face{{len(support_feature.Shape.Faces)}}"
+                )
             if hasattr(sketch, "AttachmentSupport"):
-                sketch.AttachmentSupport = [(body, plane)]
+                sketch.AttachmentSupport = [(support_feature, [plane])]
             else:
-                sketch.Support = (body, [plane])
+                sketch.Support = (support_feature, [plane])
             sketch.MapMode = "FlatFace"
     else:
         # Standalone sketch
@@ -386,11 +402,15 @@ _result_ = {{
                 - name: Pocket name
                 - label: Pocket label
                 - type_id: Object type
+                - validated: Check if the result has a valid shape
+                - removed_volume: Removed volume of the body
         """
         bridge = await get_bridge()
 
         code = f"""
 {BODY_RUNTIME_HELPERS}
+
+{FEATURE_VALIDATION_RUNTIME_HELPERS}
 
 doc = (
     FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
@@ -406,6 +426,11 @@ body = _find_body_containing_object(doc, sketch)
 if body is None:
     raise ValueError("Sketch must be inside a PartDesign Body for Pocket operation")
 
+base_feature = _find_preceding_single_solid_feature(body, sketch)
+if base_feature is None:
+    raise ValueError("Pocket requires a valid single-solid feature before the sketch")
+base_shape = base_feature.Shape.copy()
+
 # Wrap in transaction for undo support
 doc.openTransaction("Pocket Sketch")
 try:
@@ -416,6 +441,9 @@ try:
     pocket.Type = {type!r}
 
     doc.recompute()
+    validation = _validate_subtractive_feature(pocket, body, base_shape)
+    if not validation["ok"]:
+        raise ValueError("Pocket failed: " + "; ".join(validation["reasons"]))
     doc.commitTransaction()
 except Exception:
     doc.abortTransaction()
@@ -425,6 +453,8 @@ _result_ = {{
     "name": pocket.Name,
     "label": pocket.Label,
     "type_id": pocket.TypeId,
+    "validated": validation["ok"],
+    "removed_volume": validation["removed_volume"],
 }}
 """
         result = await bridge.execute_python(code)
@@ -743,6 +773,8 @@ _result_ = {{
                 - name: Groove name
                 - label: Groove label
                 - type_id: Object type
+                - validated: Check if the result has a valid shape
+                - removed_volume: Removed volume of the body
         """
         bridge = await get_bridge()
 
@@ -765,6 +797,11 @@ body = _find_body_containing_object(doc, sketch)
 if body is None:
     raise ValueError("Sketch must be inside a PartDesign Body for Groove operation")
 
+base_feature = _find_preceding_single_solid_feature(body, sketch)
+if base_feature is None:
+    raise ValueError("Groove requires a valid single-solid feature before the sketch")
+base_shape = base_feature.Shape.copy()
+
 # Wrap in transaction for undo support
 doc.openTransaction("Groove Sketch")
 try:
@@ -785,13 +822,13 @@ try:
 
     doc.recompute()
 
-    validation = _validate_single_solid_feature(groove, body)
+    validation = _validate_subtractive_feature(groove, body, base_shape)
     if not validation["ok"]:
         details = "; ".join(validation["reasons"])
         raise ValueError(
             'Groove' + " failed: " + details +
-            ". Common causes: open profile, profile crossing the axis, "
-            "or an axis that does not produce a valid solid."
+            ". Common causes: the groove profile does not intersect the base "
+            "solid, the profile is open, or the selected axis is incorrect."
         )
 
     doc.commitTransaction()
@@ -803,7 +840,8 @@ _result_ = {{
     "name": groove.Name,
     "label": groove.Label,
     "type_id": groove.TypeId,
-    "validated": validation["ok"]
+    "validated": validation["ok"],
+    "removed_volume": validation["removed_volume"],
 }}
 """
         result = await bridge.execute_python(code)
@@ -820,6 +858,7 @@ _result_ = {{
         threaded: bool = False,
         thread_type: str = "ISO",
         thread_size: str = "M6",
+        drill_point: str = "Flat",
         reversed: bool | None = None,
         name: str | None = None,
         doc_name: str | None = None,
@@ -840,6 +879,8 @@ _result_ = {{
             threaded: Whether to create a threaded hole definition.
             thread_type: Thread profile: ``ISO``, ``ISO_FINE``, ``UNC``, or ``UNF``.
             thread_size: Thread designation, for example ``M6`` or ``1/4``.
+            drill_point: Blind-hole bottom shape: ``Flat`` (default) or
+                ``Angled``. ``Angled`` adds the drill-tip cone.
             reversed: Explicit cutting direction. If None, both directions are
                 tried and the first valid subtractive result is retained.
             name: Hole feature name. Auto-generated if None.
@@ -889,6 +930,12 @@ _result_ = {{
         resolved_thread_type = thread_type_map.get(
             normalized_thread_type, "ISOMetricProfile"
         )
+
+        normalized_drill_point = drill_point.strip().lower()
+        drill_point_map = {"flat": "Flat", "angled": "Angled"}
+        if normalized_drill_point not in drill_point_map:
+            raise ValueError("Unsupported drill_point. Use 'Flat' or 'Angled'.")
+        resolved_drill_point = drill_point_map[normalized_drill_point]
 
         bridge = await get_bridge()
 
@@ -970,27 +1017,7 @@ if unsupported_geometry:
     )
 
 # Locate the most recent valid solid feature preceding the sketch in the Body.
-group = list(body.Group)
-try:
-    sketch_index = group.index(sketch)
-except ValueError as exc:
-    raise ValueError("Sketch is not present in its Body history") from exc
-
-base_feature = None
-for candidate in reversed(group[:sketch_index]):
-    if not hasattr(candidate, "Shape"):
-        continue
-    try:
-        candidate_shape = candidate.Shape
-        if (
-            not candidate_shape.isNull()
-            and candidate_shape.isValid()
-            and len(candidate_shape.Solids) == 1
-        ):
-            base_feature = candidate
-            break
-    except Exception:
-        pass
+base_feature = _find_preceding_single_solid_feature(body, sketch)
 if base_feature is None:
     raise ValueError(
         "No valid single-solid feature exists before the hole sketch. "
@@ -1017,6 +1044,13 @@ try:
     hole.DepthType = {depth_type!r}
     if {depth_type!r} == "Dimension":
         hole.Depth = {depth}
+        # FreeCAD defaults to an angled drill point, which adds a conical tip
+        # beyond the cylindrical depth. Use a flat bottom by default so MCP
+        # dimensions and volume comparisons are deterministic.
+        if hasattr(hole, "DrillPoint"):
+            hole.DrillPoint = {resolved_drill_point!r}
+        if hasattr(hole, "DrillForDepth"):
+            hole.DrillForDepth = False
 
     if {threaded}:
         resolved_thread_profile = {resolved_thread_type!r}
@@ -1091,8 +1125,11 @@ try:
         )
         raise ValueError(
             "Hole produced no valid subtractive result in the tested direction(s). "
-            "Check that every circle center lies over the existing solid and that "
-            "the sketch plane intersects the body. " + details
+            f"Sketch support={{getattr(sketch, 'Support', None)!s}}; "
+            f"attachment support={{getattr(sketch, 'AttachmentSupport', None)!s}}. "
+            "Check that the sketch is attached to a face of the preceding solid, "
+            "every circle center lies over material, and the sketch plane "
+            "intersects the body. " + details
         )
 
     removed_volume = base_volume - selected["result_volume"]
@@ -1401,6 +1438,7 @@ _result_ = {{
 
         Returns:
             Dictionary with geometry info:
+                - name: Sketch name
                 - geometry_index: Index of the added line
                 - geometry_count: Total geometry elements
         """
@@ -1434,6 +1472,7 @@ except Exception:
     raise
 
 _result_ = {{
+    "sketch_name": sketch.Name,
     "geometry_index": idx,
     "geometry_count": sketch.GeometryCount,
 }}
@@ -1466,6 +1505,7 @@ _result_ = {{
 
         Returns:
             Dictionary with geometry info:
+                - name: Sketch name
                 - geometry_index: Index of the added arc
                 - geometry_count: Total geometry elements
         """
@@ -1503,6 +1543,7 @@ except Exception:
     raise
 
 _result_ = {{
+    "name": sketch.Name,
     "geometry_index": idx,
     "geometry_count": sketch.GeometryCount,
 }}
@@ -1531,6 +1572,7 @@ _result_ = {{
 
         Returns:
             Dictionary with geometry info:
+                - name: Sketch name
                 - geometry_index: Index of the added point
                 - geometry_count: Total geometry elements
         """
@@ -1558,6 +1600,7 @@ except Exception:
     raise
 
 _result_ = {{
+    "name": sketch.Name,
     "geometry_index": idx,
     "geometry_count": sketch.GeometryCount,
 }}
@@ -2320,6 +2363,7 @@ except Exception:
 
         Returns:
             Dictionary with geometry info:
+                - name: Sketch name
                 - geometry_index: Index of the added ellipse
                 - geometry_count: Total geometry elements
         """
@@ -2346,6 +2390,7 @@ try:
     doc.commitTransaction()
 
     _result_ = {{
+        "name": sketch.Name,
         "geometry_index": idx,
         "geometry_count": sketch.GeometryCount,
     }}
@@ -2379,6 +2424,7 @@ except Exception:
 
         Returns:
             Dictionary with geometry info:
+                - name: Sketch name
                 - first_line_index: Index of the first line
                 - geometry_count: Total geometry elements
         """
@@ -2429,6 +2475,7 @@ try:
     doc.commitTransaction()
 
     _result_ = {{
+        "name": sketch.Name,
         "first_line_index": first_idx,
         "geometry_count": sketch.GeometryCount,
     }}
@@ -2466,6 +2513,7 @@ except Exception:
 
         Returns:
             Dictionary with geometry info:
+                - name: Sketch name
                 - first_geometry_index: Index of first geometry element
                 - geometry_count: Total geometry elements
         """
@@ -2541,6 +2589,7 @@ try:
     doc.commitTransaction()
 
     _result_ = {{
+        "name": sketch.Name,
         "first_geometry_index": first_idx,
         "geometry_count": sketch.GeometryCount,
     }}
@@ -2570,6 +2619,7 @@ except Exception:
 
         Returns:
             Dictionary with geometry info:
+                - name: Sketch name
                 - geometry_index: Index of the added B-spline
                 - geometry_count: Total geometry elements
         """
@@ -2607,6 +2657,7 @@ try:
     doc.commitTransaction()
 
     _result_ = {{
+        "name": sketch.Name,
         "geometry_index": idx,
         "geometry_count": sketch.GeometryCount,
     }}
