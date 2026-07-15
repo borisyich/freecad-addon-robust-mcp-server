@@ -10,50 +10,11 @@ comprehensive PartDesign coverage.
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-
-_ORIGIN_FEATURE_RESOLVER_CODE = r'''
-def _resolve_body_origin_feature(body, canonical_name):
-    """Resolve a Body origin feature without depending on document suffixes.
-
-    FreeCAD makes DocumentObject.Name unique across the whole document.  As a
-    result, the second Body receives names such as ``Z_Axis001`` and
-    ``XY_Plane001`` even though they still represent that Body's canonical
-    Z-axis and XY-plane.  Tool arguments use canonical names, so resolution
-    must be scoped to ``body.Origin`` and accept a numeric uniqueness suffix.
-    """
-    origin = getattr(body, "Origin", None)
-    if origin is None:
-        raise ValueError(f"Body has no Origin: {getattr(body, 'Name', '<unknown>')}")
-
-    features = list(getattr(origin, "OriginFeatures", []) or [])
-    if not features:
-        features = list(getattr(origin, "OutList", []) or [])
-
-    suffixed_matches = []
-    for feature in features:
-        feature_name = getattr(feature, "Name", "")
-        if feature_name == canonical_name:
-            return feature
-        if feature_name.startswith(canonical_name):
-            suffix = feature_name[len(canonical_name):]
-            if suffix.isdigit():
-                suffixed_matches.append(feature)
-
-    if len(suffixed_matches) == 1:
-        return suffixed_matches[0]
-    if len(suffixed_matches) > 1:
-        names = [getattr(feature, "Name", "") for feature in suffixed_matches]
-        raise ValueError(
-            f"Ambiguous origin feature {canonical_name!r} in Body "
-            f"{getattr(body, 'Name', '<unknown>')!r}: {names}"
-        )
-
-    available = [getattr(feature, "Name", "") for feature in features]
-    raise ValueError(
-        f"Origin feature not found: {canonical_name}. "
-        f"Body={getattr(body, 'Name', '<unknown>')!r}; available={available}"
-    )
-'''
+from freecad_mcp.tools._freecad_runtime_helpers import (
+    BODY_RUNTIME_HELPERS,
+    FEATURE_VALIDATION_RUNTIME_HELPERS,
+    REVOLUTION_AXIS_RUNTIME_HELPERS,
+)
 
 
 def register_partdesign_tools(
@@ -123,7 +84,7 @@ def register_partdesign_tools(
         bridge = await get_bridge()
 
         code = f"""
-{_ORIGIN_FEATURE_RESOLVER_CODE}
+{BODY_RUNTIME_HELPERS}
 
 doc = (
     FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
@@ -358,6 +319,8 @@ _result_ = {{
         bridge = await get_bridge()
 
         code = f"""
+{BODY_RUNTIME_HELPERS}
+
 doc = (
     FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
     else FreeCAD.ActiveDocument
@@ -367,12 +330,7 @@ if sketch is None:
     raise ValueError(f"Sketch not found: {sketch_name!r}")
 
 # Find the body containing this sketch
-body = None
-for obj in doc.Objects:
-    if obj.TypeId == "PartDesign::Body":
-        if hasattr(obj, "Group") and sketch in obj.Group:
-            body = obj
-            break
+body = _find_body_containing_object(doc, sketch)
 
 if body is None:
     raise ValueError("Sketch must be inside a PartDesign Body for Pad operation")
@@ -432,6 +390,8 @@ _result_ = {{
         bridge = await get_bridge()
 
         code = f"""
+{BODY_RUNTIME_HELPERS}
+
 doc = (
     FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
     else FreeCAD.ActiveDocument
@@ -441,12 +401,7 @@ if sketch is None:
     raise ValueError(f"Sketch not found: {sketch_name!r}")
 
 # Find the body containing this sketch
-body = None
-for obj in doc.Objects:
-    if obj.TypeId == "PartDesign::Body":
-        if hasattr(obj, "Group") and sketch in obj.Group:
-            body = obj
-            break
+body = _find_body_containing_object(doc, sketch)
 
 if body is None:
     raise ValueError("Sketch must be inside a PartDesign Body for Pocket operation")
@@ -686,11 +641,14 @@ _result_ = {{
                 - name: Revolution name
                 - label: Revolution label
                 - type_id: Object type
+                - validated: Check if the result has a valid shape
         """
         bridge = await get_bridge()
 
         code = f"""
-{_ORIGIN_FEATURE_RESOLVER_CODE}
+{REVOLUTION_AXIS_RUNTIME_HELPERS}
+
+{FEATURE_VALIDATION_RUNTIME_HELPERS}
 
 doc = (
     FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
@@ -701,12 +659,7 @@ if sketch is None:
     raise ValueError(f"Sketch not found: {sketch_name!r}")
 
 # Find the body containing this sketch
-body = None
-for obj in doc.Objects:
-    if obj.TypeId == "PartDesign::Body":
-        if hasattr(obj, "Group") and sketch in obj.Group:
-            body = obj
-            break
+body = _find_body_containing_object(doc, sketch)
 
 if body is None:
     raise ValueError("Sketch must be inside a PartDesign Body for Revolution operation")
@@ -723,77 +676,22 @@ try:
         rev.Midplane = True
     rev.Reversed = {reversed}
 
-    # Set axis reference
+    # Resolve the requested Body or sketch axis.
     axis_name = {axis!r}
-    allowed_axes = {{"Base_X", "Base_Y", "Base_Z", "Sketch_V", "Sketch_H"}}
-    if axis_name not in allowed_axes:
-        raise ValueError(
-            f"Unsupported revolution axis: {{axis_name!r}}. "
-            f"Expected one of {{sorted(allowed_axes)}}"
-        )
-
-    resolved_axis_name = None
-    if axis_name.startswith("Base_"):
-        axis_ref = axis_name.removeprefix("Base_")
-        axis_obj = _resolve_body_origin_feature(body, f"{{axis_ref}}_Axis")
-        resolved_axis_name = axis_obj.Name
-
-        # Validate axis is not perpendicular to the sketch plane
-        try:
-            sketch_rotation = sketch.getGlobalPlacement().Rotation
-        except Exception:
-            sketch_rotation = sketch.Placement.Rotation
-        try:
-            body_rotation = body.getGlobalPlacement().Rotation
-        except Exception:
-            body_rotation = body.Placement.Rotation
-
-        sketch_normal = sketch_rotation.multVec(FreeCAD.Vector(0, 0, 1))
-        axis_direction_map = {{
-            "X": FreeCAD.Vector(1, 0, 0),
-            "Y": FreeCAD.Vector(0, 1, 0),
-            "Z": FreeCAD.Vector(0, 0, 1),
-        }}
-        axis_dir = body_rotation.multVec(axis_direction_map[axis_ref])
-        dot = abs(sketch_normal.dot(axis_dir))
-        if dot > 0.9999:
-            raise ValueError(
-                f"Axis '{{axis_name}}' is perpendicular to the sketch plane. "
-                f"Revolution axis must lie in (be parallel to) the sketch plane. "
-                f"For a sketch on XY plane, use Base_X or Base_Y (not Base_Z). "
-                f"For a sketch on XZ plane, use Base_X or Base_Z (not Base_Y). "
-                f"For a sketch on YZ plane, use Base_Y or Base_Z (not Base_X)."
-            )
-
-        rev.ReferenceAxis = (axis_obj, [""])
-    else:
-        if axis_name == "Sketch_V":
-            rev.ReferenceAxis = (sketch, ["V_Axis"])
-            resolved_axis_name = "V_Axis"
-        else:
-            rev.ReferenceAxis = (sketch, ["H_Axis"])
-            resolved_axis_name = "H_Axis"
+    rev.ReferenceAxis, resolved_axis_name = _resolve_revolution_axis(
+        body, sketch, axis_name, 'Revolution'
+    )
 
     doc.recompute()
 
-    # Post-validation: check if the result has a valid shape
-    # FreeCAD loggs errors to console but does not raise Python exceptions on recompute
-    if not hasattr(rev, "Shape") or rev.Shape.isNull() or not rev.Shape.isValid():
-        # Collect errors from FreeCAD console
-        import PySide
-        _errors = []
-        if hasattr(FreeCAD, "Console") and hasattr(FreeCAD.Console, "GetError"):
-            _err_text = FreeCAD.Console.GetError()
-            if _err_text:
-                _errors.append(_err_text.strip())
-        if not _errors:
-            # Fallback: check for common error patterns in log
-            _errors.append(
-                "Revolution result has invalid shape. Check FreeCAD console for details. "
-                "Common causes: axis perpendicular to sketch plane, "
-                "wire not closed, or profile crossing the axis."
-            )
-        raise ValueError("Revolution failed: " + " ".join(_errors))
+    validation = _validate_single_solid_feature(rev, body)
+    if not validation["ok"]:
+        details = "; ".join(validation["reasons"])
+        raise ValueError(
+            'Revolution' + " failed: " + details +
+            ". Common causes: open profile, profile crossing the axis, "
+            "or an axis that does not produce a valid solid."
+        )
 
     doc.commitTransaction()
 except Exception:
@@ -804,6 +702,7 @@ _result_ = {{
     "name": rev.Name,
     "label": rev.Label,
     "type_id": rev.TypeId,
+    "validated": validation["ok"],
 }}
 """
         result = await bridge.execute_python(code)
@@ -848,7 +747,9 @@ _result_ = {{
         bridge = await get_bridge()
 
         code = f"""
-{_ORIGIN_FEATURE_RESOLVER_CODE}
+{REVOLUTION_AXIS_RUNTIME_HELPERS}
+
+{FEATURE_VALIDATION_RUNTIME_HELPERS}
 
 doc = (
     FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
@@ -859,12 +760,7 @@ if sketch is None:
     raise ValueError(f"Sketch not found: {sketch_name!r}")
 
 # Find the body containing this sketch
-body = None
-for obj in doc.Objects:
-    if obj.TypeId == "PartDesign::Body":
-        if hasattr(obj, "Group") and sketch in obj.Group:
-            body = obj
-            break
+body = _find_body_containing_object(doc, sketch)
 
 if body is None:
     raise ValueError("Sketch must be inside a PartDesign Body for Groove operation")
@@ -881,75 +777,22 @@ try:
         groove.Midplane = True
     groove.Reversed = {reversed}
 
-    # Set axis reference
+    # Resolve the requested Body or sketch axis.
     axis_name = {axis!r}
-    allowed_axes = {{"Base_X", "Base_Y", "Base_Z", "Sketch_V", "Sketch_H"}}
-    if axis_name not in allowed_axes:
-        raise ValueError(
-            f"Unsupported groove axis: {{axis_name!r}}. "
-            f"Expected one of {{sorted(allowed_axes)}}"
-        )
-
-    resolved_axis_name = None
-    if axis_name.startswith("Base_"):
-        axis_ref = axis_name.removeprefix("Base_")
-        axis_obj = _resolve_body_origin_feature(body, f"{{axis_ref}}_Axis")
-        resolved_axis_name = axis_obj.Name
-
-        # Validate axis is not perpendicular to the sketch plane
-        try:
-            sketch_rotation = sketch.getGlobalPlacement().Rotation
-        except Exception:
-            sketch_rotation = sketch.Placement.Rotation
-        try:
-            body_rotation = body.getGlobalPlacement().Rotation
-        except Exception:
-            body_rotation = body.Placement.Rotation
-
-        sketch_normal = sketch_rotation.multVec(FreeCAD.Vector(0, 0, 1))
-        axis_direction_map = {{
-            "X": FreeCAD.Vector(1, 0, 0),
-            "Y": FreeCAD.Vector(0, 1, 0),
-            "Z": FreeCAD.Vector(0, 0, 1),
-        }}
-        axis_dir = body_rotation.multVec(axis_direction_map[axis_ref])
-        dot = abs(sketch_normal.dot(axis_dir))
-        if dot > 0.9999:
-            raise ValueError(
-                f"Axis '{{axis_name}}' is perpendicular to the sketch plane. "
-                f"Groove axis must lie in (be parallel to) the sketch plane. "
-                f"For a sketch on XY plane, use Base_X or Base_Y (not Base_Z). "
-                f"For a sketch on XZ plane, use Base_X or Base_Z (not Base_Y). "
-                f"For a sketch on YZ plane, use Base_Y or Base_Z (not Base_X)."
-            )
-
-        groove.ReferenceAxis = (axis_obj, [""])
-    else:
-        if axis_name == "Sketch_V":
-            groove.ReferenceAxis = (sketch, ["V_Axis"])
-            resolved_axis_name = "V_Axis"
-        else:
-            groove.ReferenceAxis = (sketch, ["H_Axis"])
-            resolved_axis_name = "H_Axis"
+    groove.ReferenceAxis, resolved_axis_name = _resolve_revolution_axis(
+        body, sketch, axis_name, 'Groove'
+    )
 
     doc.recompute()
 
-    # Post-validation: check if the result has a valid shape
-    # FreeCAD loggs errors to console but does not raise Python exceptions on recompute
-    if not hasattr(groove, "Shape") or groove.Shape.isNull() or not groove.Shape.isValid():
-        import PySide
-        _errors = []
-        if hasattr(FreeCAD, "Console") and hasattr(FreeCAD.Console, "GetError"):
-            _err_text = FreeCAD.Console.GetError()
-            if _err_text:
-                _errors.append(_err_text.strip())
-        if not _errors:
-            _errors.append(
-                "Groove result has invalid shape. Check FreeCAD console for details. "
-                "Common causes: axis perpendicular to sketch plane, "
-                "wire not closed, or profile crossing the axis."
-            )
-        raise ValueError("Groove failed: " + " ".join(_errors))
+    validation = _validate_single_solid_feature(groove, body)
+    if not validation["ok"]:
+        details = "; ".join(validation["reasons"])
+        raise ValueError(
+            'Groove' + " failed: " + details +
+            ". Common causes: open profile, profile crossing the axis, "
+            "or an axis that does not produce a valid solid."
+        )
 
     doc.commitTransaction()
 except Exception:
@@ -960,6 +803,7 @@ _result_ = {{
     "name": groove.Name,
     "label": groove.Label,
     "type_id": groove.TypeId,
+    "validated": validation["ok"]
 }}
 """
         result = await bridge.execute_python(code)
@@ -1007,7 +851,7 @@ _result_ = {{
                 - name: Hole name
                 - label: Hole label
                 - type_id: Object type
-                - validated: Bool result of valid check of the body after creating hole
+                - validated: Check if the result has a valid shape
                 - removed_volume: Removed volume of the body
         """
         if diameter <= 0:
@@ -1049,6 +893,10 @@ _result_ = {{
         bridge = await get_bridge()
 
         code = f"""
+{BODY_RUNTIME_HELPERS}
+
+{FEATURE_VALIDATION_RUNTIME_HELPERS}
+
 requested_doc_name = {doc_name!r}
 doc = (
     FreeCAD.listDocuments().get(requested_doc_name)
@@ -1070,16 +918,9 @@ if sketch.TypeId != "Sketcher::SketchObject":
     )
 
 # Find the unique PartDesign Body containing the sketch.
-bodies = []
-for obj in doc.Objects:
-    if obj.TypeId == "PartDesign::Body" and hasattr(obj, "Group"):
-        if sketch in obj.Group:
-            bodies.append(obj)
-if len(bodies) != 1:
-    raise ValueError(
-        f"Sketch must belong to exactly one PartDesign Body; found {{len(bodies)}}"
-    )
-body = bodies[0]
+body = _find_body_containing_object(doc, sketch)
+if body is None:
+    raise ValueError("Sketch must belong to a PartDesign Body")
 
 # A profile sketch is single-use in a PartDesign history. Reusing it creates
 # ambiguous dependencies and frequently leaves invalid/no-op Hole features.
@@ -1163,68 +1004,6 @@ if base_volume <= 0:
 volume_tolerance = max(1e-7, abs(base_volume) * 1e-9)
 
 
-def _status_strings(feature):
-    try:
-        return [str(item) for item in feature.getStatusString()]
-    except Exception:
-        try:
-            return [str(item) for item in feature.State]
-        except Exception:
-            return []
-
-
-def _check_result(feature):
-    reasons = []
-    shape = getattr(feature, "Shape", None)
-    result_volume = None
-    solid_count = 0
-    removed_solid_count = 0
-    if shape is None or shape.isNull():
-        reasons.append("result shape is null")
-    else:
-        if not shape.isValid():
-            reasons.append("result shape is invalid")
-        try:
-            solid_count = len(shape.Solids)
-        except Exception:
-            solid_count = 0
-        if solid_count != 1:
-            reasons.append(f"expected one solid, got {{solid_count}}")
-        result_volume = float(shape.Volume)
-        removed_volume = base_volume - result_volume
-        if removed_volume <= volume_tolerance:
-            reasons.append(
-                f"body volume did not decrease: base={{base_volume:.9g}}, "
-                f"result={{result_volume:.9g}}"
-            )
-        else:
-            try:
-                removed_shape = base_shape.cut(shape)
-                removed_solid_count = len(removed_shape.Solids)
-                if removed_solid_count != profile_circle_count:
-                    reasons.append(
-                        f"expected {{profile_circle_count}} independent hole cut(s), "
-                        f"got {{removed_solid_count}}. A circle may be outside the "
-                        "solid or multiple hole cuts may overlap."
-                    )
-            except Exception as exc:
-                reasons.append(f"could not validate removed material: {{exc}}")
-    if body.Tip is not feature:
-        reasons.append(
-            f"Body Tip is {{getattr(body.Tip, 'Name', None)!r}}, not {{feature.Name!r}}"
-        )
-    status = _status_strings(feature)
-    error_status = [
-        item for item in status
-        if "error" in item.lower() or "invalid" in item.lower()
-    ]
-    if error_status:
-        reasons.append("feature status: " + ", ".join(error_status))
-    return (
-        not reasons, reasons, result_volume, solid_count,
-        removed_solid_count, status
-    )
-
 
 hole = None
 created_hole_name = None
@@ -1281,22 +1060,26 @@ try:
     for direction in directions_to_try:
         hole.Reversed = bool(direction)
         doc.recompute()
-        (
-            ok, reasons, result_volume, solid_count,
-            removed_solid_count, status
-        ) = _check_result(hole)
+        validation = _validate_subtractive_feature(
+            hole,
+            body,
+            base_shape,
+            expected_removed_solid_count=profile_circle_count,
+            volume_tolerance=volume_tolerance,
+        )
         attempts.append({{
             "reversed": bool(direction),
-            "ok": ok,
-            "reasons": reasons,
-            "status": status,
+            "ok": validation["ok"],
+            "reasons": validation["reasons"],
+            "status": validation["status"],
         }})
-        if ok:
+        if validation["ok"]:
             selected = {{
                 "reversed": bool(direction),
-                "result_volume": result_volume,
-                "solid_count": solid_count,
-                "removed_solid_count": removed_solid_count,
+                "result_volume": validation["result_volume"],
+                "solid_count": validation["solid_count"],
+                "removed_solid_count": validation["removed_solid_count"],
+                "shape_valid": validation["shape_valid"],
             }}
             break
 
@@ -1388,10 +1171,10 @@ _result_ = {{
         bridge = await get_bridge()
 
         code = f"""
-{_ORIGIN_FEATURE_RESOLVER_CODE}
+{BODY_RUNTIME_HELPERS}
 
 doc = (
-    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
+    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None
     else FreeCAD.ActiveDocument
 ) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
 feature = doc.getObject({feature_name!r})
@@ -1399,12 +1182,7 @@ if feature is None:
     raise ValueError(f"Feature not found: {feature_name!r}")
 
 # Find the body containing this feature
-body = None
-for obj in doc.Objects:
-    if obj.TypeId == "PartDesign::Body":
-        if hasattr(obj, "Group") and feature in obj.Group:
-            body = obj
-            break
+body = _find_body_containing_object(doc, feature)
 
 if body is None:
     raise ValueError("Feature must be inside a PartDesign Body")
@@ -1472,7 +1250,7 @@ _result_ = {{
         bridge = await get_bridge()
 
         code = f"""
-{_ORIGIN_FEATURE_RESOLVER_CODE}
+{BODY_RUNTIME_HELPERS}
 
 doc = (
     FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
@@ -1483,12 +1261,7 @@ if feature is None:
     raise ValueError(f"Feature not found: {feature_name!r}")
 
 # Find the body containing this feature
-body = None
-for obj in doc.Objects:
-    if obj.TypeId == "PartDesign::Body":
-        if hasattr(obj, "Group") and feature in obj.Group:
-            body = obj
-            break
+body = _find_body_containing_object(doc, feature)
 
 if body is None:
     raise ValueError("Feature must be inside a PartDesign Body")
@@ -1563,7 +1336,7 @@ _result_ = {{
         plane_ref = plane_map[plane]
 
         code = f"""
-{_ORIGIN_FEATURE_RESOLVER_CODE}
+{BODY_RUNTIME_HELPERS}
 
 doc = (
     FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
@@ -1574,12 +1347,7 @@ if feature is None:
     raise ValueError(f"Feature not found: {feature_name!r}")
 
 # Find the body containing this feature
-body = None
-for obj in doc.Objects:
-    if obj.TypeId == "PartDesign::Body":
-        if hasattr(obj, "Group") and feature in obj.Group:
-            body = obj
-            break
+body = _find_body_containing_object(doc, feature)
 
 if body is None:
     raise ValueError("Feature must be inside a PartDesign Body")
@@ -1827,6 +1595,8 @@ _result_ = {{
         bridge = await get_bridge()
 
         code = f"""
+{BODY_RUNTIME_HELPERS}
+
 doc = (
     FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
     else FreeCAD.ActiveDocument
@@ -1843,12 +1613,7 @@ if len(sketches) < 2:
     raise ValueError("Loft requires at least 2 sketches")
 
 # Find the body containing the first sketch
-body = None
-for obj in doc.Objects:
-    if obj.TypeId == "PartDesign::Body":
-        if hasattr(obj, "Group") and sketches[0] in obj.Group:
-            body = obj
-            break
+body = _find_body_containing_object(doc, sketches[0])
 
 if body is None:
     raise ValueError("Sketches must be inside a PartDesign Body for Loft operation")
@@ -1922,8 +1687,10 @@ _result_ = {{
             )
 
         code = f"""
+{BODY_RUNTIME_HELPERS}
+
 doc = (
-    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
+    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None
     else FreeCAD.ActiveDocument
 ) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
 
@@ -1936,12 +1703,7 @@ if spine is None:
     raise ValueError(f"Spine sketch not found: {spine_sketch!r}")
 
 # Find the body containing the profile sketch
-body = None
-for obj in doc.Objects:
-    if obj.TypeId == "PartDesign::Body":
-        if hasattr(obj, "Group") and profile in obj.Group:
-            body = obj
-            break
+body = _find_body_containing_object(doc, profile)
 
 if body is None:
     raise ValueError("Sketches must be inside a PartDesign Body for Sweep operation")
@@ -2007,7 +1769,7 @@ _result_ = {{
         bridge = await get_bridge()
 
         code = f"""
-{_ORIGIN_FEATURE_RESOLVER_CODE}
+{BODY_RUNTIME_HELPERS}
 
 doc = (
     FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
@@ -2081,7 +1843,7 @@ except Exception:
         bridge = await get_bridge()
 
         code = f"""
-{_ORIGIN_FEATURE_RESOLVER_CODE}
+{BODY_RUNTIME_HELPERS}
 
 doc = (
     FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
@@ -2151,7 +1913,7 @@ except Exception:
         pos = position if position else [0, 0, 0]
 
         code = f"""
-{_ORIGIN_FEATURE_RESOLVER_CODE}
+{BODY_RUNTIME_HELPERS}
 
 doc = (
     FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
@@ -2233,7 +1995,7 @@ except Exception:
         faces_param = faces if faces else None
 
         code = f"""
-{_ORIGIN_FEATURE_RESOLVER_CODE}
+{BODY_RUNTIME_HELPERS}
 
 doc = (
     FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
@@ -2398,6 +2160,8 @@ except Exception:
         bridge = await get_bridge()
 
         code = f"""
+{BODY_RUNTIME_HELPERS}
+
 doc = (
     FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
     else FreeCAD.ActiveDocument
@@ -2414,12 +2178,7 @@ if len(sketches) < 2:
     raise ValueError("Loft requires at least 2 sketches")
 
 # Find the body containing the first sketch
-body = None
-for obj in doc.Objects:
-    if obj.TypeId == "PartDesign::Body":
-        if hasattr(obj, "Group") and sketches[0] in obj.Group:
-            body = obj
-            break
+body = _find_body_containing_object(doc, sketches[0])
 
 if body is None:
     raise ValueError("Sketches must be inside a PartDesign Body")
@@ -2489,6 +2248,8 @@ except Exception:
             raise ValueError(f"Invalid transition: {transition}")
 
         code = f"""
+{BODY_RUNTIME_HELPERS}
+
 doc = (
     FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
     else FreeCAD.ActiveDocument
@@ -2503,12 +2264,7 @@ if spine is None:
     raise ValueError(f"Spine sketch not found: {spine_sketch!r}")
 
 # Find the body containing the profile sketch
-body = None
-for obj in doc.Objects:
-    if obj.TypeId == "PartDesign::Body":
-        if hasattr(obj, "Group") and profile in obj.Group:
-            body = obj
-            break
+body = _find_body_containing_object(doc, profile)
 
 if body is None:
     raise ValueError("Sketches must be inside a PartDesign Body")

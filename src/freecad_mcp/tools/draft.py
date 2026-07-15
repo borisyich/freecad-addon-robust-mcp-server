@@ -7,6 +7,8 @@ ShapeString for creating 3D text geometry that can be used with PartDesign.
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from freecad_mcp.tools._freecad_runtime_helpers import BODY_RUNTIME_HELPERS
+
 
 def _validate_vector(
     value: list[float] | None,
@@ -343,6 +345,8 @@ _result_ = {
         bridge = await get_bridge()
 
         code = f"""
+{BODY_RUNTIME_HELPERS}
+
 import Part
 
 doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
@@ -370,7 +374,8 @@ try:
             raise ValueError(f"Body not found: {{body_name}}")
         sketch = doc.addObject("Sketcher::SketchObject", sketch_name)
         # Attach to body's XY plane
-        sketch.AttachmentSupport = [(body.Origin.OriginFeatures[0], '')]
+        plane_obj = _resolve_body_origin_feature(body, "XY_Plane")
+        sketch.AttachmentSupport = [(plane_obj, [""])]
         sketch.MapMode = 'FlatFace'
         body.addObject(sketch)
     else:

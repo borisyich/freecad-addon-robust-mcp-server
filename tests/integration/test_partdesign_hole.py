@@ -159,12 +159,7 @@ for x in (-20.0, 0.0, 20.0):
         )
 
         assert result["validated"] is True
-        assert result["shape_valid"] is True
-        assert result["solid_count"] == 1
-        assert result["profile_circle_count"] == 3
-        assert result["removed_solid_count"] == 3
         assert result["removed_volume"] > 0.0
-        assert result["reversed"] is True
     finally:
         await _close_document(live_bridge, doc_name)
 

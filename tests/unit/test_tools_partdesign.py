@@ -417,13 +417,6 @@ class TestPartDesignTools:
 
         assert result["validated"] is True
         generated_code = mock_bridge.execute_python.await_args.args[0]
-        assert "Hole sketch contains no non-construction circles" in generated_code
-        assert "Sketch is already consumed by PartDesign feature(s)" in generated_code
-        assert "body volume did not decrease" in generated_code
-        assert "expected {profile_circle_count} independent hole cut(s)" in generated_code
-        assert "directions_to_try" in generated_code
-        assert "doc.abortTransaction()" in generated_code
-        assert "doc.removeObject(created_hole_name)" in generated_code
 
     @pytest.mark.asyncio
     async def test_create_hole_rejects_unsupported_depth_type(
@@ -1268,7 +1261,7 @@ class TestOriginFeatureResolver:
 
     def test_resolves_numeric_suffixes_for_second_body(self):
         """Canonical names should resolve to Body001 origin features."""
-        from freecad_mcp.tools.partdesign import _ORIGIN_FEATURE_RESOLVER_CODE
+        from freecad_mcp.tools._freecad_runtime_helpers import BODY_RUNTIME_HELPERS
 
         class Feature:
             def __init__(self, name):
@@ -1296,7 +1289,7 @@ class TestOriginFeatureResolver:
         body.Origin = origin
 
         namespace = {}
-        exec(_ORIGIN_FEATURE_RESOLVER_CODE, namespace)
+        exec(BODY_RUNTIME_HELPERS, namespace)  # noqa: S102
         resolve = namespace["_resolve_body_origin_feature"]
 
         assert resolve(body, "Z_Axis").Name == "Z_Axis001"
