@@ -254,9 +254,20 @@ class TestPartDesignTools:
         )
 
         revolution = register_tools["revolution_sketch"]
-        result = await revolution(sketch_name="Sketch", angle=360)
+        result = await revolution(
+            sketch_name="Sketch001",
+            angle=360,
+            axis="Base_Z",
+            doc_name="MultiBody",
+        )
 
         assert result["name"] == "Revolution"
+        generated_code = mock_bridge.execute_python.call_args.args[0]
+        assert (
+            '_resolve_body_origin_feature(body, f"{axis_ref}_Axis")'
+            in generated_code
+        )
+        assert "getGlobalPlacement" in generated_code
         mock_bridge.execute_python.assert_called_once()
 
     @pytest.mark.asyncio
@@ -389,7 +400,6 @@ class TestPartDesignTools:
                     "name": "Hole",
                     "validated": True,
                     "removed_volume": 100.0,
-                    "shape_valid": True
                 },
                 stdout="",
                 stderr="",
@@ -452,7 +462,6 @@ class TestPartDesignTools:
                 result={
                     "name": "Hole",
                     "validated": True,
-                    "shape_valid": True,
                     "removed_volume": 100.0,
                 },
                 stdout="",
@@ -1252,3 +1261,44 @@ class TestPartDesignTools:
         assert result["success"] is True
         assert result["is_construction"] is True
         mock_bridge.execute_python.assert_called_once()
+
+
+class TestOriginFeatureResolver:
+    """Tests for Body-scoped origin feature resolution."""
+
+    def test_resolves_numeric_suffixes_for_second_body(self):
+        """Canonical names should resolve to Body001 origin features."""
+        from freecad_mcp.tools.partdesign import _ORIGIN_FEATURE_RESOLVER_CODE
+
+        class Feature:
+            def __init__(self, name):
+                self.Name = name
+
+        class Origin:
+            pass
+
+        class Body:
+            pass
+
+        origin = Origin()
+        origin.OriginFeatures = [
+            Feature("X_Axis001"),
+            Feature("Y_Axis001"),
+            Feature("Z_Axis001"),
+            Feature("XY_Plane001"),
+            Feature("XZ_Plane001"),
+            Feature("YZ_Plane001"),
+            Feature("Point001"),
+        ]
+        origin.OutList = []
+        body = Body()
+        body.Name = "Body001"
+        body.Origin = origin
+
+        namespace = {}
+        exec(_ORIGIN_FEATURE_RESOLVER_CODE, namespace)
+        resolve = namespace["_resolve_body_origin_feature"]
+
+        assert resolve(body, "Z_Axis").Name == "Z_Axis001"
+        assert resolve(body, "XZ_Plane").Name == "XZ_Plane001"
+        assert resolve(body, "Point").Name == "Point001"

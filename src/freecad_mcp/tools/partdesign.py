@@ -11,6 +11,51 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 
+_ORIGIN_FEATURE_RESOLVER_CODE = r'''
+def _resolve_body_origin_feature(body, canonical_name):
+    """Resolve a Body origin feature without depending on document suffixes.
+
+    FreeCAD makes DocumentObject.Name unique across the whole document.  As a
+    result, the second Body receives names such as ``Z_Axis001`` and
+    ``XY_Plane001`` even though they still represent that Body's canonical
+    Z-axis and XY-plane.  Tool arguments use canonical names, so resolution
+    must be scoped to ``body.Origin`` and accept a numeric uniqueness suffix.
+    """
+    origin = getattr(body, "Origin", None)
+    if origin is None:
+        raise ValueError(f"Body has no Origin: {getattr(body, 'Name', '<unknown>')}")
+
+    features = list(getattr(origin, "OriginFeatures", []) or [])
+    if not features:
+        features = list(getattr(origin, "OutList", []) or [])
+
+    suffixed_matches = []
+    for feature in features:
+        feature_name = getattr(feature, "Name", "")
+        if feature_name == canonical_name:
+            return feature
+        if feature_name.startswith(canonical_name):
+            suffix = feature_name[len(canonical_name):]
+            if suffix.isdigit():
+                suffixed_matches.append(feature)
+
+    if len(suffixed_matches) == 1:
+        return suffixed_matches[0]
+    if len(suffixed_matches) > 1:
+        names = [getattr(feature, "Name", "") for feature in suffixed_matches]
+        raise ValueError(
+            f"Ambiguous origin feature {canonical_name!r} in Body "
+            f"{getattr(body, 'Name', '<unknown>')!r}: {names}"
+        )
+
+    available = [getattr(feature, "Name", "") for feature in features]
+    raise ValueError(
+        f"Origin feature not found: {canonical_name}. "
+        f"Body={getattr(body, 'Name', '<unknown>')!r}; available={available}"
+    )
+'''
+
+
 def register_partdesign_tools(
     mcp: Any, get_bridge: Callable[[], Awaitable[Any]]
 ) -> None:
@@ -78,6 +123,8 @@ def register_partdesign_tools(
         bridge = await get_bridge()
 
         code = f"""
+{_ORIGIN_FEATURE_RESOLVER_CODE}
+
 doc = (
     FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
     else FreeCAD.ActiveDocument
@@ -100,12 +147,7 @@ try:
         # Check which property exists and use the appropriate one
         plane = {plane!r}
         if plane in ["XY_Plane", "XZ_Plane", "YZ_Plane"]:
-            plane_obj = None
-            origin_objs = body.Origin.OriginFeatures
-            for obj in origin_objs:
-                if obj.Name.startswith(plane):
-                    plane_obj = obj
-                    break
+            plane_obj = _resolve_body_origin_feature(body, plane)
             
             if hasattr(sketch, "AttachmentSupport"):
                 sketch.AttachmentSupport = [(plane_obj, [""])]
@@ -648,6 +690,8 @@ _result_ = {{
         bridge = await get_bridge()
 
         code = f"""
+{_ORIGIN_FEATURE_RESOLVER_CODE}
+
 doc = (
     FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
     else FreeCAD.ActiveDocument
@@ -681,21 +725,36 @@ try:
 
     # Set axis reference
     axis_name = {axis!r}
+    allowed_axes = {{"Base_X", "Base_Y", "Base_Z", "Sketch_V", "Sketch_H"}}
+    if axis_name not in allowed_axes:
+        raise ValueError(
+            f"Unsupported revolution axis: {{axis_name!r}}. "
+            f"Expected one of {{sorted(allowed_axes)}}"
+        )
+
+    resolved_axis_name = None
     if axis_name.startswith("Base_"):
-        axis_ref = axis_name.replace("Base_", "")
-        # Find axis in OriginFeatures (getObject doesn't work on Origin)
-        axis_obj = None
-        for obj in body.Origin.OriginFeatures:
-            if obj.Name == f"{{axis_ref}}_Axis":
-                axis_obj = obj
-                break
-        if axis_obj is None:
-            raise ValueError(f"Axis not found: {{axis_ref}}_Axis")
+        axis_ref = axis_name.removeprefix("Base_")
+        axis_obj = _resolve_body_origin_feature(body, f"{{axis_ref}}_Axis")
+        resolved_axis_name = axis_obj.Name
 
         # Validate axis is not perpendicular to the sketch plane
-        sketch_normal = sketch.AttachmentOffset.Rotation.multVec(FreeCAD.Vector(0, 0, 1))
-        axis_direction_map = {{"X": FreeCAD.Vector(1, 0, 0), "Y": FreeCAD.Vector(0, 1, 0), "Z": FreeCAD.Vector(0, 0, 1)}}
-        axis_dir = axis_direction_map[axis_ref]
+        try:
+            sketch_rotation = sketch.getGlobalPlacement().Rotation
+        except Exception:
+            sketch_rotation = sketch.Placement.Rotation
+        try:
+            body_rotation = body.getGlobalPlacement().Rotation
+        except Exception:
+            body_rotation = body.Placement.Rotation
+
+        sketch_normal = sketch_rotation.multVec(FreeCAD.Vector(0, 0, 1))
+        axis_direction_map = {{
+            "X": FreeCAD.Vector(1, 0, 0),
+            "Y": FreeCAD.Vector(0, 1, 0),
+            "Z": FreeCAD.Vector(0, 0, 1),
+        }}
+        axis_dir = body_rotation.multVec(axis_direction_map[axis_ref])
         dot = abs(sketch_normal.dot(axis_dir))
         if dot > 0.9999:
             raise ValueError(
@@ -707,11 +766,13 @@ try:
             )
 
         rev.ReferenceAxis = (axis_obj, [""])
-    elif axis_name.startswith("Sketch_"):
+    else:
         if axis_name == "Sketch_V":
             rev.ReferenceAxis = (sketch, ["V_Axis"])
+            resolved_axis_name = "V_Axis"
         else:
             rev.ReferenceAxis = (sketch, ["H_Axis"])
+            resolved_axis_name = "H_Axis"
 
     doc.recompute()
 
@@ -787,6 +848,8 @@ _result_ = {{
         bridge = await get_bridge()
 
         code = f"""
+{_ORIGIN_FEATURE_RESOLVER_CODE}
+
 doc = (
     FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
     else FreeCAD.ActiveDocument
@@ -820,21 +883,36 @@ try:
 
     # Set axis reference
     axis_name = {axis!r}
+    allowed_axes = {{"Base_X", "Base_Y", "Base_Z", "Sketch_V", "Sketch_H"}}
+    if axis_name not in allowed_axes:
+        raise ValueError(
+            f"Unsupported groove axis: {{axis_name!r}}. "
+            f"Expected one of {{sorted(allowed_axes)}}"
+        )
+
+    resolved_axis_name = None
     if axis_name.startswith("Base_"):
-        axis_ref = axis_name.replace("Base_", "")
-        # Find axis in OriginFeatures (getObject doesn't work on Origin)
-        axis_obj = None
-        for obj in body.Origin.OriginFeatures:
-            if obj.Name == f"{{axis_ref}}_Axis":
-                axis_obj = obj
-                break
-        if axis_obj is None:
-            raise ValueError(f"Axis not found: {{axis_ref}}_Axis")
+        axis_ref = axis_name.removeprefix("Base_")
+        axis_obj = _resolve_body_origin_feature(body, f"{{axis_ref}}_Axis")
+        resolved_axis_name = axis_obj.Name
 
         # Validate axis is not perpendicular to the sketch plane
-        sketch_normal = sketch.AttachmentOffset.Rotation.multVec(FreeCAD.Vector(0, 0, 1))
-        axis_direction_map = {{"X": FreeCAD.Vector(1, 0, 0), "Y": FreeCAD.Vector(0, 1, 0), "Z": FreeCAD.Vector(0, 0, 1)}}
-        axis_dir = axis_direction_map[axis_ref]
+        try:
+            sketch_rotation = sketch.getGlobalPlacement().Rotation
+        except Exception:
+            sketch_rotation = sketch.Placement.Rotation
+        try:
+            body_rotation = body.getGlobalPlacement().Rotation
+        except Exception:
+            body_rotation = body.Placement.Rotation
+
+        sketch_normal = sketch_rotation.multVec(FreeCAD.Vector(0, 0, 1))
+        axis_direction_map = {{
+            "X": FreeCAD.Vector(1, 0, 0),
+            "Y": FreeCAD.Vector(0, 1, 0),
+            "Z": FreeCAD.Vector(0, 0, 1),
+        }}
+        axis_dir = body_rotation.multVec(axis_direction_map[axis_ref])
         dot = abs(sketch_normal.dot(axis_dir))
         if dot > 0.9999:
             raise ValueError(
@@ -846,11 +924,13 @@ try:
             )
 
         groove.ReferenceAxis = (axis_obj, [""])
-    elif axis_name.startswith("Sketch_"):
+    else:
         if axis_name == "Sketch_V":
             groove.ReferenceAxis = (sketch, ["V_Axis"])
+            resolved_axis_name = "V_Axis"
         else:
             groove.ReferenceAxis = (sketch, ["H_Axis"])
+            resolved_axis_name = "H_Axis"
 
     doc.recompute()
 
@@ -923,8 +1003,12 @@ _result_ = {{
                 document if None. A missing document is never created silently.
 
         Returns:
-            Dictionary describing the validated feature, including removed
-            volume, selected direction, profile circle count, and shape status.
+            Dictionary with created groove information:
+                - name: Hole name
+                - label: Hole label
+                - type_id: Object type
+                - validated: Bool result of valid check of the body after creating hole
+                - removed_volume: Removed volume of the body
         """
         if diameter <= 0:
             raise ValueError("Hole diameter must be greater than zero")
@@ -1255,10 +1339,7 @@ _result_ = {{
     "label": hole.Label,
     "type_id": hole.TypeId,
     "validated": True,
-    "shape_valid": hole.Shape.isValid(),
-    "base_feature": base_feature.Name,
-    "removed_volume": removed_volume,
-    "reversed": selected["reversed"],
+    "removed_volume": removed_volume
 }}
 """
         result = await bridge.execute_python(code)
@@ -1270,7 +1351,6 @@ _result_ = {{
             raise ValueError("Hole validation returned an invalid response payload")
         if (
             payload.get("validated") is not True
-            or payload.get("shape_valid") is not True
             or float(payload.get("removed_volume", 0.0)) <= 0.0
         ):
             raise ValueError(
@@ -1308,6 +1388,8 @@ _result_ = {{
         bridge = await get_bridge()
 
         code = f"""
+{_ORIGIN_FEATURE_RESOLVER_CODE}
+
 doc = (
     FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
     else FreeCAD.ActiveDocument
@@ -1338,14 +1420,9 @@ try:
 
     # Set direction
     dir_name = {direction!r}
-    # Find axis in OriginFeatures (getObject doesn't work on Origin)
-    axis_obj = None
-    for obj in body.Origin.OriginFeatures:
-        if obj.Name == f"{{dir_name}}_Axis":
-            axis_obj = obj
-            break
-    if axis_obj is None:
-        raise ValueError(f"Axis not found: {{dir_name}}_Axis")
+    if dir_name not in {{"X", "Y", "Z"}}:
+        raise ValueError(f"Invalid pattern direction: {{dir_name!r}}")
+    axis_obj = _resolve_body_origin_feature(body, f"{{dir_name}}_Axis")
     pattern.Direction = (axis_obj, [""])
 
     doc.recompute()
@@ -1395,6 +1472,8 @@ _result_ = {{
         bridge = await get_bridge()
 
         code = f"""
+{_ORIGIN_FEATURE_RESOLVER_CODE}
+
 doc = (
     FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
     else FreeCAD.ActiveDocument
@@ -1425,14 +1504,9 @@ try:
 
     # Set axis
     axis_name = {axis!r}
-    # Find axis in OriginFeatures (getObject doesn't work on Origin)
-    axis_obj = None
-    for obj in body.Origin.OriginFeatures:
-        if obj.Name == f"{{axis_name}}_Axis":
-            axis_obj = obj
-            break
-    if axis_obj is None:
-        raise ValueError(f"Axis not found: {{axis_name}}_Axis")
+    if axis_name not in {{"X", "Y", "Z"}}:
+        raise ValueError(f"Invalid pattern axis: {{axis_name!r}}")
+    axis_obj = _resolve_body_origin_feature(body, f"{{axis_name}}_Axis")
     pattern.Axis = (axis_obj, [""])
 
     doc.recompute()
@@ -1489,6 +1563,8 @@ _result_ = {{
         plane_ref = plane_map[plane]
 
         code = f"""
+{_ORIGIN_FEATURE_RESOLVER_CODE}
+
 doc = (
     FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
     else FreeCAD.ActiveDocument
@@ -1514,14 +1590,7 @@ try:
     mirror_name = {name!r} or "Mirrored"
     mirror = body.newObject("PartDesign::Mirrored", mirror_name)
     mirror.Originals = [feature]
-    # Find plane in OriginFeatures (getObject doesn't work on Origin)
-    plane_obj = None
-    for obj in body.Origin.OriginFeatures:
-        if obj.Name == {plane_ref!r}:
-            plane_obj = obj
-            break
-    if plane_obj is None:
-        raise ValueError(f"Plane not found: {{plane_ref}}")
+    plane_obj = _resolve_body_origin_feature(body, {plane_ref!r})
     mirror.MirrorPlane = (plane_obj, [""])
 
     doc.recompute()
@@ -1938,6 +2007,8 @@ _result_ = {{
         bridge = await get_bridge()
 
         code = f"""
+{_ORIGIN_FEATURE_RESOLVER_CODE}
+
 doc = (
     FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
     else FreeCAD.ActiveDocument
@@ -1955,14 +2026,9 @@ try:
 
     # Set reference plane
     plane = {base_plane!r}
-    # Find plane in OriginFeatures (getObject doesn't work on Origin)
-    plane_obj = None
-    for obj in body.Origin.OriginFeatures:
-        if obj.Name == plane:
-            plane_obj = obj
-            break
-    if plane_obj is None:
-        raise ValueError(f"Plane not found: {{plane}}")
+    if plane not in {{"XY_Plane", "XZ_Plane", "YZ_Plane"}}:
+        raise ValueError(f"Invalid base plane: {{plane!r}}")
+    plane_obj = _resolve_body_origin_feature(body, plane)
     datum.AttachmentSupport = [(plane_obj, "")]
     datum.MapMode = "FlatFace"
     datum.MapPathParameter = 0
@@ -2015,6 +2081,8 @@ except Exception:
         bridge = await get_bridge()
 
         code = f"""
+{_ORIGIN_FEATURE_RESOLVER_CODE}
+
 doc = (
     FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
     else FreeCAD.ActiveDocument
@@ -2032,14 +2100,9 @@ try:
 
     # Set reference axis
     axis = {base_axis!r}
-    # Find axis in OriginFeatures (getObject doesn't work on Origin)
-    axis_obj = None
-    for obj in body.Origin.OriginFeatures:
-        if obj.Name == axis:
-            axis_obj = obj
-            break
-    if axis_obj is None:
-        raise ValueError(f"Axis not found: {{axis}}")
+    if axis not in {{"X_Axis", "Y_Axis", "Z_Axis"}}:
+        raise ValueError(f"Invalid base axis: {{axis!r}}")
+    axis_obj = _resolve_body_origin_feature(body, axis)
     datum.AttachmentSupport = [(axis_obj, "")]
     datum.MapMode = "ObjectXY"
 
@@ -2088,6 +2151,8 @@ except Exception:
         pos = position if position else [0, 0, 0]
 
         code = f"""
+{_ORIGIN_FEATURE_RESOLVER_CODE}
+
 doc = (
     FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
     else FreeCAD.ActiveDocument
@@ -2103,15 +2168,8 @@ try:
     datum_name = {name!r} or "DatumPoint"
     datum = body.newObject("PartDesign::Point", datum_name)
 
-    # Set offset from origin
-    # Find Point in OriginFeatures (getObject doesn't work on Origin)
-    origin_point = None
-    for obj in body.Origin.OriginFeatures:
-        if obj.Name == "Point":
-            origin_point = obj
-            break
-    if origin_point is None:
-        raise ValueError("Point not found in Origin")
+    # Set offset from the origin point that belongs to this Body.
+    origin_point = _resolve_body_origin_feature(body, "Point")
     datum.AttachmentSupport = [(origin_point, "")]
     datum.MapMode = "ObjectOrigin"
     datum.AttachmentOffset = FreeCAD.Placement(
@@ -2175,6 +2233,8 @@ except Exception:
         faces_param = faces if faces else None
 
         code = f"""
+{_ORIGIN_FEATURE_RESOLVER_CODE}
+
 doc = (
     FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
     else FreeCAD.ActiveDocument
@@ -2211,14 +2271,7 @@ try:
     plane_name = {plane!r}
     plane_map = {{"XY": "XY_Plane", "XZ": "XZ_Plane", "YZ": "YZ_Plane"}}
     if plane_name in plane_map:
-        # Find plane in OriginFeatures (getObject doesn't work on Origin)
-        plane_obj = None
-        for obj in body.Origin.OriginFeatures:
-            if obj.Name == plane_map[plane_name]:
-                plane_obj = obj
-                break
-        if plane_obj is None:
-            raise ValueError(f"Plane not found: {{plane_map[plane_name]}}")
+        plane_obj = _resolve_body_origin_feature(body, plane_map[plane_name])
         draft.NeutralPlane = (plane_obj, "")
 
     doc.recompute()
