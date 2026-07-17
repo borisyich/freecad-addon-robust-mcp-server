@@ -1,4 +1,11 @@
 # Changelog
+## AFTER FORK ORIGINAL REPO
+
+- Debugged tools
+- Added effective-volume validation and rollback for Pad, Revolution, Additive Loft, and Additive Pipe.
+- Reworked screenshots to activate the target 3D view, fit and refresh the GUI, verify image output, and optionally save without returning base64.
+- Added engineering-agent modeling rules, a tooling roadmap, and a full bracket integration regression.
+
 
 This project uses **component-specific versioning**. Each component has its own
 release notes and version history.

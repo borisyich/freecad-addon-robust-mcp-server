@@ -1,5 +1,9 @@
 # CLAUDE.md - AI Assistant Guidelines for This Project
 
+> For FreeCAD part construction, follow `.clinerules/freecad-modeling.md`.
+> It defines feature ordering, parametric modeling, validation, rollback, and
+> visual verification rules for engineering agents.
+
 ## Project Overview
 
 This is a Python project that provides an MCP (Model Context Protocol) server for FreeCAD integration. It follows strict code quality, security, and documentation standards.
