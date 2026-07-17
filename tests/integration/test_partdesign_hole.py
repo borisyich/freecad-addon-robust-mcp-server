@@ -393,5 +393,20 @@ _result_ = True
             3.141592653589793 * 2.5**2 * 10.0,
             rel=1e-5,
         )
+
+        state = await live_bridge.execute_python(
+            f"""
+doc = FreeCAD.getDocument({doc_name!r})
+body = doc.getObject("Body")
+shape = body.Tip.Shape
+_result_ = {{
+    "solid_count": len(shape.Solids),
+    "shape_valid": bool(not shape.isNull() and shape.isValid()),
+}}
+"""
+        )
+        assert state.success, state.error_traceback
+        assert state.result["shape_valid"] is True
+        assert state.result["solid_count"] == 1
     finally:
         await _close_document(live_bridge, doc_name)

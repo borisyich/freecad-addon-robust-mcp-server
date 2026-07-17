@@ -272,9 +272,9 @@ class TestPartDesignTools:
         assert result["name"] == "Pad"
         assert result["type_id"] == "PartDesign::Pad"
         generated_code = mock_bridge.execute_python.call_args.args[0]
-        # assert "_validate_additive_feature(pad, body, base_shape)" in generated_code
-        # assert "body volume did not increase" in generated_code
-        # assert "_cleanup_failed_partdesign_feature" in generated_code
+        assert "_validate_additive_feature(pad, body, base_shape)" in generated_code
+        assert "body volume did not increase" in generated_code
+        assert "_cleanup_failed_partdesign_feature" in generated_code
         mock_bridge.execute_python.assert_called_once()
 
     @pytest.mark.asyncio
@@ -291,7 +291,9 @@ class TestPartDesignTools:
                     "type_id": "PartDesign::Pad",
                     "validated": True,
                     "added_volume": 50.0,
+                    "sketch_normal": [0.0, 1.0, 0.0],
                     "effective_direction": [0.0, -1.0, 0.0],
+                    "reversed": True,
                 },
                 stdout="",
                 stderr="",
@@ -321,6 +323,7 @@ class TestPartDesignTools:
                     "name": "Pad",
                     "validated": False,
                     "added_volume": 0.0,
+                    "solid_count": 1,
                 },
                 stdout="",
                 stderr="",
@@ -330,6 +333,55 @@ class TestPartDesignTools:
 
         pad_sketch = register_tools["pad_sketch"]
         with pytest.raises(ValueError, match="additive validation contract"):
+            await pad_sketch(sketch_name="Sketch", length=10)
+
+    @pytest.mark.asyncio
+    async def test_pad_sketch_checks_optional_solid_count_when_present(
+        self, register_tools, mock_bridge
+    ):
+        """Optional diagnostics remain strict when the API includes them."""
+        mock_bridge.execute_python = AsyncMock(
+            return_value=ExecutionResult(
+                success=True,
+                result={
+                    "name": "Pad",
+                    "validated": True,
+                    "added_volume": 10.0,
+                    "solid_count": 2,
+                },
+                stdout="",
+                stderr="",
+                execution_time_ms=15.0,
+            )
+        )
+
+        pad_sketch = register_tools["pad_sketch"]
+        with pytest.raises(ValueError, match="expected one solid"):
+            await pad_sketch(sketch_name="Sketch", length=10)
+
+    @pytest.mark.asyncio
+    async def test_pad_sketch_rejects_inconsistent_optional_volume_snapshots(
+        self, register_tools, mock_bridge
+    ):
+        """Volume snapshots are checked when a bridge version returns them."""
+        mock_bridge.execute_python = AsyncMock(
+            return_value=ExecutionResult(
+                success=True,
+                result={
+                    "name": "Pad",
+                    "validated": True,
+                    "base_volume": 100.0,
+                    "result_volume": 150.0,
+                    "added_volume": 40.0,
+                },
+                stdout="",
+                stderr="",
+                execution_time_ms=15.0,
+            )
+        )
+
+        pad_sketch = register_tools["pad_sketch"]
+        with pytest.raises(ValueError, match="inconsistent additive volume"):
             await pad_sketch(sketch_name="Sketch", length=10)
 
     @pytest.mark.asyncio
@@ -612,6 +664,11 @@ class TestPartDesignTools:
                     "type_id": "PartDesign::SubtractiveCylinder",
                     "validated": True,
                     "removed_volume": 250.0,
+                    "axis_removed_volume": 250.0,
+                    "axis_origin": [0.0, -19.0, 105.0],
+                    "axis_direction": [0.0, 0.0, -1.0],
+                    "diameter": 10.0,
+                    "depth": 12.5,
                 },
                 stdout="",
                 stderr="",

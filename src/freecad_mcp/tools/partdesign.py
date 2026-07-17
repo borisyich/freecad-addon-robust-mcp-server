@@ -7,7 +7,7 @@ Based on learnings from contextform/freecad-mcp which has the most
 comprehensive PartDesign coverage.
 """
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
 from freecad_mcp.tools._freecad_runtime_helpers import (
@@ -28,49 +28,120 @@ def register_partdesign_tools(
         get_bridge: Async function to get the active bridge.
     """
 
-    def require_additive_result(payload: Any, operation: str) -> dict[str, Any]:
-        """Enforce the host-side contract for additive feature tools."""
-        if not isinstance(payload, dict):
-            raise ValueError(f"{operation} returned an invalid response payload")
+    def _validation_payload(payload: Any, operation: str) -> dict[str, Any]:
+        """Normalize bridge results without coupling to optional API fields.
+
+        Current bridge and FastMCP versions may expose only the public evidence
+        fields (``validated`` plus the volume delta). Older bridge versions also
+        return diagnostic fields such as ``solid_count`` and volume snapshots.
+        The strict geometric checks still run inside FreeCAD before ``validated``
+        can become true; host-side validation must not reject a successful result
+        merely because optional diagnostics were omitted during transport.
+        """
+        if isinstance(payload, Mapping):
+            return dict(payload)
+
+        model_dump = getattr(payload, "model_dump", None)
+        if callable(model_dump):
+            dumped = model_dump()
+            if isinstance(dumped, Mapping):
+                return dict(dumped)
+
+        raise ValueError(f"{operation} returned an invalid response payload")
+
+    def _optional_numeric_field(
+        payload: dict[str, Any], field: str, operation: str
+    ) -> float | None:
+        """Read an optional numeric validation field without inventing evidence."""
+        if field not in payload or payload[field] is None:
+            return None
         try:
-            added_volume = float(payload.get("added_volume", 0.0))
-            solid_count = int(payload.get("solid_count", 0))
+            return float(payload[field])
         except (TypeError, ValueError) as exc:
             raise ValueError(
-                f"{operation} returned non-numeric validation evidence: {payload!r}"
+                f"{operation} returned non-numeric {field}: {payload!r}"
             ) from exc
-        if (
-            payload.get("validated") is not True
-            or added_volume <= 0.0
-            or solid_count != 1
+
+    def _validate_optional_common_evidence(
+        payload: dict[str, Any], operation: str
+    ) -> None:
+        """Validate diagnostics when the active API version includes them."""
+        if payload.get("shape_valid") is False:
+            raise ValueError(
+                f"{operation} validation reported an invalid shape: {payload!r}"
+            )
+
+        if "solid_count" in payload and payload["solid_count"] is not None:
+            try:
+                solid_count = int(payload["solid_count"])
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"{operation} returned non-numeric solid_count: {payload!r}"
+                ) from exc
+            if solid_count != 1:
+                raise ValueError(
+                    f"{operation} validation expected one solid: {payload!r}"
+                )
+
+    def require_additive_result(payload: Any, operation: str) -> dict[str, Any]:
+        """Enforce the public host-side contract for additive feature tools."""
+        normalized = _validation_payload(payload, operation)
+        added_volume = _optional_numeric_field(
+            normalized, "added_volume", operation
+        )
+        _validate_optional_common_evidence(normalized, operation)
+
+        if normalized.get("validated") is not True or not (
+            added_volume is not None and added_volume > 0.0
         ):
             raise ValueError(
                 f"{operation} additive validation contract was not satisfied: "
-                + repr(payload)
+                + repr(normalized)
             )
-        return payload
+
+        base_volume = _optional_numeric_field(normalized, "base_volume", operation)
+        result_volume = _optional_numeric_field(
+            normalized, "result_volume", operation
+        )
+        if base_volume is not None and result_volume is not None:
+            measured_delta = result_volume - base_volume
+            tolerance = max(1e-7, abs(added_volume) * 1e-9)
+            if abs(measured_delta - added_volume) > tolerance:
+                raise ValueError(
+                    f"{operation} returned inconsistent additive volume evidence: "
+                    + repr(normalized)
+                )
+        return normalized
 
     def require_subtractive_result(payload: Any, operation: str) -> dict[str, Any]:
-        """Enforce the host-side contract for subtractive feature tools."""
-        if not isinstance(payload, dict):
-            raise ValueError(f"{operation} returned an invalid response payload")
-        try:
-            removed_volume = float(payload.get("removed_volume", 0.0))
-            solid_count = int(payload.get("solid_count", 0))
-        except (TypeError, ValueError) as exc:
-            raise ValueError(
-                f"{operation} returned non-numeric validation evidence: {payload!r}"
-            ) from exc
-        if (
-            payload.get("validated") is not True
-            or removed_volume <= 0.0
-            or solid_count != 1
+        """Enforce the public host-side contract for subtractive feature tools."""
+        normalized = _validation_payload(payload, operation)
+        removed_volume = _optional_numeric_field(
+            normalized, "removed_volume", operation
+        )
+        _validate_optional_common_evidence(normalized, operation)
+
+        if normalized.get("validated") is not True or not (
+            removed_volume is not None and removed_volume > 0.0
         ):
             raise ValueError(
                 f"{operation} subtractive validation contract was not satisfied: "
-                + repr(payload)
+                + repr(normalized)
             )
-        return payload
+
+        base_volume = _optional_numeric_field(normalized, "base_volume", operation)
+        result_volume = _optional_numeric_field(
+            normalized, "result_volume", operation
+        )
+        if base_volume is not None and result_volume is not None:
+            measured_delta = base_volume - result_volume
+            tolerance = max(1e-7, abs(removed_volume) * 1e-9)
+            if abs(measured_delta - removed_volume) > tolerance:
+                raise ValueError(
+                    f"{operation} returned inconsistent subtractive volume evidence: "
+                    + repr(normalized)
+                )
+        return normalized
 
     @mcp.tool()
     async def create_partdesign_body(
