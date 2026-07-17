@@ -481,12 +481,12 @@ create_partdesign_body(
 
 #### create_sketch
 
-Create a sketch attached to a plane or body.
+Create a sketch attached to a Body origin plane, explicit face, or datum plane.
 
 ```python
 create_sketch(
     body_name: str | None = None,
-    plane: str = "XY_Plane",  # "XY_Plane", "XZ_Plane", "YZ_Plane", or "FaceN"
+    plane: str = "XY_Plane",  # origin plane, "FaceN", "Object.FaceN", or datum name
     name: str | None = None,
     doc_name: str | None = None
 ) -> dict
@@ -562,6 +562,10 @@ add_sketch_point(
 ```
 
 ### Additive Features
+
+All four additive tools return `validated`, `base_volume`, `result_volume`,
+`added_volume`, and `solid_count`. They roll back if the result is not one valid
+solid or the Body volume fails to increase.
 
 #### pad_sketch
 
@@ -656,8 +660,6 @@ groove_sketch(
 
 #### create_hole
 
-Create parametric holes with optional threading and strict post-validation. The call fails and rolls back if the result is invalid, does not reduce body volume, or does not produce one independent cut per profile circle. A sketch can be consumed only once.
-
 ```python
 create_hole(
     sketch_name: str,        # Unused sketch with non-construction circles
@@ -667,7 +669,23 @@ create_hole(
     threaded: bool = False,
     thread_type: str = "ISO",  # "ISO", "ISO_FINE", "UNC", "UNF"
     thread_size: str = "M6",
+    drill_point: str = "Flat",  # "Flat" or "Angled" for blind holes
     reversed: bool | None = None,  # None = try both directions automatically
+    name: str | None = None,
+    doc_name: str | None = None
+) -> dict
+```
+
+
+#### create_cylindrical_cut
+
+```python
+create_cylindrical_cut(
+    body_name: str,
+    axis_origin: list[float],      # [x, y, z], cylinder starts here
+    axis_direction: list[float],   # [dx, dy, dz], normalized internally
+    diameter: float,
+    depth: float,
     name: str | None = None,
     doc_name: str | None = None
 ) -> dict
@@ -859,8 +877,13 @@ get_screenshot(
     view_angle: str = "Isometric",
     width: int = 800,
     height: int = 600,
-    doc_name: str | None = None
-) -> dict  # Returns base64-encoded PNG
+    doc_name: str | None = None,
+    fit_all: bool = True,
+    background: str = "White",
+    save_to_disk: bool = False,
+    output_path: str | None = None,
+    return_data: bool = True,
+) -> dict
 ```
 
 **View angles:** `Isometric`, `Front`, `Back`, `Top`, `Bottom`, `Left`, `Right`, `FitAll`

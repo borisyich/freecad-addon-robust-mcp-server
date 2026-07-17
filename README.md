@@ -402,7 +402,7 @@ The Robust MCP Server provides **150+ tools** organized into categories. Tools m
 | `set_selection`     | Select specific objects by name                    | GUI  |
 | `clear_selection`   | Clear all selections                               | GUI  |
 
-#### PartDesign - Sketching (14 tools)
+#### PartDesign - Sketching and Core Features (15 tools)
 
 | Tool                     | Description                                     | Mode |
 | ------------------------ | ----------------------------------------------- | ---- |
@@ -412,12 +412,13 @@ The Robust MCP Server provides **150+ tools** organized into categories. Tools m
 | `add_sketch_circle`      | Add a circle to a sketch                        | All  |
 | `add_sketch_line`        | Add a line (with optional construction flag)    | All  |
 | `add_sketch_arc`         | Add an arc by center, radius, and angles        | All  |
-| `add_sketch_point`       | Add a point (useful for hole centers)           | All  |
+| `add_sketch_point`       | Add a reference point to a sketch               | All  |
 | `pad_sketch`             | Extrude a sketch (additive)                     | All  |
 | `pocket_sketch`          | Cut into solid using a sketch (subtractive)     | All  |
 | `revolution_sketch`      | Revolve a sketch around an axis (additive)      | All  |
 | `groove_sketch`          | Revolve a sketch around an axis (subtractive)   | All  |
-| `create_hole`            | Create parametric holes with optional threading | All  |
+| `create_hole`            | Create validated holes from a supported sketch  | All  |
+| `create_cylindrical_cut` | Create radial/off-face cylindrical cuts         | All  |
 | `loft_sketches`          | Create a loft through multiple sketches         | All  |
 | `sweep_sketch`           | Sweep a profile along a spine path              | All  |
 

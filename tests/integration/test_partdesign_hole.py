@@ -59,6 +59,18 @@ def create_hole_tool(live_bridge: XmlRpcBridge) -> Any:
     return collector.tools["create_hole"]
 
 
+@pytest.fixture
+def create_cylindrical_cut_tool(live_bridge: XmlRpcBridge) -> Any:
+    """Return the real registered explicit-axis cylindrical cut tool."""
+    collector = _ToolCollector()
+
+    async def get_bridge() -> XmlRpcBridge:
+        return live_bridge
+
+    register_partdesign_tools(collector, get_bridge)
+    return collector.tools["create_cylindrical_cut"]
+
+
 async def _create_test_body(
     bridge: XmlRpcBridge,
     doc_name: str,
@@ -133,6 +145,63 @@ if {doc_name!r} in FreeCAD.listDocuments():
 _result_ = True
 """
     )
+
+
+async def _create_datum_plane_hole_fixture(
+    bridge: XmlRpcBridge,
+    doc_name: str,
+) -> None:
+    """Create a solid followed by a circle sketch on a PartDesign datum plane."""
+    result = await bridge.execute_python(
+        f"""
+import FreeCAD
+import Part
+
+if {doc_name!r} in FreeCAD.listDocuments():
+    FreeCAD.closeDocument({doc_name!r})
+doc = FreeCAD.newDocument({doc_name!r})
+body = doc.addObject("PartDesign::Body", "Body")
+base = body.newObject("PartDesign::Feature", "BaseSolid")
+base.Shape = Part.makeBox(
+    30.0,
+    30.0,
+    10.0,
+    FreeCAD.Vector(-15.0, -15.0, 0.0),
+)
+body.Tip = base
+
+plane = body.newObject("PartDesign::Plane", "HoleDatum")
+xy_plane = next(
+    item for item in body.Origin.OriginFeatures
+    if item.Name.startswith("XY_Plane")
+)
+if hasattr(plane, "AttachmentSupport"):
+    plane.AttachmentSupport = [(xy_plane, [""])]
+else:
+    plane.Support = (xy_plane, [""])
+plane.MapMode = "FlatFace"
+plane.AttachmentOffset = FreeCAD.Placement(
+    FreeCAD.Vector(0.0, 0.0, 10.0), FreeCAD.Rotation()
+)
+
+sketch = body.newObject("Sketcher::SketchObject", "DatumHoleSketch")
+if hasattr(sketch, "AttachmentSupport"):
+    sketch.AttachmentSupport = [(plane, [""])]
+else:
+    sketch.Support = (plane, [""])
+sketch.MapMode = "FlatFace"
+sketch.addGeometry(
+    Part.Circle(FreeCAD.Vector(0, 0, 0), FreeCAD.Vector(0, 0, 1), 2.5),
+    False,
+)
+doc.recompute()
+_result_ = {{
+    "datum_type": plane.TypeId,
+    "sketch_support": str(getattr(sketch, "AttachmentSupport", "")),
+}}
+"""
+    )
+    assert result.success, result.error_traceback
 
 
 @pytest.mark.asyncio
@@ -255,5 +324,76 @@ sketch.addGeometry(
 
         state = await _document_state(live_bridge, doc_name)
         assert state["holes"] == [first["name"]]
+    finally:
+        await _close_document(live_bridge, doc_name)
+
+
+@pytest.mark.asyncio
+async def test_datum_plane_hole_is_rejected_with_cylindrical_cut_guidance(
+    live_bridge: XmlRpcBridge,
+    create_hole_tool: Any,
+) -> None:
+    """A datum-plane Hole must fail before leaving a no-op feature behind."""
+    doc_name = "MCPHoleDatumPlaneRejected"
+    await _create_datum_plane_hole_fixture(live_bridge, doc_name)
+    try:
+        with pytest.raises(ValueError, match="create_cylindrical_cut"):
+            await create_hole_tool(
+                sketch_name="DatumHoleSketch",
+                diameter=5.0,
+                depth=10.0,
+                reversed=True,
+                doc_name=doc_name,
+            )
+
+        state = await _document_state(live_bridge, doc_name)
+        assert state["holes"] == []
+    finally:
+        await _close_document(live_bridge, doc_name)
+
+
+@pytest.mark.asyncio
+async def test_explicit_axis_cylindrical_cut_handles_radial_style_hole(
+    live_bridge: XmlRpcBridge,
+    create_cylindrical_cut_tool: Any,
+) -> None:
+    """The explicit-axis tool should replace datum-plane Hole workarounds."""
+    doc_name = "MCPCylindricalCutExplicitAxis"
+    geometry = """
+sketch.addGeometry(
+    Part.Circle(FreeCAD.Vector(0.0, 0.0, 0.0), FreeCAD.Vector(0, 0, 1), 1.0),
+    True,
+)
+"""
+    await _create_test_body(live_bridge, doc_name, "UnusedReferenceSketch", geometry)
+    try:
+        # Restore the solid Tip because the reference sketch is intentionally
+        # not part of the cut operation.
+        await live_bridge.execute_python(
+            f"""
+doc = FreeCAD.getDocument({doc_name!r})
+body = doc.getObject("Body")
+body.Tip = doc.getObject("BaseSolid")
+doc.recompute()
+_result_ = True
+"""
+        )
+        result = await create_cylindrical_cut_tool(
+            body_name="Body",
+            axis_origin=[0.0, 0.0, 10.0],
+            axis_direction=[0.0, 0.0, -1.0],
+            diameter=5.0,
+            depth=10.0,
+            name="ExplicitAxisHole",
+            doc_name=doc_name,
+        )
+
+        assert result["validated"] is True
+        assert result["solid_count"] == 1
+        assert result["axis_direction"] == pytest.approx([0.0, 0.0, -1.0])
+        assert result["removed_volume"] == pytest.approx(
+            3.141592653589793 * 2.5**2 * 10.0,
+            rel=1e-5,
+        )
     finally:
         await _close_document(live_bridge, doc_name)

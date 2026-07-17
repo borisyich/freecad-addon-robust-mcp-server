@@ -1928,7 +1928,8 @@ The MCP server provides a `freecad://capabilities` resource that returns a compl
 | `sweep_sketch`           | Sweep a sketch along a path.                      |
 | `subtractive_loft`       | Cut material with a loft through sketches.        |
 | `subtractive_pipe`       | Cut material by sweeping a sketch along a path.   |
-| `create_hole`            | Create parametric holes from sketch points.       |
+| `create_hole`            | Create validated holes from circles on a planar-face or origin-plane sketch. |
+| `create_cylindrical_cut` | Create a validated radial/off-face cylindrical cut from an explicit axis. |
 | `fillet_edges`           | Add fillets (rounded edges).                      |
 | `chamfer_edges`          | Add chamfers (beveled edges).                     |
 | `draft_feature`          | Add draft angle to faces (for mold release).      |

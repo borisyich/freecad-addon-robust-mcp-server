@@ -22,6 +22,7 @@ from typing import Any
 from freecad_mcp.bridge._object_inspection_runtime import (
     build_object_inspection_code,
 )
+from freecad_mcp.bridge._screenshot_runtime import build_screenshot_code
 from freecad_mcp.bridge.base import (
     ConnectionStatus,
     DocumentInfo,
@@ -666,100 +667,46 @@ _result_ = True
         width: int = 800,
         height: int = 600,
         doc_name: str | None = None,
+        fit_all: bool = True,
+        background: str = "White",
+        save_to_disk: bool = False,
+        output_path: str | None = None,
+        return_data: bool = True,
     ) -> ScreenshotResult:
-        """Capture a screenshot of the 3D view.
-
-        Note: In embedded headless mode, screenshots are typically not available.
-
-        Args:
-            view_angle: View angle to set before capture.
-            width: Image width in pixels.
-            height: Image height in pixels.
-            doc_name: Document name (uses active if None).
-
-        Returns:
-            ScreenshotResult with image data or error.
-        """
-        # Check if GUI is available
-        gui_available = await self.is_gui_available()
-
-        if not gui_available:
-            return ScreenshotResult(
-                success=False,
-                error="Screenshots not available in headless mode",
-                width=width,
-                height=height,
-                view_angle=view_angle,
-            )
-
-        # If GUI is available, attempt screenshot
+        """Capture a screenshot using the active FreeCAD 3D view."""
         view_angle_str = view_angle.value if view_angle else "Isometric"
-        code = f"""
-import base64
-import tempfile
-import os
-
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
-if doc is None:
-    raise ValueError("No document found")
-
-view = FreeCADGui.ActiveDocument.ActiveView
-if view is None:
-    raise ValueError("No active view")
-
-# Set view angle
-view_type = {view_angle_str!r}
-if view_type == "FitAll":
-    view.fitAll()
-elif view_type == "Isometric":
-    view.viewIsometric()
-elif view_type == "Front":
-    view.viewFront()
-elif view_type == "Back":
-    view.viewRear()
-elif view_type == "Top":
-    view.viewTop()
-elif view_type == "Bottom":
-    view.viewBottom()
-elif view_type == "Left":
-    view.viewLeft()
-elif view_type == "Right":
-    view.viewRight()
-
-# Save to temp file and read
-with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
-    temp_path = f.name
-
-view.saveImage(temp_path, {width}, {height}, "Current")
-
-with open(temp_path, "rb") as f:
-    image_data = base64.b64encode(f.read()).decode("utf-8")
-
-os.unlink(temp_path)
-
-_result_ = {{
-    "success": True,
-    "data": image_data,
-    "format": "png",
-    "width": {width},
-    "height": {height},
-}}
-"""
+        code = build_screenshot_code(
+            view_angle=view_angle_str,
+            width=width,
+            height=height,
+            doc_name=doc_name,
+            fit_all=fit_all,
+            background=background,
+            save_to_disk=save_to_disk,
+            output_path=output_path,
+            return_data=return_data,
+        )
         result = await self.execute_python(code)
 
-        if result.success and result.result:
+        if result.success and isinstance(result.result, dict):
+            payload = result.result
             return ScreenshotResult(
-                success=True,
-                data=result.result["data"],
-                format=result.result["format"],
-                width=result.result["width"],
-                height=result.result["height"],
+                success=bool(payload.get("success")),
+                data=payload.get("data"),
+                format=str(payload.get("format", "png")),
+                width=int(payload.get("width", width)),
+                height=int(payload.get("height", height)),
                 view_angle=view_angle,
+                path=payload.get("path"),
+                saved_to_disk=bool(payload.get("saved_to_disk", False)),
+                file_size=int(payload.get("file_size", 0)),
             )
 
         return ScreenshotResult(
             success=False,
-            error=result.error_traceback or "Failed to capture screenshot",
+            error=result.error_traceback
+            or result.stderr
+            or "Failed to capture screenshot",
             width=width,
             height=height,
             view_angle=view_angle,

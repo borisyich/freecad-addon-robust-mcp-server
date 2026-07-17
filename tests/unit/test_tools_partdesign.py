@@ -87,6 +87,33 @@ class TestPartDesignTools:
         mock_bridge.execute_python.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_create_sketch_supports_explicit_face_and_datum_names(
+        self, register_tools, mock_bridge
+    ):
+        """create_sketch should expose explicit object faces and datum supports."""
+        mock_bridge.execute_python = AsyncMock(
+            return_value=ExecutionResult(
+                success=True,
+                result={
+                    "name": "Sketch",
+                    "label": "Sketch",
+                    "type_id": "Sketcher::SketchObject",
+                    "support": "Pad.Face6",
+                },
+                stdout="",
+                stderr="",
+                execution_time_ms=10.0,
+            )
+        )
+
+        create_sketch = register_tools["create_sketch"]
+        await create_sketch(body_name="Body", plane="Pad.Face6")
+        generated_code = mock_bridge.execute_python.await_args.args[0]
+
+        assert 'plane.rsplit(".", 1)' in generated_code
+        assert 'TypeId", "") != "PartDesign::Plane"' in generated_code
+
+    @pytest.mark.asyncio
     async def test_add_sketch_rectangle(self, register_tools, mock_bridge):
         """add_sketch_rectangle should add a rectangle via execute_python."""
         mock_bridge.execute_python = AsyncMock(
@@ -226,7 +253,16 @@ class TestPartDesignTools:
         mock_bridge.execute_python = AsyncMock(
             return_value=ExecutionResult(
                 success=True,
-                result={"name": "Pad", "label": "Pad", "type_id": "PartDesign::Pad"},
+                result={
+                    "name": "Pad",
+                    "label": "Pad",
+                    "type_id": "PartDesign::Pad",
+                    "validated": True,
+                    "base_volume": 0.0,
+                    "result_volume": 1000.0,
+                    "added_volume": 1000.0,
+                    "solid_count": 1,
+                },
                 stdout="",
                 stderr="",
                 execution_time_ms=15.0,
@@ -238,7 +274,35 @@ class TestPartDesignTools:
 
         assert result["name"] == "Pad"
         assert result["type_id"] == "PartDesign::Pad"
+        generated_code = mock_bridge.execute_python.call_args.args[0]
+        assert "_validate_additive_feature(pad, body, base_shape)" in generated_code
+        assert "body volume did not increase" in generated_code
+        assert "_cleanup_failed_partdesign_feature" in generated_code
         mock_bridge.execute_python.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_pad_sketch_rejects_missing_additive_evidence(
+        self, register_tools, mock_bridge
+    ):
+        """pad_sketch should reject successful execution without volume evidence."""
+        mock_bridge.execute_python = AsyncMock(
+            return_value=ExecutionResult(
+                success=True,
+                result={
+                    "name": "Pad",
+                    "validated": False,
+                    "added_volume": 0.0,
+                    "solid_count": 1,
+                },
+                stdout="",
+                stderr="",
+                execution_time_ms=15.0,
+            )
+        )
+
+        pad_sketch = register_tools["pad_sketch"]
+        with pytest.raises(ValueError, match="additive validation contract"):
+            await pad_sketch(sketch_name="Sketch", length=10)
 
     @pytest.mark.asyncio
     async def test_pocket_sketch(self, register_tools, mock_bridge):
@@ -273,6 +337,11 @@ class TestPartDesignTools:
                     "name": "Revolution",
                     "label": "Revolution",
                     "type_id": "PartDesign::Revolution",
+                    "validated": True,
+                    "base_volume": 100.0,
+                    "result_volume": 300.0,
+                    "added_volume": 200.0,
+                    "solid_count": 1,
                 },
                 stdout="",
                 stderr="",
@@ -294,6 +363,8 @@ class TestPartDesignTools:
             '_resolve_body_origin_feature(body, f"{axis_ref}_Axis")' in generated_code
         )
         assert "getGlobalPlacement" in generated_code
+        assert "_validate_additive_feature(rev, body, base_shape)" in generated_code
+        assert "_cleanup_failed_partdesign_feature" in generated_code
         mock_bridge.execute_python.assert_called_once()
 
     @pytest.mark.asyncio
@@ -378,6 +449,7 @@ class TestPartDesignTools:
                     "validated": True,
                     "shape_valid": True,
                     "removed_volume": 100.0,
+                    "solid_count": 1,
                 },
                 stdout="",
                 stderr="",
@@ -426,6 +498,7 @@ class TestPartDesignTools:
                     "name": "Hole",
                     "validated": True,
                     "removed_volume": 100.0,
+                    "solid_count": 1,
                 },
                 stdout="",
                 stderr="",
@@ -442,6 +515,10 @@ class TestPartDesignTools:
         )
 
         assert result["validated"] is True
+        generated_code = mock_bridge.execute_python.await_args.args[0]
+        assert 'support_type == "PartDesign::Plane"' in generated_code
+        assert "create_cylindrical_cut" in generated_code
+        assert "circle_probe_volumes" in generated_code
         mock_bridge.execute_python.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -482,6 +559,7 @@ class TestPartDesignTools:
                     "name": "Hole",
                     "validated": True,
                     "removed_volume": 100.0,
+                    "solid_count": 1,
                 },
                 stdout="",
                 stderr="",
@@ -500,6 +578,74 @@ class TestPartDesignTools:
         generated_code = mock_bridge.execute_python.await_args.args[0]
         assert "resolved_thread_profile = 'ISOMetricProfile'" in generated_code
         assert "[False, True]" in generated_code
+
+    @pytest.mark.asyncio
+    async def test_create_cylindrical_cut(self, register_tools, mock_bridge):
+        """create_cylindrical_cut should validate an explicit-axis cut."""
+        mock_bridge.execute_python = AsyncMock(
+            return_value=ExecutionResult(
+                success=True,
+                result={
+                    "name": "OilHole",
+                    "label": "OilHole",
+                    "type_id": "PartDesign::SubtractiveCylinder",
+                    "validated": True,
+                    "removed_volume": 250.0,
+                    "axis_removed_volume": 250.0,
+                    "solid_count": 1,
+                    "axis_origin": [0.0, -19.0, 105.0],
+                    "axis_direction": [0.0, 0.0, -1.0],
+                    "diameter": 10.0,
+                    "depth": 12.5,
+                },
+                stdout="",
+                stderr="",
+                execution_time_ms=10.0,
+            )
+        )
+
+        create_cut = register_tools["create_cylindrical_cut"]
+        result = await create_cut(
+            body_name="Body",
+            axis_origin=[0, -19, 105],
+            axis_direction=[0, 0, -1],
+            diameter=10,
+            depth=12.5,
+            name="OilHole",
+        )
+
+        assert result["validated"] is True
+        assert result["removed_volume"] == 250.0
+        generated_code = mock_bridge.execute_python.await_args.args[0]
+        assert 'body.newObject("PartDesign::SubtractiveCylinder"' in generated_code
+        assert "FreeCAD.Rotation(FreeCAD.Vector(0, 0, 1), direction)" in generated_code
+        assert "axis_removed_volume" in generated_code
+
+    @pytest.mark.asyncio
+    async def test_create_cylindrical_cut_rejects_invalid_axis(
+        self, register_tools, mock_bridge
+    ):
+        """Explicit cylindrical-cut axes must be three-dimensional and non-zero."""
+        create_cut = register_tools["create_cylindrical_cut"]
+
+        with pytest.raises(ValueError, match="three components"):
+            await create_cut(
+                body_name="Body",
+                axis_origin=[0, 0, 0],
+                axis_direction=[0, 1],
+                diameter=5,
+                depth=10,
+            )
+        with pytest.raises(ValueError, match="non-zero"):
+            await create_cut(
+                body_name="Body",
+                axis_origin=[0, 0, 0],
+                axis_direction=[0, 0, 0],
+                diameter=5,
+                depth=10,
+            )
+
+        mock_bridge.execute_python.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_linear_pattern(self, register_tools, mock_bridge):
@@ -582,6 +728,11 @@ class TestPartDesignTools:
                     "name": "Loft",
                     "label": "Loft",
                     "type_id": "PartDesign::AdditiveLoft",
+                    "validated": True,
+                    "base_volume": 100.0,
+                    "result_volume": 250.0,
+                    "added_volume": 150.0,
+                    "solid_count": 1,
                 },
                 stdout="",
                 stderr="",
@@ -593,6 +744,8 @@ class TestPartDesignTools:
         result = await loft(sketch_names=["Sketch", "Sketch001"])
 
         assert result["name"] == "Loft"
+        generated_code = mock_bridge.execute_python.call_args.args[0]
+        assert "_validate_additive_feature(loft, body, base_shape)" in generated_code
         mock_bridge.execute_python.assert_called_once()
 
     @pytest.mark.asyncio
@@ -605,6 +758,11 @@ class TestPartDesignTools:
                     "name": "Sweep",
                     "label": "Sweep",
                     "type_id": "PartDesign::AdditivePipe",
+                    "validated": True,
+                    "base_volume": 100.0,
+                    "result_volume": 225.0,
+                    "added_volume": 125.0,
+                    "solid_count": 1,
                 },
                 stdout="",
                 stderr="",
@@ -616,6 +774,8 @@ class TestPartDesignTools:
         result = await sweep(profile_sketch="Profile", spine_sketch="Spine")
 
         assert result["name"] == "Sweep"
+        generated_code = mock_bridge.execute_python.call_args.args[0]
+        assert "_validate_additive_feature(sweep, body, base_shape)" in generated_code
         mock_bridge.execute_python.assert_called_once()
 
     # Tests for PartDesign datum features

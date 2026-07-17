@@ -1004,8 +1004,25 @@ Check with: sketch.solve() returns DoF count (0 = fully constrained)""",
                         },
                         {
                             "name": "create_hole",
-                            "description": "Create and validate subtractive hole feature",
+                            "description": (
+                                "Create validated holes from a planar-face or "
+                                "origin-plane circle sketch"
+                            ),
                             "key_params": ["sketch_name", "diameter", "depth"],
+                        },
+                        {
+                            "name": "create_cylindrical_cut",
+                            "description": (
+                                "Create a validated radial or off-face cylindrical "
+                                "cut from an explicit axis"
+                            ),
+                            "key_params": [
+                                "body_name",
+                                "axis_origin",
+                                "axis_direction",
+                                "diameter",
+                                "depth",
+                            ],
                         },
                         {
                             "name": "fillet_edges",

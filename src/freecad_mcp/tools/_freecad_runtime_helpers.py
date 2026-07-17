@@ -233,6 +233,95 @@ FEATURE_VALIDATION_RUNTIME_HELPERS = _runtime_code(
         }
 
 
+    def _cleanup_failed_partdesign_feature(
+        doc,
+        body,
+        feature_name,
+        original_tip_name=None,
+    ):
+        """Remove a feature left behind by an aborted FreeCAD transaction."""
+        if feature_name:
+            leftover = doc.getObject(feature_name)
+            if leftover is not None:
+                try:
+                    doc.removeObject(feature_name)
+                except Exception:
+                    pass
+        if original_tip_name:
+            try:
+                original_tip = doc.getObject(original_tip_name)
+                if original_tip is not None:
+                    body.Tip = original_tip
+            except Exception:
+                pass
+        try:
+            doc.recompute()
+        except Exception:
+            pass
+
+
+    def _validate_additive_feature(
+        feature,
+        body,
+        base_shape=None,
+        volume_tolerance=None,
+    ):
+        """Validate that an additive feature creates effective solid volume.
+
+        The common shape checks are not enough for PartDesign additive
+        operations: FreeCAD can create a syntactically valid feature that is
+        detached from the existing Body or leaves the Body unchanged.  This
+        contract therefore requires one valid solid and a measurable positive
+        volume delta.  For the first solid feature, a positive result volume is
+        sufficient.
+        """
+        validation = _validate_single_solid_feature(feature, body)
+        reasons = validation["reasons"]
+        result_volume = validation["result_volume"]
+        base_volume = None
+        added_volume = None
+
+        if base_shape is not None:
+            try:
+                base_volume = float(base_shape.Volume)
+            except Exception:
+                reasons.append("could not inspect base shape volume")
+
+        reference_volume = abs(base_volume or result_volume or 0.0)
+        tolerance = (
+            max(1e-7, reference_volume * 1e-9)
+            if volume_tolerance is None
+            else float(volume_tolerance)
+        )
+
+        if result_volume is None:
+            reasons.append("result volume is unavailable")
+        elif base_volume is None:
+            added_volume = result_volume
+            if result_volume <= tolerance:
+                reasons.append(
+                    f"additive feature produced non-positive volume: "
+                    f"result={result_volume:.9g}"
+                )
+        else:
+            added_volume = result_volume - base_volume
+            if added_volume <= tolerance:
+                reasons.append(
+                    f"body volume did not increase: base={base_volume:.9g}, "
+                    f"result={result_volume:.9g}"
+                )
+
+        validation.update(
+            {
+                "ok": not reasons,
+                "base_volume": base_volume,
+                "added_volume": added_volume,
+                "volume_tolerance": tolerance,
+            }
+        )
+        return validation
+
+
     def _validate_subtractive_feature(
         feature,
         body,

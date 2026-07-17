@@ -215,8 +215,9 @@ Create a parametric mounting plate:
 1. `create_sketch(body_name="Body", plane="XY_Plane")` - Creates attached sketch
 1. `add_sketch_rectangle(...)` - Adds the profile geometry
 1. `pad_sketch(sketch_name="Sketch", length=8)` - Extrudes to solid
-1. Creates new sketches with circles at each hole location
-1. `create_hole(...)` for each mounting hole
+1. Identifies the planar top face geometrically
+1. Creates a new face-attached sketch with circles at the hole locations
+1. Calls one validated `create_hole(...)` for the circle group
 1. `fillet_edges(...)` - Rounds the edges
 
 ### Revolving Profiles
@@ -305,12 +306,23 @@ create_sketch(body_name="Body", plane="XZ_Plane", name="SupportSketch")
 # ... add geometry
 pad_sketch(sketch_name="SupportSketch", length=60)
 
-# 4. Add mounting holes
-create_sketch(body_name="Body", plane="XY_Plane", name="HoleSketch")
+# 4. Add mounting holes after all additive features.
+# Determine the actual planar top face first; do not guess FaceN.
+create_sketch(body_name="Body", plane="Pad.Face6", name="HoleSketch")
 add_sketch_circle(sketch_name="HoleSketch", center_x=15, center_y=30, radius=3)
 add_sketch_circle(sketch_name="HoleSketch", center_x=65, center_y=30, radius=3)
 hole = create_hole(sketch_name="HoleSketch", diameter=6, hole_type="ThroughAll")
 # Continue only when hole["validated"] is true and hole["removed_volume"] > 0.
+
+# A radial/off-face hole is not a create_hole + datum-plane workflow.
+oil_hole = create_cylindrical_cut(
+    body_name="Body",
+    axis_origin=[0, 20, 40],
+    axis_direction=[0, 0, -1],
+    diameter=5,
+    depth=8,
+    name="OilHole",
+)
 
 # 5. Add slot (as pocket)
 create_sketch(body_name="Body", plane="Face...", name="SlotSketch")

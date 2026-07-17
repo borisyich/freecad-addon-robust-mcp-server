@@ -218,7 +218,8 @@ The MCP tools handle this automatically.
 
 ## Adding Features
 - **Additive**: pad_sketch, revolution_sketch, loft_sketches, sweep_sketch
-- **Subtractive**: pocket_sketch, groove_sketch, create_hole, subtractive_loft, subtractive_pipe
+- **Subtractive**: pocket_sketch, groove_sketch, create_hole,
+  create_cylindrical_cut, subtractive_loft, subtractive_pipe
 - **Modifiers**: fillet_edges, chamfer_edges, draft_feature, thickness_feature
 - **Patterns**: linear_pattern, polar_pattern, mirrored_feature
 - **Datums**: create_datum_plane, create_datum_line, create_datum_point
@@ -280,6 +281,9 @@ For Pad/Pocket operations, sketches must be closed:
 - Start simple: rectangle or circle first
 - Build complex shapes with multiple sketch elements
 - For `create_hole`, use one or more non-construction circles via `add_sketch_circle`; do not use sketch points
+- Prefer attaching a Hole sketch to an actual planar solid face (`Object.FaceN`)
+- Do not use `create_hole` from a PartDesign datum plane; use
+  `create_cylindrical_cut` for radial or off-face cylindrical cuts
 - Treat a PartDesign profile sketch as single-use: create a new sketch for each separate feature
 - A hole is successful only when `create_hole` returns `validated: true` and positive `removed_volume`
 - Use `get_sketch_info` to check if fully constrained (0 DOF)

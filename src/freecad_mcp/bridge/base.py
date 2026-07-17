@@ -157,6 +157,9 @@ class ScreenshotResult:
         width: Image width in pixels.
         height: Image height in pixels.
         view_angle: The view angle used.
+        path: Saved image path when disk output was requested.
+        saved_to_disk: Whether the screenshot was persisted.
+        file_size: Size of the produced PNG in bytes.
         error: Error message if failed.
     """
 
@@ -166,6 +169,9 @@ class ScreenshotResult:
     width: int = 0
     height: int = 0
     view_angle: ViewAngle | None = None
+    path: str | None = None
+    saved_to_disk: bool = False
+    file_size: int = 0
     error: str | None = None
 
 
@@ -388,6 +394,11 @@ class FreecadBridge(ABC):
 
         Args:
             doc_name: Document name (uses active if None).
+            fit_all: Fit visible geometry after setting the view.
+            background: FreeCAD saveImage background mode, usually White or Current.
+            save_to_disk: Persist the PNG instead of using only a temporary file.
+            output_path: Optional explicit PNG path for disk output.
+            return_data: Return base64 PNG data in addition to optional disk output.
 
         Returns:
             List of ObjectInfo for each object.
@@ -480,6 +491,11 @@ class FreecadBridge(ABC):
         width: int = 800,
         height: int = 600,
         doc_name: str | None = None,
+        fit_all: bool = True,
+        background: str = "White",
+        save_to_disk: bool = False,
+        output_path: str | None = None,
+        return_data: bool = True,
     ) -> ScreenshotResult:
         """Capture a screenshot of the 3D view.
 
@@ -488,6 +504,11 @@ class FreecadBridge(ABC):
             width: Image width in pixels.
             height: Image height in pixels.
             doc_name: Document name (uses active if None).
+            fit_all: Fit visible geometry after setting the view.
+            background: FreeCAD saveImage background mode.
+            save_to_disk: Persist the screenshot on disk.
+            output_path: Optional explicit path for persisted output.
+            return_data: Return base64 image data in the result.
 
         Returns:
             ScreenshotResult with image data or error.

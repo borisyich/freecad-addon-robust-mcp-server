@@ -28,6 +28,50 @@ def register_partdesign_tools(
         get_bridge: Async function to get the active bridge.
     """
 
+    def require_additive_result(payload: Any, operation: str) -> dict[str, Any]:
+        """Enforce the host-side contract for additive feature tools."""
+        if not isinstance(payload, dict):
+            raise ValueError(f"{operation} returned an invalid response payload")
+        try:
+            added_volume = float(payload.get("added_volume", 0.0))
+            solid_count = int(payload.get("solid_count", 0))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"{operation} returned non-numeric validation evidence: {payload!r}"
+            ) from exc
+        if (
+            payload.get("validated") is not True
+            or added_volume <= 0.0
+            or solid_count != 1
+        ):
+            raise ValueError(
+                f"{operation} additive validation contract was not satisfied: "
+                + repr(payload)
+            )
+        return payload
+
+    def require_subtractive_result(payload: Any, operation: str) -> dict[str, Any]:
+        """Enforce the host-side contract for subtractive feature tools."""
+        if not isinstance(payload, dict):
+            raise ValueError(f"{operation} returned an invalid response payload")
+        try:
+            removed_volume = float(payload.get("removed_volume", 0.0))
+            solid_count = int(payload.get("solid_count", 0))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"{operation} returned non-numeric validation evidence: {payload!r}"
+            ) from exc
+        if (
+            payload.get("validated") is not True
+            or removed_volume <= 0.0
+            or solid_count != 1
+        ):
+            raise ValueError(
+                f"{operation} subtractive validation contract was not satisfied: "
+                + repr(payload)
+            )
+        return payload
+
     @mcp.tool()
     async def create_partdesign_body(
         name: str | None = None,
@@ -63,15 +107,17 @@ def register_partdesign_tools(
         name: str | None = None,
         doc_name: str | None = None,
     ) -> dict[str, Any]:
-        """Create a new Sketch attached to a plane or body.
+        """Create a new Sketch attached to an origin plane, datum plane, or face.
 
         Args:
             body_name: Name of PartDesign Body to attach to. Creates standalone if None.
-            plane: Plane to attach sketch to. Options:
+            plane: Support to attach the sketch to. Options:
                 - "XY_Plane" - Horizontal plane
                 - "XZ_Plane" - Front vertical plane
                 - "YZ_Plane" - Side vertical plane
-                - Face name like "Face1" to attach to body face
+                - Face name like "Face1" to attach to the current Body Tip
+                - Explicit face like "Pad_Base.Face8"
+                - Datum plane object name like "DP_OilHole"
             name: Sketch name. Auto-generated if None.
             doc_name: Target document. Uses active document if None.
 
@@ -138,6 +184,56 @@ try:
                 sketch.AttachmentSupport = [(support_feature, [plane])]
             else:
                 sketch.Support = (support_feature, [plane])
+            sketch.MapMode = "FlatFace"
+        elif "." in plane:
+            support_name, sub_element = plane.rsplit(".", 1)
+            support_object = doc.getObject(support_name)
+            if support_object is None:
+                raise ValueError(f"Sketch support object not found: {{support_name!r}}")
+            if not sub_element.startswith("Face"):
+                raise ValueError(
+                    f"Unsupported sketch sub-element: {{sub_element!r}}. "
+                    "Use an explicit planar FaceN reference."
+                )
+            shape = getattr(support_object, "Shape", None)
+            try:
+                face_index = int(sub_element[4:])
+            except Exception as exc:
+                raise ValueError(
+                    f"Invalid face reference: {{support_name}}.{{sub_element}}"
+                ) from exc
+            if (
+                shape is None
+                or shape.isNull()
+                or face_index < 1
+                or face_index > len(shape.Faces)
+            ):
+                available = 0 if shape is None or shape.isNull() else len(shape.Faces)
+                raise ValueError(
+                    f"Face not found: {{support_name}}.{{sub_element}}. "
+                    f"Available faces: Face1..Face{{available}}"
+                )
+            if hasattr(sketch, "AttachmentSupport"):
+                sketch.AttachmentSupport = [(support_object, [sub_element])]
+            else:
+                sketch.Support = (support_object, [sub_element])
+            sketch.MapMode = "FlatFace"
+        else:
+            support_object = doc.getObject(plane)
+            if support_object is None:
+                raise ValueError(
+                    f"Unsupported sketch support: {{plane!r}}. Use a Body origin "
+                    "plane, an explicit Object.FaceN, or an existing datum plane."
+                )
+            if getattr(support_object, "TypeId", "") != "PartDesign::Plane":
+                raise ValueError(
+                    f"Object {{plane!r}} is not a PartDesign datum plane: "
+                    f"{{getattr(support_object, 'TypeId', '<unknown>')}}"
+                )
+            if hasattr(sketch, "AttachmentSupport"):
+                sketch.AttachmentSupport = [(support_object, [""])]
+            else:
+                sketch.Support = (support_object, [""])
             sketch.MapMode = "FlatFace"
     else:
         # Standalone sketch
@@ -336,11 +432,18 @@ _result_ = {{
                 - name: Pad name
                 - label: Pad label
                 - type_id: Object type
+                - validated: Whether the additive result passed validation
+                - added_volume: Effective volume added to the Body
+                - base_volume: Volume before the operation, or None for first feature
+                - result_volume: Volume after the operation
+                - solid_count: Number of solids in the result (must be one)
         """
         bridge = await get_bridge()
 
         code = f"""
 {BODY_RUNTIME_HELPERS}
+
+{FEATURE_VALIDATION_RUNTIME_HELPERS}
 
 doc = (
     FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
@@ -356,11 +459,17 @@ body = _find_body_containing_object(doc, sketch)
 if body is None:
     raise ValueError("Sketch must be inside a PartDesign Body for Pad operation")
 
+base_feature = _find_preceding_single_solid_feature(body, sketch)
+base_shape = base_feature.Shape.copy() if base_feature is not None else None
+
+original_tip_name = getattr(body.Tip, "Name", None)
+created_pad_name = None
 # Wrap in transaction for undo support
 doc.openTransaction("Pad Sketch")
 try:
     pad_name = {name!r} or "Pad"
     pad = body.newObject("PartDesign::Pad", pad_name)
+    created_pad_name = pad.Name
     pad.Profile = sketch
     pad.Length = {length}
     # FreeCAD 1.0 uses Midplane instead of Symmetric
@@ -369,20 +478,33 @@ try:
     pad.Reversed = {reversed}
 
     doc.recompute()
+    validation = _validate_additive_feature(pad, body, base_shape)
+    if not validation["ok"]:
+        raise ValueError("Pad failed: " + "; ".join(validation["reasons"]))
     doc.commitTransaction()
 except Exception:
-    doc.abortTransaction()
+    try:
+        doc.abortTransaction()
+    finally:
+        _cleanup_failed_partdesign_feature(
+            doc, body, created_pad_name, original_tip_name
+        )
     raise
 
 _result_ = {{
     "name": pad.Name,
     "label": pad.Label,
     "type_id": pad.TypeId,
+    "validated": validation["ok"],
+    "base_volume": validation["base_volume"],
+    "result_volume": validation["result_volume"],
+    "added_volume": validation["added_volume"],
+    "solid_count": validation["solid_count"],
 }}
 """
         result = await bridge.execute_python(code)
         if result.success:
-            return result.result
+            return require_additive_result(result.result, 'Pad')
         raise ValueError(result.error_traceback or "Pad failed")
 
     @mcp.tool()
@@ -699,11 +821,17 @@ body = _find_body_containing_object(doc, sketch)
 if body is None:
     raise ValueError("Sketch must be inside a PartDesign Body for Revolution operation")
 
+base_feature = _find_preceding_single_solid_feature(body, sketch)
+base_shape = base_feature.Shape.copy() if base_feature is not None else None
+
+original_tip_name = getattr(body.Tip, "Name", None)
+created_revolution_name = None
 # Wrap in transaction for undo support
 doc.openTransaction("Revolution Sketch")
 try:
     rev_name = {name!r} or "Revolution"
     rev = body.newObject("PartDesign::Revolution", rev_name)
+    created_revolution_name = rev.Name
     rev.Profile = sketch
     rev.Angle = {angle}
     # FreeCAD 1.0 uses Midplane instead of Symmetric
@@ -719,7 +847,7 @@ try:
 
     doc.recompute()
 
-    validation = _validate_single_solid_feature(rev, body)
+    validation = _validate_additive_feature(rev, body, base_shape)
     if not validation["ok"]:
         details = "; ".join(validation["reasons"])
         raise ValueError(
@@ -730,7 +858,12 @@ try:
 
     doc.commitTransaction()
 except Exception:
-    doc.abortTransaction()
+    try:
+        doc.abortTransaction()
+    finally:
+        _cleanup_failed_partdesign_feature(
+            doc, body, created_revolution_name, original_tip_name
+        )
     raise
 
 _result_ = {{
@@ -738,11 +871,15 @@ _result_ = {{
     "label": rev.Label,
     "type_id": rev.TypeId,
     "validated": validation["ok"],
+    "base_volume": validation["base_volume"],
+    "result_volume": validation["result_volume"],
+    "added_volume": validation["added_volume"],
+    "solid_count": validation["solid_count"],
 }}
 """
         result = await bridge.execute_python(code)
         if result.success:
-            return result.result
+            return require_additive_result(result.result, 'Revolution')
         raise ValueError(result.error_traceback or "Revolution failed")
 
     @mcp.tool()
@@ -868,7 +1005,7 @@ _result_ = {{
         name: str | None = None,
         doc_name: str | None = None,
     ) -> dict[str, Any]:
-        """Create a validated Hole feature from a sketch containing circles.
+        """Create a validated Hole feature from a face- or origin-plane sketch.
 
         The sketch must contain one or more non-construction circles. One sketch
         may be consumed by only one PartDesign feature. The operation succeeds
@@ -876,8 +1013,16 @@ _result_ = {{
         measurably reduced. If the default direction does not cut the body, the
         opposite direction is tried automatically unless ``reversed`` is set.
 
+        Prefer a sketch attached to an actual planar face of the solid. Origin
+        planes are allowed, but can be ambiguous in a complex Body. Sketches on
+        ``PartDesign::Plane`` datum planes are rejected deliberately: FreeCAD
+        1.0.x can create a syntactically valid but geometrically ineffective
+        Hole in that configuration. Use ``create_cylindrical_cut`` for radial,
+        tangent-plane, or otherwise off-face cylindrical cuts.
+
         Args:
             sketch_name: Name of an unused sketch with hole-location circles.
+                Prefer attachment to ``Object.FaceN`` of the solid being cut.
             diameter: Hole diameter for non-threaded holes. Defaults to 6.0.
             depth: Hole depth for ``Dimension`` holes. Defaults to 10.0.
             hole_type: Depth type: ``Dimension`` or ``ThroughAll``.
@@ -893,12 +1038,13 @@ _result_ = {{
                 document if None. A missing document is never created silently.
 
         Returns:
-            Dictionary with created groove information:
+            Dictionary with created hole information:
                 - name: Hole name
                 - label: Hole label
                 - type_id: Object type
                 - validated: Check if the result has a valid shape
                 - removed_volume: Removed volume of the body
+                - support_kind: ``planar_face`` or ``body_origin_plane``
         """
         if diameter <= 0:
             raise ValueError("Hole diameter must be greater than zero")
@@ -945,6 +1091,8 @@ _result_ = {{
         bridge = await get_bridge()
 
         code = f"""
+import Part
+
 {BODY_RUNTIME_HELPERS}
 
 {FEATURE_VALIDATION_RUNTIME_HELPERS}
@@ -1035,6 +1183,95 @@ if base_volume <= 0:
     raise ValueError("Base feature has zero volume")
 volume_tolerance = max(1e-7, abs(base_volume) * 1e-9)
 
+# Classify sketch support before creating the Hole. Datum planes look valid at
+# the object/property level but repeatedly produce no-op Hole features in
+# FreeCAD 1.0.x. Fail early with the correct alternative instead of making the
+# agent try Reversed, Face1, and other attachment permutations blindly.
+support_object = None
+support_sub_elements = []
+attachment = getattr(sketch, "AttachmentSupport", None)
+if attachment:
+    try:
+        support_object, support_sub_elements = attachment[0]
+    except Exception:
+        pass
+elif hasattr(sketch, "Support") and sketch.Support:
+    try:
+        support_object, support_sub_elements = sketch.Support
+    except Exception:
+        pass
+
+support_name = getattr(support_object, "Name", None)
+support_type = getattr(support_object, "TypeId", None)
+support_sub_element = None
+try:
+    if support_sub_elements:
+        support_sub_element = str(support_sub_elements[0])
+except Exception:
+    support_sub_element = None
+
+if support_type == "PartDesign::Plane":
+    raise ValueError(
+        "create_hole does not support a sketch attached to a PartDesign datum "
+        f"plane reliably in FreeCAD 1.0.x (support={{support_name!r}}). "
+        "Use create_cylindrical_cut with an explicit axis_origin, "
+        "axis_direction, diameter, and depth. A datum plane may still be used "
+        "to derive that origin and direction."
+    )
+
+support_kind = "unknown"
+if support_sub_element and support_sub_element.startswith("Face"):
+    support_kind = "planar_face"
+    shape = getattr(support_object, "Shape", None)
+    try:
+        support_face = shape.getElement(support_sub_element)
+    except Exception as exc:
+        raise ValueError(
+            f"Hole sketch support face is unavailable: "
+            f"{{support_name}}.{{support_sub_element}}"
+        ) from exc
+    surface_name = type(getattr(support_face, "Surface", None)).__name__
+    surface_type = getattr(getattr(support_face, "Surface", None), "TypeId", "")
+    if "Plane" not in surface_name and surface_type != "Part::GeomPlane":
+        raise ValueError(
+            "create_hole requires a planar support face. "
+            f"Received {{support_name}}.{{support_sub_element}} "
+            f"with surface type {{surface_type or surface_name!r}}. "
+            "Use create_cylindrical_cut for an arbitrary cylindrical cut."
+        )
+elif support_name and any(
+    token in support_name for token in ("XY_Plane", "XZ_Plane", "YZ_Plane")
+):
+    support_kind = "body_origin_plane"
+elif support_object is None:
+    raise ValueError(
+        "Hole sketch is not attached to a support. Attach it to a planar face "
+        "of the solid, or use create_cylindrical_cut for an off-face cut."
+    )
+
+try:
+    sketch_global_placement = sketch.getGlobalPlacement()
+except Exception:
+    sketch_global_placement = sketch.Placement
+sketch_normal = sketch_global_placement.Rotation.multVec(
+    FreeCAD.Vector(0, 0, 1)
+)
+if sketch_normal.Length <= 1e-12:
+    raise ValueError("Hole sketch has an invalid zero-length normal")
+sketch_normal.normalize()
+circle_world_centers = []
+for index, geometry in enumerate(sketch.Geometry):
+    try:
+        if sketch.getConstruction(index):
+            continue
+    except Exception:
+        pass
+    if getattr(geometry, "TypeId", "") != "Part::GeomCircle":
+        continue
+    circle_world_centers.append(
+        sketch_global_placement.multVec(geometry.Center)
+    )
+
 
 
 hole = None
@@ -1103,14 +1340,52 @@ try:
             hole,
             body,
             base_shape,
-            expected_removed_solid_count=profile_circle_count,
             volume_tolerance=volume_tolerance,
         )
+
+        # Validate each intended hole location geometrically. Counting solids in
+        # base_shape.cut(result) is brittle: one valid through-hole can be split
+        # into multiple BRep solids at the sketch plane. A probe around every
+        # circle axis directly proves that each requested location removed
+        # material without requiring a topology-specific solid count.
+        circle_probe_volumes = []
+        if validation["ok"]:
+            removed_shape = base_shape.cut(hole.Shape)
+            bounds = base_shape.BoundBox
+            diagonal = (
+                bounds.XLength ** 2
+                + bounds.YLength ** 2
+                + bounds.ZLength ** 2
+            ) ** 0.5
+            probe_half_length = max(float({depth}), diagonal + float({depth}))
+            probe_radius = float({diameter}) / 2.0 * 1.000001
+            for center in circle_world_centers:
+                probe_start = center - sketch_normal * probe_half_length
+                probe = Part.makeCylinder(
+                    probe_radius,
+                    probe_half_length * 2.0,
+                    probe_start,
+                    sketch_normal,
+                )
+                probe_volume = float(removed_shape.common(probe).Volume)
+                circle_probe_volumes.append(probe_volume)
+            missing_locations = [
+                index
+                for index, probe_volume in enumerate(circle_probe_volumes)
+                if probe_volume <= volume_tolerance
+            ]
+            if missing_locations:
+                validation["ok"] = False
+                validation["reasons"].append(
+                    "no material was removed at circle index(es): "
+                    + ", ".join(str(index) for index in missing_locations)
+                )
         attempts.append({{
             "reversed": bool(direction),
             "ok": validation["ok"],
             "reasons": validation["reasons"],
             "status": validation["status"],
+            "circle_probe_volumes": circle_probe_volumes,
         }})
         if validation["ok"]:
             selected = {{
@@ -1119,6 +1394,7 @@ try:
                 "solid_count": validation["solid_count"],
                 "removed_solid_count": validation["removed_solid_count"],
                 "shape_valid": validation["shape_valid"],
+                "circle_probe_volumes": circle_probe_volumes,
             }}
             break
 
@@ -1130,11 +1406,11 @@ try:
         )
         raise ValueError(
             "Hole produced no valid subtractive result in the tested direction(s). "
-            f"Sketch support={{getattr(sketch, 'Support', None)!s}}; "
-            f"attachment support={{getattr(sketch, 'AttachmentSupport', None)!s}}. "
-            "Check that the sketch is attached to a face of the preceding solid, "
-            "every circle center lies over material, and the sketch plane "
-            "intersects the body. " + details
+            f"Support={{support_name!r}}; sub-element={{support_sub_element!r}}; "
+            f"support kind={{support_kind}}. Attach the sketch to an actual "
+            "planar face of the solid when possible. For radial or off-face "
+            "cuts, use create_cylindrical_cut instead of moving the Hole sketch "
+            "between origin and datum planes. " + details
         )
 
     removed_volume = base_volume - selected["result_volume"]
@@ -1164,24 +1440,214 @@ _result_ = {{
     "label": hole.Label,
     "type_id": hole.TypeId,
     "validated": True,
-    "removed_volume": removed_volume
+    "profile_circle_count": profile_circle_count,
+    "base_feature": base_feature.Name,
+    "base_volume": base_volume,
+    "result_volume": selected["result_volume"],
+    "removed_volume": removed_volume,
+    "solid_count": selected["solid_count"],
+    "reversed": selected["reversed"],
+    "depth_type": str(hole.DepthType),
+    "depth": float(hole.Depth) if {depth_type!r} == "Dimension" else None,
+    "effective_diameter": float(getattr(hole, "Diameter", {diameter})),
+    "drill_point": str(getattr(hole, "DrillPoint", "")),
+    "threaded": bool(hole.Threaded),
+    "support_kind": support_kind,
+    "support_object": support_name,
+    "support_sub_element": support_sub_element,
+    "circle_probe_volumes": selected["circle_probe_volumes"],
 }}
 """
         result = await bridge.execute_python(code)
         if not result.success:
             raise ValueError(result.error_traceback or "Hole creation failed")
 
-        payload = result.result
-        if not isinstance(payload, dict):
-            raise ValueError("Hole validation returned an invalid response payload")
-        if (
-            payload.get("validated") is not True
-            or float(payload.get("removed_volume", 0.0)) <= 0.0
-        ):
+        return require_subtractive_result(result.result, "Hole")
+
+    @mcp.tool()
+    async def create_cylindrical_cut(
+        body_name: str,
+        axis_origin: list[float],
+        axis_direction: list[float],
+        diameter: float,
+        depth: float,
+        name: str | None = None,
+        doc_name: str | None = None,
+    ) -> dict[str, Any]:
+        """Create a validated cylindrical cut with an explicit world-space axis.
+
+        Use this tool for radial holes, tangent-plane holes, oil passages, and
+        other cylindrical cuts that do not start from an actual planar face.
+        Unlike ``create_hole``, it does not require a sketch or datum-plane
+        attachment. The cylinder starts at ``axis_origin`` and extends by
+        ``depth`` along the normalized ``axis_direction``.
+
+        Args:
+            body_name: Existing PartDesign Body to cut.
+            axis_origin: World-space start point ``[x, y, z]`` in millimetres.
+            axis_direction: World-space cutting direction ``[dx, dy, dz]``.
+            diameter: Cylinder diameter in millimetres.
+            depth: Cut depth in millimetres.
+            name: Feature name. Defaults to ``CylindricalCut``.
+            doc_name: Existing document containing the Body. Uses the active
+                document if None. A missing document is never created silently.
+
+        Returns:
+            Validation evidence including removed volume, final solid count,
+            normalized axis direction, origin, diameter, and depth.
+        """
+        if len(axis_origin) != 3:
+            raise ValueError("axis_origin must contain exactly three coordinates")
+        if len(axis_direction) != 3:
+            raise ValueError("axis_direction must contain exactly three components")
+        if diameter <= 0:
+            raise ValueError("Cylindrical cut diameter must be greater than zero")
+        if depth <= 0:
+            raise ValueError("Cylindrical cut depth must be greater than zero")
+
+        try:
+            resolved_origin = [float(value) for value in axis_origin]
+            resolved_direction = [float(value) for value in axis_direction]
+        except (TypeError, ValueError) as exc:
             raise ValueError(
-                "Hole validation contract was not satisfied: " + repr(payload)
+                "axis_origin and axis_direction must contain numeric values"
+            ) from exc
+        direction_norm = sum(value * value for value in resolved_direction) ** 0.5
+        if direction_norm <= 1e-12:
+            raise ValueError("axis_direction must be non-zero")
+
+        bridge = await get_bridge()
+        code = f"""
+import Part
+
+{BODY_RUNTIME_HELPERS}
+
+{FEATURE_VALIDATION_RUNTIME_HELPERS}
+
+requested_doc_name = {doc_name!r}
+doc = (
+    FreeCAD.listDocuments().get(requested_doc_name)
+    if requested_doc_name is not None
+    else FreeCAD.ActiveDocument
+)
+if doc is None:
+    raise ValueError(
+        "Document not found. create_cylindrical_cut requires an existing "
+        "document; it will not create one implicitly."
+    )
+
+body = doc.getObject({body_name!r})
+if body is None:
+    raise ValueError(f"Body not found: {body_name!r}")
+if body.TypeId != "PartDesign::Body":
+    raise ValueError(
+        f"Object {body_name!r} is not a PartDesign Body: {{body.TypeId}}"
+    )
+
+base_feature = body.Tip
+base_shape = getattr(base_feature, "Shape", None)
+if (
+    base_feature is None
+    or base_shape is None
+    or base_shape.isNull()
+    or not base_shape.isValid()
+    or len(base_shape.Solids) != 1
+    or float(base_shape.Volume) <= 0
+):
+    raise ValueError(
+        "create_cylindrical_cut requires a valid single-solid Body Tip"
+    )
+base_shape = base_shape.copy()
+base_volume = float(base_shape.Volume)
+volume_tolerance = max(1e-7, abs(base_volume) * 1e-9)
+
+origin = FreeCAD.Vector(*{resolved_origin!r})
+direction = FreeCAD.Vector(*{resolved_direction!r})
+if direction.Length <= 1e-12:
+    raise ValueError("axis_direction must be non-zero")
+direction.normalize()
+
+original_tip_name = getattr(body.Tip, "Name", None)
+created_name = None
+doc.openTransaction("Create validated cylindrical cut")
+try:
+    cut_name = {name!r} or "CylindricalCut"
+    cut = body.newObject("PartDesign::SubtractiveCylinder", cut_name)
+    created_name = cut.Name
+    cut.Radius = float({diameter}) / 2.0
+    cut.Height = float({depth})
+    if hasattr(cut, "Angle"):
+        cut.Angle = 360.0
+    cut.Placement = FreeCAD.Placement(
+        origin,
+        FreeCAD.Rotation(FreeCAD.Vector(0, 0, 1), direction),
+    )
+    doc.recompute()
+
+    validation = _validate_subtractive_feature(
+        cut,
+        body,
+        base_shape,
+        volume_tolerance=volume_tolerance,
+    )
+    if not validation["ok"]:
+        details = "; ".join(validation["reasons"])
+        raise ValueError(
+            "Cylindrical cut failed: " + details + ". Check that the axis "
+            "starts at or outside the material, points through the Body, and "
+            "uses sufficient depth."
+        )
+
+    # Confirm that material was removed specifically along the requested axis.
+    requested_tool = Part.makeCylinder(
+        float({diameter}) / 2.0,
+        float({depth}),
+        origin,
+        direction,
+    )
+    removed_shape = base_shape.cut(cut.Shape)
+    axis_removed_volume = float(removed_shape.common(requested_tool).Volume)
+    if axis_removed_volume <= volume_tolerance:
+        raise ValueError(
+            "Cylindrical cut changed the Body but removed no material along "
+            "the requested axis"
+        )
+
+    doc.commitTransaction()
+except Exception:
+    try:
+        doc.abortTransaction()
+    finally:
+        _cleanup_failed_partdesign_feature(
+            doc,
+            body,
+            created_name,
+            original_tip_name,
+        )
+    raise
+
+_result_ = {{
+    "name": cut.Name,
+    "label": cut.Label,
+    "type_id": cut.TypeId,
+    "validated": True,
+    "base_volume": base_volume,
+    "result_volume": validation["result_volume"],
+    "removed_volume": validation["removed_volume"],
+    "axis_removed_volume": axis_removed_volume,
+    "solid_count": validation["solid_count"],
+    "axis_origin": [origin.x, origin.y, origin.z],
+    "axis_direction": [direction.x, direction.y, direction.z],
+    "diameter": float({diameter}),
+    "depth": float({depth}),
+}}
+"""
+        result = await bridge.execute_python(code)
+        if not result.success:
+            raise ValueError(
+                result.error_traceback or "Cylindrical cut creation failed"
             )
-        return payload
+        return require_subtractive_result(result.result, "Cylindrical cut")
 
     @mcp.tool()
     async def linear_pattern(
@@ -1651,6 +2117,8 @@ _result_ = {{
         code = f"""
 {BODY_RUNTIME_HELPERS}
 
+{FEATURE_VALIDATION_RUNTIME_HELPERS}
+
 doc = (
     FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
     else FreeCAD.ActiveDocument
@@ -1672,31 +2140,50 @@ body = _find_body_containing_object(doc, sketches[0])
 if body is None:
     raise ValueError("Sketches must be inside a PartDesign Body for Loft operation")
 
+base_feature = _find_preceding_single_solid_feature(body, sketches[0])
+base_shape = base_feature.Shape.copy() if base_feature is not None else None
+
+original_tip_name = getattr(body.Tip, "Name", None)
+created_loft_name = None
 # Wrap in transaction for undo support
 doc.openTransaction("Loft Sketches")
 try:
     loft_name = {name!r} or "Loft"
     loft = body.newObject("PartDesign::AdditiveLoft", loft_name)
+    created_loft_name = loft.Name
     loft.Profile = sketches[0]
     loft.Sections = sketches[1:]
     loft.Ruled = {ruled}
     loft.Closed = {closed}
 
     doc.recompute()
+    validation = _validate_additive_feature(loft, body, base_shape)
+    if not validation["ok"]:
+        raise ValueError("Loft failed: " + "; ".join(validation["reasons"]))
     doc.commitTransaction()
 except Exception:
-    doc.abortTransaction()
+    try:
+        doc.abortTransaction()
+    finally:
+        _cleanup_failed_partdesign_feature(
+            doc, body, created_loft_name, original_tip_name
+        )
     raise
 
 _result_ = {{
     "name": loft.Name,
     "label": loft.Label,
     "type_id": loft.TypeId,
+    "validated": validation["ok"],
+    "base_volume": validation["base_volume"],
+    "result_volume": validation["result_volume"],
+    "added_volume": validation["added_volume"],
+    "solid_count": validation["solid_count"],
 }}
 """
         result = await bridge.execute_python(code)
         if result.success:
-            return result.result
+            return require_additive_result(result.result, 'Loft')
         raise ValueError(result.error_traceback or "Loft failed")
 
     @mcp.tool()
@@ -1743,6 +2230,8 @@ _result_ = {{
         code = f"""
 {BODY_RUNTIME_HELPERS}
 
+{FEATURE_VALIDATION_RUNTIME_HELPERS}
+
 doc = (
     FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None
     else FreeCAD.ActiveDocument
@@ -1762,30 +2251,49 @@ body = _find_body_containing_object(doc, profile)
 if body is None:
     raise ValueError("Sketches must be inside a PartDesign Body for Sweep operation")
 
+base_feature = _find_preceding_single_solid_feature(body, profile)
+base_shape = base_feature.Shape.copy() if base_feature is not None else None
+
+original_tip_name = getattr(body.Tip, "Name", None)
+created_sweep_name = None
 # Wrap in transaction for undo support
 doc.openTransaction("Sweep Sketch")
 try:
     sweep_name = {name!r} or "Sweep"
     sweep = body.newObject("PartDesign::AdditivePipe", sweep_name)
+    created_sweep_name = sweep.Name
     sweep.Profile = profile
     sweep.Spine = (spine, ["Edge1"])
     sweep.Transition = {transition_map[transition]}
 
     doc.recompute()
+    validation = _validate_additive_feature(sweep, body, base_shape)
+    if not validation["ok"]:
+        raise ValueError("Sweep failed: " + "; ".join(validation["reasons"]))
     doc.commitTransaction()
 except Exception:
-    doc.abortTransaction()
+    try:
+        doc.abortTransaction()
+    finally:
+        _cleanup_failed_partdesign_feature(
+            doc, body, created_sweep_name, original_tip_name
+        )
     raise
 
 _result_ = {{
     "name": sweep.Name,
     "label": sweep.Label,
     "type_id": sweep.TypeId,
+    "validated": validation["ok"],
+    "base_volume": validation["base_volume"],
+    "result_volume": validation["result_volume"],
+    "added_volume": validation["added_volume"],
+    "solid_count": validation["solid_count"],
 }}
 """
         result = await bridge.execute_python(code)
         if result.success:
-            return result.result
+            return require_additive_result(result.result, 'Sweep')
         raise ValueError(result.error_traceback or "Sweep failed")
 
     # =========================================================================

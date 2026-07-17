@@ -4,7 +4,12 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from freecad_mcp.bridge.base import ExecutionResult, ScreenshotResult, WorkbenchInfo
+from freecad_mcp.bridge.base import (
+    ExecutionResult,
+    ScreenshotResult,
+    ViewAngle,
+    WorkbenchInfo,
+)
 
 
 class TestViewTools:
@@ -84,6 +89,66 @@ class TestViewTools:
 
         assert result["width"] == 1920
         assert result["height"] == 1080
+
+
+    @pytest.mark.asyncio
+    async def test_get_screenshot_can_save_without_returning_base64(
+        self, register_tools, mock_bridge
+    ):
+        """Disk screenshots should expose the verified path and file size."""
+        mock_bridge.get_screenshot = AsyncMock(
+            return_value=ScreenshotResult(
+                success=True,
+                data=None,
+                format="png",
+                width=1024,
+                height=768,
+                path="/tmp/bracket.png",
+                saved_to_disk=True,
+                file_size=2048,
+            )
+        )
+
+        get_screenshot = register_tools["get_screenshot"]
+        result = await get_screenshot(
+            view_angle="Front",
+            width=1024,
+            height=768,
+            save_to_disk=True,
+            output_path="/tmp/bracket.png",
+            return_data=False,
+        )
+
+        assert result["success"] is True
+        assert result["data"] is None
+        assert result["saved_to_disk"] is True
+        assert result["path"] == "/tmp/bracket.png"
+        assert result["file_size"] == 2048
+        mock_bridge.get_screenshot.assert_awaited_once_with(
+            view_angle=ViewAngle.FRONT,
+            width=1024,
+            height=768,
+            doc_name=None,
+            fit_all=True,
+            background="White",
+            save_to_disk=True,
+            output_path="/tmp/bracket.png",
+            return_data=False,
+        )
+
+    @pytest.mark.asyncio
+    async def test_get_screenshot_rejects_unused_output_path(
+        self, register_tools, mock_bridge
+    ):
+        """An output path without disk saving is an ambiguous request."""
+        result = await register_tools["get_screenshot"](
+            output_path="unused.png",
+            save_to_disk=False,
+        )
+
+        assert result["success"] is False
+        assert "requires save_to_disk" in result["error"]
+        mock_bridge.get_screenshot.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_get_screenshot_headless_error(self, register_tools, mock_bridge):

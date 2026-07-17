@@ -28,7 +28,8 @@ FreeCAD documents the topological naming problem and recommends modeling practic
 - [ ] Add `preview_feature` / `dry_run_feature` that reports direction, expected bounds, intersection volume, and resulting solid count before committing.
 - [ ] Add explicit world-space direction vectors and `direction="auto"` for Pad, Pocket, Revolution, Hole, and datum offsets.
 - [ ] Add `create_simple_holes` for one or many circle centers and automatic support/direction selection.
-- [ ] Add `create_cylindrical_cut` for radial or datum-plane holes where PartDesign Hole is unnecessarily fragile.
+- [x] Add `create_cylindrical_cut` for radial or datum-plane holes where PartDesign Hole is unnecessarily fragile.
+- [x] Reject datum-plane `create_hole` calls early with an actionable alternative, validate each circle location by probe volume, and prefer actual planar-face support.
 - [ ] Add feature suppression, safe reordering, replace-feature, and checkpoint/restore operations.
 - [ ] Add design-history rules such as “all additive features before all holes” with configurable exceptions.
 

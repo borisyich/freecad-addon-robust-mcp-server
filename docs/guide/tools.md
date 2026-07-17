@@ -188,6 +188,7 @@ The Part workbench provides direct shape creation and manipulation tools using O
 | `pocket_sketch`                      | Cut by extruding sketch      |
 | `groove_sketch`                      | Cut by revolving sketch      |
 | `create_hole`                        | Create parametric holes      |
+| `create_cylindrical_cut`             | Create radial/off-face cylindrical cuts |
 | `partdesign_create_subtractive_pipe` | Subtractive pipe/sweep       |
 | `partdesign_create_subtractive_loft` | Subtractive loft             |
 
@@ -371,7 +372,7 @@ Tools marked with **GUI** only work when FreeCAD is running in GUI mode.
 
 | Tool                    | Mode | Description                        |
 | ----------------------- | ---- | ---------------------------------- |
-| `get_screenshot`        | GUI  | Capture 3D view screenshot         |
+| `get_screenshot`        | GUI  | Reliable capture, optional disk save |
 | `set_view_angle`        | Both | Set camera angle                   |
 | `fit_all`               | Both | Fit all objects in view            |
 | `zoom_in`               | GUI  | Zoom in                            |

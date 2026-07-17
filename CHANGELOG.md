@@ -5,6 +5,8 @@
 - Added effective-volume validation and rollback for Pad, Revolution, Additive Loft, and Additive Pipe.
 - Reworked screenshots to activate the target 3D view, fit and refresh the GUI, verify image output, and optionally save without returning base64.
 - Added engineering-agent modeling rules, a tooling roadmap, and a full bracket integration regression.
+- Added `create_cylindrical_cut` for validated radial and off-face holes with an explicit world-space axis.
+- Extended `create_sketch` to accept explicit `Object.FaceN` and datum-plane object names.
 
 
 This project uses **component-specific versioning**. Each component has its own
