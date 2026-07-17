@@ -414,6 +414,7 @@ _result_ = {{
         length: float,
         symmetric: bool = False,
         reversed: bool = False,
+        direction: list[float] | None = None,
         name: str | None = None,
         doc_name: str | None = None,
     ) -> dict[str, Any]:
@@ -423,7 +424,11 @@ _result_ = {{
             sketch_name: Name of the sketch to pad.
             length: Pad length (extrusion distance).
             symmetric: Whether to extrude symmetrically. Defaults to False.
-            reversed: Whether to reverse direction. Defaults to False.
+            reversed: Whether to reverse direction when ``direction`` is not supplied.
+            direction: Optional desired world-space extrusion direction ``[x, y, z]``.
+                The tool resolves ``Reversed`` from the sketch global normal and rejects
+                directions perpendicular to the sketch. Prefer this for direction-sensitive
+                features instead of guessing ``reversed``.
             name: Pad feature name. Auto-generated if None.
             doc_name: Document containing the sketch. Uses active document if None.
 
@@ -434,9 +439,7 @@ _result_ = {{
                 - type_id: Object type
                 - validated: Whether the additive result passed validation
                 - added_volume: Effective volume added to the Body
-                - base_volume: Volume before the operation, or None for first feature
-                - result_volume: Volume after the operation
-                - solid_count: Number of solids in the result (must be one)
+                - effective_direction: Actual extrusion direction in world coordinates
         """
         bridge = await get_bridge()
 
@@ -472,10 +475,42 @@ try:
     created_pad_name = pad.Name
     pad.Profile = sketch
     pad.Length = {length}
-    # FreeCAD 1.0 uses Midplane instead of Symmetric
+    # Resolve the direction from the sketch global normal. Plane orientation can
+    # differ between support types and FreeCAD builds, so callers may supply an
+    # explicit world-space direction instead of guessing Reversed.
+    sketch_normal_vec = sketch.getGlobalPlacement().Rotation.multVec(
+        FreeCAD.Vector(0, 0, 1)
+    )
+    if sketch_normal_vec.Length <= 1e-12:
+        raise ValueError("Could not resolve sketch global normal")
+    sketch_normal_vec.normalize()
+    requested_direction = {direction!r}
+    resolved_reversed = bool({reversed})
+    if requested_direction is not None:
+        if len(requested_direction) != 3:
+            raise ValueError("direction must contain exactly three numbers")
+        desired_vec = FreeCAD.Vector(*[float(v) for v in requested_direction])
+        if desired_vec.Length <= 1e-12:
+            raise ValueError("direction must be a non-zero vector")
+        desired_vec.normalize()
+        alignment = sketch_normal_vec.dot(desired_vec)
+        if abs(alignment) < 1.0 - 1e-3:
+            raise ValueError(
+                "direction must be parallel to the sketch normal; "
+                f"sketch_normal=({{sketch_normal_vec.x:.3g}}, "
+                f"{{sketch_normal_vec.y:.3g}}, {{sketch_normal_vec.z:.3g}}), "
+                f"requested=({{desired_vec.x:.3g}}, {{desired_vec.y:.3g}}, "
+                f"{{desired_vec.z:.3g}})"
+            )
+        resolved_reversed = alignment < 0
+    # FreeCAD 1.0 uses Midplane instead of Symmetric. Direction is immaterial
+    # for a midplane pad, but we still report the resolved normal consistently.
     if {symmetric}:
         pad.Midplane = True
-    pad.Reversed = {reversed}
+    pad.Reversed = resolved_reversed
+    effective_direction_vec = (
+        sketch_normal_vec * -1.0 if resolved_reversed else sketch_normal_vec
+    )
 
     doc.recompute()
     validation = _validate_additive_feature(pad, body, base_shape)
@@ -496,10 +531,12 @@ _result_ = {{
     "label": pad.Label,
     "type_id": pad.TypeId,
     "validated": validation["ok"],
-    "base_volume": validation["base_volume"],
-    "result_volume": validation["result_volume"],
     "added_volume": validation["added_volume"],
-    "solid_count": validation["solid_count"],
+    "effective_direction": [
+        float(effective_direction_vec.x),
+        float(effective_direction_vec.y),
+        float(effective_direction_vec.z),
+    ],
 }}
 """
         result = await bridge.execute_python(code)
@@ -799,6 +836,7 @@ _result_ = {{
                 - label: Revolution label
                 - type_id: Object type
                 - validated: Check if the result has a valid shape
+                - added_volume: Effective volume added to the Body
         """
         bridge = await get_bridge()
 
@@ -871,10 +909,7 @@ _result_ = {{
     "label": rev.Label,
     "type_id": rev.TypeId,
     "validated": validation["ok"],
-    "base_volume": validation["base_volume"],
-    "result_volume": validation["result_volume"],
     "added_volume": validation["added_volume"],
-    "solid_count": validation["solid_count"],
 }}
 """
         result = await bridge.execute_python(code)
@@ -1044,7 +1079,6 @@ _result_ = {{
                 - type_id: Object type
                 - validated: Check if the result has a valid shape
                 - removed_volume: Removed volume of the body
-                - support_kind: ``planar_face`` or ``body_origin_plane``
         """
         if diameter <= 0:
             raise ValueError("Hole diameter must be greater than zero")
@@ -1440,22 +1474,7 @@ _result_ = {{
     "label": hole.Label,
     "type_id": hole.TypeId,
     "validated": True,
-    "profile_circle_count": profile_circle_count,
-    "base_feature": base_feature.Name,
-    "base_volume": base_volume,
-    "result_volume": selected["result_volume"],
     "removed_volume": removed_volume,
-    "solid_count": selected["solid_count"],
-    "reversed": selected["reversed"],
-    "depth_type": str(hole.DepthType),
-    "depth": float(hole.Depth) if {depth_type!r} == "Dimension" else None,
-    "effective_diameter": float(getattr(hole, "Diameter", {diameter})),
-    "drill_point": str(getattr(hole, "DrillPoint", "")),
-    "threaded": bool(hole.Threaded),
-    "support_kind": support_kind,
-    "support_object": support_name,
-    "support_sub_element": support_sub_element,
-    "circle_probe_volumes": selected["circle_probe_volumes"],
 }}
 """
         result = await bridge.execute_python(code)
@@ -1493,8 +1512,12 @@ _result_ = {{
                 document if None. A missing document is never created silently.
 
         Returns:
-            Validation evidence including removed volume, final solid count,
-            normalized axis direction, origin, diameter, and depth.
+            Dictionary with created cylindrical cut information:
+                - name: Cylindrical cut name
+                - label: Cylindrical cut label
+                - type_id: Object type
+                - validated: Check if the result has a valid shape
+                - removed_volume: Removed volume of the body
         """
         if len(axis_origin) != 3:
             raise ValueError("axis_origin must contain exactly three coordinates")
@@ -1631,15 +1654,7 @@ _result_ = {{
     "label": cut.Label,
     "type_id": cut.TypeId,
     "validated": True,
-    "base_volume": base_volume,
-    "result_volume": validation["result_volume"],
     "removed_volume": validation["removed_volume"],
-    "axis_removed_volume": axis_removed_volume,
-    "solid_count": validation["solid_count"],
-    "axis_origin": [origin.x, origin.y, origin.z],
-    "axis_direction": [direction.x, direction.y, direction.z],
-    "diameter": float({diameter}),
-    "depth": float({depth}),
 }}
 """
         result = await bridge.execute_python(code)
@@ -2111,6 +2126,8 @@ _result_ = {{
                 - name: Loft name
                 - label: Loft label
                 - type_id: Object type
+                - validated: Check if the result has a valid shape
+                - added_volume: Effective volume added to the Body
         """
         bridge = await get_bridge()
 
@@ -2175,10 +2192,7 @@ _result_ = {{
     "label": loft.Label,
     "type_id": loft.TypeId,
     "validated": validation["ok"],
-    "base_volume": validation["base_volume"],
-    "result_volume": validation["result_volume"],
     "added_volume": validation["added_volume"],
-    "solid_count": validation["solid_count"],
 }}
 """
         result = await bridge.execute_python(code)
@@ -2213,6 +2227,8 @@ _result_ = {{
                 - name: Sweep name
                 - label: Sweep label
                 - type_id: Object type
+                - validated: Check if the result has a valid shape
+                - added_volume: Effective volume added to the Body
         """
         bridge = await get_bridge()
 
@@ -2285,10 +2301,7 @@ _result_ = {{
     "label": sweep.Label,
     "type_id": sweep.TypeId,
     "validated": validation["ok"],
-    "base_volume": validation["base_volume"],
-    "result_volume": validation["result_volume"],
     "added_volume": validation["added_volume"],
-    "solid_count": validation["solid_count"],
 }}
 """
         result = await bridge.execute_python(code)

@@ -569,7 +569,7 @@ solid or the Body volume fails to increase.
 
 #### pad_sketch
 
-Extrude a sketch to create material.
+Extrude a sketch to create material. For direction-sensitive pads, prefer `direction=[x, y, z]`; the tool resolves `Reversed` from the sketch global normal and reports the effective world-space direction.
 
 ```python
 pad_sketch(
@@ -577,6 +577,7 @@ pad_sketch(
     length: float,
     symmetric: bool = False,
     reversed: bool = False,
+    direction: list[float] | None = None,  # desired world-space direction
     name: str | None = None,
     doc_name: str | None = None
 ) -> dict
@@ -660,6 +661,12 @@ groove_sketch(
 
 #### create_hole
 
+Create parametric holes with optional threading and strict post-validation. Use a new sketch containing only non-construction circles. Prefer attachment to an actual planar solid face such as `Pad_Base.Face8`; origin planes are allowed but may be ambiguous in a complex Body. Datum-plane sketches are rejected because `PartDesign::Hole` can become a geometrically ineffective no-op in FreeCAD 1.0.x. Use `create_cylindrical_cut` for radial or off-face holes.
+
+The call rolls back unless the result is one valid solid, body volume decreases,
+and geometric probes confirm that material was removed at every profile-circle
+location. A sketch can be consumed only once.
+
 ```python
 create_hole(
     sketch_name: str,        # Unused sketch with non-construction circles
@@ -676,8 +683,11 @@ create_hole(
 ) -> dict
 ```
 
-
 #### create_cylindrical_cut
+
+Create a cylindrical cut from an explicit world-space start point and axis.
+This is the preferred tool for radial oil holes, tangent-plane holes, and other
+cuts that do not start from an actual planar face. A datum plane is not needed.
 
 ```python
 create_cylindrical_cut(

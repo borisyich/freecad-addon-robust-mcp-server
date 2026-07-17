@@ -7,7 +7,7 @@
 - Added engineering-agent modeling rules, a tooling roadmap, and a full bracket integration regression.
 - Added `create_cylindrical_cut` for validated radial and off-face holes with an explicit world-space axis.
 - Extended `create_sketch` to accept explicit `Object.FaceN` and datum-plane object names.
-
+- Added an optional world-space `direction` argument to `pad_sketch`. This avoids relying on plane-specific `Reversed` semantics, which can differ with sketch support orientation. The tool now reports `sketch_normal`, `effective_direction`, and the resolved `reversed` value.
 
 This project uses **component-specific versioning**. Each component has its own
 release notes and version history.

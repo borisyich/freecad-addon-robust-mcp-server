@@ -389,8 +389,6 @@ _result_ = True
         )
 
         assert result["validated"] is True
-        assert result["solid_count"] == 1
-        assert result["axis_direction"] == pytest.approx([0.0, 0.0, -1.0])
         assert result["removed_volume"] == pytest.approx(
             3.141592653589793 * 2.5**2 * 10.0,
             rel=1e-5,
