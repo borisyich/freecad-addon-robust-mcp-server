@@ -125,3 +125,5 @@ Thumbs.db
 
 # Debug tools
 artifacts/
+
+examples/
