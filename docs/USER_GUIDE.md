@@ -342,7 +342,7 @@ export_step(file_path="/path/to/bracket.step")
 Take a screenshot of the bracket from an isometric view
 ```
 
-Claude will use `get_screenshot(view_angle="Isometric")` to capture and display the result.
+The agent should use `get_screenshot(view_angle="Isometric", return_image=True)` so the pixels are returned as MCP image content. Use `open_image(path)` for drawings already stored on disk and `compare_images(reference_path, candidate_path)` for a labelled side-by-side check.
 
 ---
 

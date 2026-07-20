@@ -1322,6 +1322,8 @@ The following tools in `src/freecad_mcp/tools/view.py` check `FreeCAD.GuiUp`:
 - `zoom_in` / `zoom_out`
 - `set_camera_position`
 - `get_screenshot`
+- `open_image`
+- `compare_images`
 
 ### Implementing Transaction Support for Undo/Redo
 
@@ -2024,7 +2026,9 @@ The MCP server provides a `freecad://capabilities` resource that returns a compl
 
 | Tool                    | Description                                                 |
 | ----------------------- | ----------------------------------------------------------- |
-| `get_screenshot`        | Capture a screenshot of the 3D view. **Requires GUI mode.** |
+| `get_screenshot`        | Capture a view and return MCP image content. **Requires GUI mode.** |
+| `open_image`            | Open a local image and return MCP image content. |
+| `compare_images`        | Return a labelled side-by-side visual comparison. |
 | `set_view_angle`        | Set camera to standard views (front, top, isometric, etc.). |
 | `fit_all`               | Zoom to fit all objects in view.                            |
 | `zoom_in` / `zoom_out`  | Adjust zoom level.                                          |

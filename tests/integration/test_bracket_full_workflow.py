@@ -561,12 +561,16 @@ _result_ = {{
                 background="White",
                 save_to_disk=True,
                 output_path=str(screenshot_path),
+                return_image=True,
                 return_data=False,
             )
-            assert screenshot["success"] is True
-            assert screenshot["saved_to_disk"] is True
-            assert screenshot["path"] == str(screenshot_path.resolve())
-            assert screenshot["file_size"] > 0
+            metadata = screenshot.structuredContent
+            assert screenshot.isError is False
+            assert metadata["success"] is True
+            assert metadata["saved_to_disk"] is True
+            assert metadata["path"] == str(screenshot_path.resolve())
+            assert metadata["file_size"] > 0
+            assert any(item.type == "image" for item in screenshot.content)
             assert screenshot_path.is_file()
     finally:
         await _close_document(live_bridge, doc_name)

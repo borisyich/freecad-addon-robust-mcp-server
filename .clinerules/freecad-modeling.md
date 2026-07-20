@@ -9,6 +9,6 @@
 7. A datum plane only positions a sketch; it does not make `PartDesign::Hole` reliable. For radial, tangent-plane, or other off-face holes use `create_cylindrical_cut(axis_origin, axis_direction, diameter, depth)` instead of repeatedly changing Hole attachment or `reversed`.
 8. Prefer standard MCP tools. Use `safe_execute` only for a missing or demonstrably invalid tool, keep it local to one operation, and validate immediately.
 9. Do not guess `FaceN` or `EdgeN`. Inspect geometry and select by plane, normal, location, and adjacency; topology names are temporary. Use `FaceN` or `EdgeN` only if there are no no other ways to make a goal.
-10. After every major feature: recompute, inspect dimensions and volume, capture Isometric views, and compare with expected bounds.
+10. After every major feature: recompute, inspect dimensions and volume, then call `get_screenshot(return_image=True)` and actually inspect the returned pixels. For a drawing available only by path, call `open_image(path)` first. Use `compare_images(reference_path, candidate_path)` when both images are saved on disk.
 11. On failure, undo or remove only the failed feature, confirm the previous Tip and solid are restored, then correct the cause. Do not start another Body or document to hide an error.
 12. Before completion, verify feature order, expressions, one valid solid, overall dimensions.

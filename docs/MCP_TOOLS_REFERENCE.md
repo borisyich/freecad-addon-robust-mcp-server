@@ -892,11 +892,45 @@ get_screenshot(
     background: str = "White",
     save_to_disk: bool = False,
     output_path: str | None = None,
-    return_data: bool = True,
-) -> dict
+    return_image: bool = True,
+    return_data: bool = False,  # Legacy base64 metadata only
+) -> CallToolResult
 ```
 
+With `return_image=True`, the result contains real MCP `ImageContent`, so a
+multimodal agent can inspect the pixels. A path or base64 string shown as text
+is not equivalent to visual context.
+
 **View angles:** `Isometric`, `Front`, `Back`, `Top`, `Bottom`, `Left`, `Right`, `FitAll`
+
+#### open_image
+
+Open a local drawing or saved screenshot and return its pixels to the agent.
+
+```python
+open_image(path: str, max_dimension: int = 4096) -> CallToolResult
+```
+
+Supported formats: PNG, JPEG, WebP. Relative paths are resolved from the MCP
+server working directory. Local file access must be enabled.
+
+#### compare_images
+
+Create a labelled side-by-side image with `REFERENCE` on the left and
+`CANDIDATE` on the right, then return it as MCP `ImageContent`.
+
+```python
+compare_images(
+    reference_path: str,
+    candidate_path: str,
+    panel_width: int = 1200,
+    panel_height: int = 900,
+    output_path: str | None = None,
+) -> CallToolResult
+```
+
+This is a visual comparison aid; it does not claim automatic geometric
+alignment or a correctness score.
 
 ### View Control
 

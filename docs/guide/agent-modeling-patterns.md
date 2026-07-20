@@ -21,6 +21,7 @@ FreeCAD may create a feature object whose shape is valid while the intended Body
 
 ```python
 get_screenshot(
+    return_image=True,
     view_angle="Isometric",
     doc_name="PartDocument",
     fit_all=True,
@@ -31,7 +32,7 @@ get_screenshot(
 )
 ```
 
-Saving to disk without base64 keeps the agent context small while retaining a reproducible visual checkpoint.
+The image is returned as MCP `ImageContent` for actual visual inspection, while disk saving retains a reproducible checkpoint. Keep `return_data=False` so base64 is not duplicated as text metadata.
 
 ## Bracket regression
 

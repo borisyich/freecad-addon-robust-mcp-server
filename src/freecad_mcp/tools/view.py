@@ -8,6 +8,8 @@ has excellent screenshot handling with view type detection.
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from mcp.types import CallToolResult
+
 
 def register_view_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> None:
     """Register view-related tools with the Robust MCP Server.
@@ -27,15 +29,16 @@ def register_view_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> N
         background: str = "White",
         save_to_disk: bool = False,
         output_path: str | None = None,
-        return_data: bool = True,
-    ) -> dict[str, Any]:
-        """Capture a reliable screenshot of a FreeCAD 3D view.
+        return_image: bool = True,
+        return_data: bool = False,
+    ) -> CallToolResult:
+        """Capture a FreeCAD view and optionally return real MCP image content.
 
-        The target document is activated explicitly, the requested standard
-        view is selected, ``fitAll`` is applied by default, GUI events are
-        flushed, and FreeCAD's ``saveImage`` result is verified.  To avoid
-        returning a large base64 string to the agent, use ``save_to_disk=True``
-        together with ``return_data=False``.
+        ``return_image=True`` is the normal choice for an autonomous multimodal
+        agent: the screenshot is returned as MCP ``ImageContent`` and can be
+        interpreted directly. A filesystem path or base64 text alone is not
+        visual context. ``return_data`` is retained only for legacy callers that
+        explicitly need the base64 string in metadata.
 
         Args:
             view_angle: Isometric, Front, Back, Top, Bottom, Left, Right, or FitAll.
@@ -45,14 +48,17 @@ def register_view_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> N
             fit_all: Fit all visible objects after setting the view.
             background: FreeCAD saveImage mode: ``White`` or ``Current``.
             save_to_disk: Persist the PNG on disk.
-            output_path: Optional PNG path. When omitted, a file is created in
-                ``./screenshots`` in the FreeCAD process working directory.
-            return_data: Include base64 PNG data in the response.
+            output_path: Optional PNG path. When omitted, FreeCAD creates a file
+                under ``./screenshots`` when disk saving is enabled.
+            return_image: Return pixels as MCP ``ImageContent``. Defaults to True.
+            return_data: Also expose legacy base64 text in metadata. Avoid this for
+                agent vision because it wastes context and is not interpreted as an image.
 
         Returns:
-            Screenshot status, optional base64 data, and optional saved path.
+            A ``CallToolResult`` containing metadata and, when requested, an image.
         """
         from freecad_mcp.bridge.base import ViewAngle
+        from freecad_mcp.tools.images import image_error, image_tool_result
 
         angle_map = {
             "Isometric": ViewAngle.ISOMETRIC,
@@ -66,29 +72,20 @@ def register_view_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> N
         }
 
         if view_angle not in angle_map:
-            return {
-                "success": False,
-                "error": f"Invalid view_angle: {view_angle}. Options: {list(angle_map.keys())}",
-            }
+            return image_error(
+                f"Invalid view_angle: {view_angle}. Options: {list(angle_map.keys())}"
+            )
         if width <= 0 or height <= 0:
-            return {"success": False, "error": "width and height must be positive"}
+            return image_error("width and height must be positive")
         if background not in {"White", "Current"}:
-            return {
-                "success": False,
-                "error": "background must be 'White' or 'Current'",
-            }
+            return image_error("background must be 'White' or 'Current'")
         if output_path is not None and not save_to_disk:
-            return {
-                "success": False,
-                "error": "output_path requires save_to_disk=True",
-            }
-        if not save_to_disk and not return_data:
-            return {
-                "success": False,
-                "error": "Enable return_data or save_to_disk",
-            }
+            return image_error("output_path requires save_to_disk=True")
+        if not save_to_disk and not return_image and not return_data:
+            return image_error("Enable return_image, return_data, or save_to_disk")
 
         bridge = await get_bridge()
+        need_base64 = return_image or return_data
         result = await bridge.get_screenshot(
             view_angle=angle_map[view_angle],
             width=width,
@@ -98,12 +95,13 @@ def register_view_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> N
             background=background,
             save_to_disk=save_to_disk,
             output_path=output_path,
-            return_data=return_data,
+            return_data=need_base64,
         )
 
-        return {
+        metadata = {
             "success": result.success,
-            "data": result.data,
+            "kind": "freecad_screenshot",
+            "view_angle": view_angle,
             "format": result.format,
             "width": result.width,
             "height": result.height,
@@ -112,6 +110,22 @@ def register_view_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> N
             "file_size": result.file_size,
             "error": result.error,
         }
+        if return_data:
+            metadata["data"] = result.data
+
+        if not result.success:
+            return image_tool_result(metadata, is_error=True)
+        if return_image and not result.data:
+            return image_error(
+                "FreeCAD screenshot succeeded but returned no image data",
+                **metadata,
+            )
+
+        return image_tool_result(
+            metadata,
+            image_base64=result.data if return_image else None,
+            mime_type=f"image/{result.format}",
+        )
 
     @mcp.tool()
     async def set_view_angle(

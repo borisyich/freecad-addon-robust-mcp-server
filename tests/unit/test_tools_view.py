@@ -3,6 +3,7 @@
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from mcp.types import CallToolResult, ImageContent
 
 from freecad_mcp.bridge.base import (
     ExecutionResult,
@@ -49,7 +50,7 @@ class TestViewTools:
 
     @pytest.mark.asyncio
     async def test_get_screenshot_success(self, register_tools, mock_bridge):
-        """get_screenshot should return base64 image data."""
+        """get_screenshot should return MCP image content by default."""
         # get_screenshot calls bridge.get_screenshot which returns ScreenshotResult
         mock_bridge.get_screenshot = AsyncMock(
             return_value=ScreenshotResult(
@@ -65,9 +66,11 @@ class TestViewTools:
         get_screenshot = register_tools["get_screenshot"]
         result = await get_screenshot(view_angle="Isometric")
 
-        assert result["success"] is True
-        assert "data" in result
-        assert result["format"] == "png"
+        assert isinstance(result, CallToolResult)
+        assert result.isError is False
+        assert result.structuredContent["success"] is True
+        assert result.structuredContent["format"] == "png"
+        assert any(isinstance(item, ImageContent) for item in result.content)
         mock_bridge.get_screenshot.assert_called_once()
 
     @pytest.mark.asyncio
@@ -87,9 +90,32 @@ class TestViewTools:
         get_screenshot = register_tools["get_screenshot"]
         result = await get_screenshot(width=1920, height=1080)
 
-        assert result["width"] == 1920
-        assert result["height"] == 1080
+        assert result.structuredContent["width"] == 1920
+        assert result.structuredContent["height"] == 1080
+        assert any(isinstance(item, ImageContent) for item in result.content)
 
+    @pytest.mark.asyncio
+    async def test_get_screenshot_legacy_base64_metadata(
+        self, register_tools, mock_bridge
+    ):
+        """Legacy callers may explicitly request base64 metadata without an image block."""
+        mock_bridge.get_screenshot = AsyncMock(
+            return_value=ScreenshotResult(
+                success=True,
+                data="legacy-base64",
+                format="png",
+                width=800,
+                height=600,
+            )
+        )
+
+        result = await register_tools["get_screenshot"](
+            return_image=False,
+            return_data=True,
+        )
+
+        assert result.structuredContent["data"] == "legacy-base64"
+        assert not any(isinstance(item, ImageContent) for item in result.content)
 
     @pytest.mark.asyncio
     async def test_get_screenshot_can_save_without_returning_base64(
@@ -116,14 +142,16 @@ class TestViewTools:
             height=768,
             save_to_disk=True,
             output_path="/tmp/bracket.png",
+            return_image=False,
             return_data=False,
         )
 
-        assert result["success"] is True
-        assert result["data"] is None
-        assert result["saved_to_disk"] is True
-        assert result["path"] == "/tmp/bracket.png"
-        assert result["file_size"] == 2048
+        assert isinstance(result, CallToolResult)
+        assert result.structuredContent["success"] is True
+        assert result.structuredContent["saved_to_disk"] is True
+        assert result.structuredContent["path"] == "/tmp/bracket.png"
+        assert result.structuredContent["file_size"] == 2048
+        assert not any(isinstance(item, ImageContent) for item in result.content)
         mock_bridge.get_screenshot.assert_awaited_once_with(
             view_angle=ViewAngle.FRONT,
             width=1024,
@@ -146,8 +174,9 @@ class TestViewTools:
             save_to_disk=False,
         )
 
-        assert result["success"] is False
-        assert "requires save_to_disk" in result["error"]
+        assert isinstance(result, CallToolResult)
+        assert result.isError is True
+        assert "requires save_to_disk" in result.structuredContent["error"]
         mock_bridge.get_screenshot.assert_not_called()
 
     @pytest.mark.asyncio
@@ -167,8 +196,8 @@ class TestViewTools:
         get_screenshot = register_tools["get_screenshot"]
         result = await get_screenshot()
 
-        assert result["success"] is False
-        assert "headless" in result["error"]
+        assert result.isError is True
+        assert "headless" in result.structuredContent["error"]
 
     @pytest.mark.asyncio
     async def test_get_screenshot_invalid_view_angle(self, register_tools, mock_bridge):
@@ -176,8 +205,8 @@ class TestViewTools:
         get_screenshot = register_tools["get_screenshot"]
         result = await get_screenshot(view_angle="InvalidAngle")
 
-        assert result["success"] is False
-        assert "Invalid view_angle" in result["error"]
+        assert result.isError is True
+        assert "Invalid view_angle" in result.structuredContent["error"]
 
     @pytest.mark.asyncio
     async def test_set_view_angle(self, register_tools, mock_bridge):

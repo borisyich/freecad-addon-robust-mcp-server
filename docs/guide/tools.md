@@ -372,7 +372,9 @@ Tools marked with **GUI** only work when FreeCAD is running in GUI mode.
 
 | Tool                    | Mode | Description                        |
 | ----------------------- | ---- | ---------------------------------- |
-| `get_screenshot`        | GUI  | Reliable capture, optional disk save |
+| `get_screenshot`        | GUI  | Capture and return MCP image content |
+| `open_image`            | Both | Open a local drawing/screenshot for vision |
+| `compare_images`        | Both | Return labelled reference/candidate comparison |
 | `set_view_angle`        | Both | Set camera angle                   |
 | `fit_all`               | Both | Fit all objects in view            |
 | `zoom_in`               | GUI  | Zoom in                            |

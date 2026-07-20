@@ -8,6 +8,7 @@
 - Added `create_cylindrical_cut` for validated radial and off-face holes with an explicit world-space axis.
 - Extended `create_sketch` to accept explicit `Object.FaceN` and datum-plane object names.
 - Added an optional world-space `direction` argument to `pad_sketch`. This avoids relying on plane-specific `Reversed` semantics, which can differ with sketch support orientation. The tool now reports `sketch_normal`, `effective_direction`, and the resolved `reversed` value.
+- Added multimodal image delivery: `get_screenshot(return_image=True)`, `open_image(path)`, and `compare_images(reference_path, candidate_path)` now return real MCP `ImageContent` instead of relying on paths or base64 text.
 
 This project uses **component-specific versioning**. Each component has its own
 release notes and version history.
