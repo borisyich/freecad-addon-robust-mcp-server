@@ -220,6 +220,30 @@ class TestFreecadPrompts:
         general_result = await prompt_guidance(task_type="general")
         assert result == general_result
 
+
+    @pytest.mark.asyncio
+    async def test_drawing_reconstruction_prompt_contains_reaction_gate(
+        self, register_prompts: dict[str, Callable[..., Any]]
+    ) -> None:
+        prompt = register_prompts["reproduce_from_drawing"]
+        result = await prompt(reference_path="drawing.png", target_document="Part")
+
+        assert "ACT → OBSERVE → REACT" in result
+        assert "evaluate_model_checkpoint" in result
+        assert "discrepancy ledger" in result.lower()
+        assert "drawing.png" in result
+
+    @pytest.mark.asyncio
+    async def test_model_modification_prompt_preserves_design_intent(
+        self, register_prompts: dict[str, Callable[..., Any]]
+    ) -> None:
+        prompt = register_prompts["modify_existing_model"]
+        result = await prompt(model_path="part.FCStd", change_request="add pocket")
+
+        assert "Preserve design intent" in result
+        assert "baseline" in result.lower()
+        assert "part.FCStd" in result
+
     # =========================================================================
     # Test that all expected prompts are registered
     # =========================================================================
@@ -253,3 +277,13 @@ class TestFreecadPrompts:
     ) -> None:
         """boolean_operations_guide prompt should be registered."""
         assert "boolean_operations_guide" in register_prompts
+
+    def test_drawing_reconstruction_prompt_is_registered(
+        self, register_prompts: dict[str, Callable[..., Any]]
+    ) -> None:
+        assert "reproduce_from_drawing" in register_prompts
+
+    def test_model_modification_prompt_is_registered(
+        self, register_prompts: dict[str, Callable[..., Any]]
+    ) -> None:
+        assert "modify_existing_model" in register_prompts

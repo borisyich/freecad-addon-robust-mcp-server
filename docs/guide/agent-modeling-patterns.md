@@ -1,51 +1,97 @@
 # Modeling patterns for engineering agents
 
-The canonical agent rule file is [`.clinerules/freecad-modeling.md`](../../.clinerules/freecad-modeling.md). Its core workflow is:
+The canonical client rule file is the root [`AGENTS.md`](../../AGENTS.md). It is mirrored in [`.clinerules/freecad-modeling.md`](../../.clinerules/freecad-modeling.md) and [`.agents/AGENT.md`](../../.agents/AGENT.md).
 
-1. Reuse one explicit document and one PartDesign Body.
-2. Centralize key dimensions in a Spreadsheet.
-3. Build the entire additive blank first.
-4. Build bosses as solids; perform all bores, pockets, and holes after additive geometry.
-5. Validate positive added or removed volume after every feature.
-6. Keep one valid solid and verify the Body Tip.
-7. Select faces and edges geometrically, not by guessed `FaceN` or `EdgeN` values.
-8. Recompute, inspect, and capture standard views after each major step.
-9. Roll back the failed operation instead of creating another document or Body.
-10. Finish with dimensional, feature-order, expression, and void-probe checks.
+For an explanation of what each client receives automatically and what must be invoked explicitly, see [Agent guidance architecture](agent-guidance-architecture.md).
+
+## Task-specific workflow entry points
+
+| Task | MCP prompt | MCP resource |
+|---|---|---|
+| New model from drawing/image | `reproduce_from_drawing` | `freecad://workflows/drawing-reconstruction` |
+| Modify existing model | `modify_existing_model` | `freecad://workflows/model-modification` |
+| General PartDesign work | `freecad_guidance(task_type="partdesign")` | `freecad://best-practices` |
 
 ## Why feature validity is not enough
 
-FreeCAD may create a feature object whose shape is valid while the intended Body is unchanged—for example, a Pad extruded away from the existing solid. Additive tools therefore validate a measurable volume increase in addition to shape validity and single-solid topology.
+FreeCAD may create a valid feature that does not implement the intended design—for example, a Pad extruded away from the Body, a valid cut in the wrong position, or the wrong number of patterned holes. Every major feature therefore has two independent gates:
+
+1. FreeCAD geometric validity and measurable effect;
+2. correspondence to the drawing or change request.
+
+## Mandatory checkpoint
+
+```text
+one feature
+→ recompute and validate
+→ same-view screenshot
+→ open saved pixels
+→ compare with a reference crop
+→ discrepancy ledger
+→ evaluate_model_checkpoint
+→ continue / rework
+```
+
+A call to `compare_images` alone is not acceptance.
+
+### Required discrepancy ledger
+
+```json
+{
+  "category": "wrong_count",
+  "severity": "major",
+  "expected": "4 mounting holes",
+  "observed": "3 mounting holes",
+  "evidence": "screenshots/front_holes_compare.png",
+  "proposed_reaction": "undo the pattern and recreate four occurrences"
+}
+```
+
+### Reaction gate example
+
+```python
+evaluate_model_checkpoint(
+    checkpoint_name="MountingHolePattern",
+    geometry_valid=True,
+    solid_count=1,
+    expected_solid_count=1,
+    dimension_checks_passed=True,
+    visual_comparison_performed=True,
+    view_match_confirmed=True,
+    unresolved_dimensions=[],
+    discrepancies=[...],
+)
+```
+
+Proceed only when `decision == "continue"`.
+
+## Drawing preparation
+
+Use `open_image` for the overview, inspect individual views, sections, details, and dimension clusters. Compare a candidate only with the equivalent reference view. Do not compare an isometric model view with an orthographic drawing or a small candidate against an entire sheet. Also you may rotate candidate, and the get screenshot.
 
 ## Recommended screenshot call
 
 ```python
 get_screenshot(
     return_image=True,
-    view_angle="Isometric",
+    view_angle="Front",
     doc_name="PartDocument",
     fit_all=True,
     background="White",
     show_corner_cross=True,
     corner_cross_size=10,
     save_to_disk=True,
-    output_path="screenshots/after_ring.png",
+    output_path="screenshots/front_after_pad.png",
     return_data=False,
 )
 ```
 
-The image is returned as MCP `ImageContent` for actual visual inspection, while disk saving retains a reproducible checkpoint. The global X/Y/Z corner cross is painted into the resulting PNG from the active camera orientation, rather than relying on FreeCAD's native screen overlay. Require `corner_cross_embedded=true` and `corner_cross_render_mode="qimage_overlay"` before treating the screenshot as orientation evidence. Keep `return_data=False` so base64 is not duplicated as text metadata.
+Open the saved PNG with `open_image` before comparison. The corner cross is orientation evidence, not proof of the part's placement relative to the global origin.
 
-## Bracket regression
+## Existing-model modification
 
-`tests/integration/test_bracket_full_workflow.py` reproduces the observed agent
-trajectory: it proves wrong-direction Pad rollback, creates the boss as solid
-Ø60 material, performs Ø35/Ø18/Ø10 cuts only after all additive features, checks
-100×65×105 mm bounds, validates Spreadsheet bindings and void probe volumes,
-and optionally saves an isometric screenshot.
+Inspect the history, aliases, constraints, expressions, dependencies, Tip, bounds, and baseline screenshots before changing anything. Modify the earliest feature or parameter that semantically owns the request. Avoid appending compensating geometry that merely hides an incorrect upstream model.
 
-Run it only while the FreeCAD Robust MCP bridge is active:
+## Fallback code policy
 
-```bash
-PYTHONPATH=src pytest tests/integration/test_bracket_full_workflow.py
-```
+Use standard MCP tools first. `safe_execute` and `execute_python` are allowed only for a missing or demonstrably invalid standard operation. State the reason, keep the code local to one feature, and run the full checkpoint immediately afterward.

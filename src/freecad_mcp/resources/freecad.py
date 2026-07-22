@@ -13,6 +13,9 @@ Resource URIs:
     - freecad://documents/{name}/objects - Objects in a document
     - freecad://objects/{doc_name}/{obj_name} - Object details
     - freecad://active-document - Currently active document
+    - freecad://best-practices - Canonical engineering guidance
+    - freecad://workflows/drawing-reconstruction - Drawing reconstruction workflow
+    - freecad://workflows/model-modification - Existing-model modification workflow
     - freecad://workbenches - Available workbenches
     - freecad://workbenches/active - Currently active workbench
     - freecad://macros - Available macros
@@ -21,6 +24,14 @@ Resource URIs:
 
 import json
 from typing import Any
+
+from freecad_mcp.guidance import (
+    BLOCKING_DISCREPANCY_CATEGORIES,
+    DISCREPANCY_LEDGER_FIELDS,
+    DRAWING_RECONSTRUCTION_WORKFLOW,
+    MODEL_MODIFICATION_WORKFLOW,
+    UNCERTAINTY_CATEGORIES,
+)
 
 
 def register_resources(mcp: Any, get_bridge: Any) -> None:
@@ -334,32 +345,68 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
         """
         best_practices = {
             "description": "FreeCAD Best Practices and AI Guidance",
-            "purpose": "Reference for AI assistants working with FreeCAD MCP tools",
+            "purpose": (
+                "Reference for reliable parametric modeling, drawing reconstruction, "
+                "existing-model modification, validation, and rollback"
+            ),
+            "delivery_note": {
+                "important": (
+                    "MCP resources and prompts are exposed to the client but are not "
+                    "guaranteed to be inserted automatically into every model turn."
+                ),
+                "client_bootstrap_files": {
+                    "Codex": "AGENTS.md",
+                    "Cline": ".clinerules/freecad-modeling.md",
+                    "repository_agents": ".agents/AGENT.md",
+                    "Claude/project development": "CLAUDE.md",
+                },
+                "task_prompts": [
+                    "freecad_startup",
+                    "reproduce_from_drawing",
+                    "modify_existing_model",
+                    "freecad_guidance",
+                ],
+            },
             "critical_patterns": {
                 "validation_first": {
-                    "description": "Always validate objects after creation or modification",
-                    "pattern": """After any operation that creates or modifies geometry:
-1. Call validate_object(object_name) to check shape validity
-2. Check the 'is_valid' field in the response
-3. If invalid, use undo() to revert and try a different approach
-4. For complex operations, use safe_execute() which auto-validates""",
-                    "tools": ["validate_object", "validate_document", "safe_execute"],
+                    "description": (
+                        "Validate geometry after every major feature, but do not confuse "
+                        "shape validity with requirement correctness."
+                    ),
+                    "pattern": [
+                        "recompute the document",
+                        "validate the new feature and document",
+                        "confirm Body Tip and solid count",
+                        "confirm positive added/removed volume and expected bounds",
+                        "run same-view visual correspondence checks",
+                    ],
+                    "tools": [
+                        "validate_object",
+                        "validate_document",
+                        "inspect_object",
+                        "get_screenshot",
+                        "compare_images",
+                        "evaluate_model_checkpoint",
+                    ],
                 },
                 "partdesign_workflow": {
-                    "description": "Proper PartDesign workflow for parametric parts",
-                    "pattern": """For parametric modeling (recommended for most parts):
-1. Create a PartDesign::Body - this is the container for all features
-2. Create sketches INSIDE the body using body.newObject() not doc.addObject()
-3. Attach sketches to planes (XY_Plane, XZ_Plane, YZ_Plane) or existing faces
-4. Use Pad/Pocket/Revolution to create features from sketches
-5. Features must be inside a body - standalone features won't work
-
-Example sequence:
-- create_document()
-- create_partdesign_body(name="Body")
-- create_sketch(body_name="Body", plane="XY_Plane")
-- add_sketch_rectangle(...)
-- pad_sketch(sketch_name="...", length=10)""",
+                    "description": "Proper parametric PartDesign workflow",
+                    "rules": [
+                        "reuse one explicit document",
+                        "use one PartDesign Body per part and keep one contiguous solid",
+                        "centralize key dimensions in Spreadsheet aliases or named constraints",
+                        "build additive blank before cuts; fillets/chamfers last",
+                        "pass explicit world-space directions for direction-sensitive features",
+                        "do not guess FaceN/EdgeN; select by geometry",
+                    ],
+                    "sequence": [
+                        "create_document or reuse intended document",
+                        "create_partdesign_body",
+                        "create and constrain sketch",
+                        "create one feature",
+                        "validate geometry",
+                        "perform visual checkpoint",
+                    ],
                     "tools": [
                         "create_partdesign_body",
                         "create_sketch",
@@ -368,39 +415,81 @@ Example sequence:
                     ],
                 },
                 "transaction_safety": {
-                    "description": "All tool operations support undo/redo",
-                    "pattern": """IMPORTANT: All MCP tool operations are wrapped in FreeCAD transactions,
-meaning every operation can be undone with the undo() tool.
-
-Built-in transaction support:
-1. Every tool that modifies the document opens a transaction
-2. Operations can be undone with undo() and redone with redo()
-3. Transaction names appear in FreeCAD's undo history
-
-For complex or risky operations:
-1. Use safe_execute() for automatic validation + rollback
-2. If validation fails after execution, it automatically undoes
-3. Use undo_if_invalid() to check and undo in one call
-4. Check get_undo_redo_status() to see available undo steps
-
-Example - automatic rollback on failure:
-safe_execute(
-    code="... complex operation ...",
-    validate_after=True,
-    auto_undo_on_failure=True
-)
-
-Example - manual undo:
-create_box(length=10, width=10, height=10)  # Can be undone
-undo()  # Reverts the box creation""",
+                    "description": "Rollback the failed operation, not the entire design",
+                    "rules": [
+                        "all modifying tools are transactional and support undo",
+                        "on failure undo/delete only the failed feature",
+                        "confirm the previous valid Body Tip/state is restored",
+                        "do not create duplicate documents or Bodies to hide errors",
+                        "safe_execute/execute_python are fallback mechanisms only",
+                    ],
                     "tools": [
-                        "safe_execute",
                         "undo",
                         "redo",
                         "undo_if_invalid",
                         "get_undo_redo_status",
+                        "safe_execute",
                     ],
                 },
+                "act_observe_react": {
+                    "description": "Mandatory checkpoint after each major feature",
+                    "act": "Create exactly one logically reviewable feature and recompute.",
+                    "observe_geometry": [
+                        "validate shape and document",
+                        "check Body Tip and solid count",
+                        "check dimensions, bounds, placement, and volume effect",
+                    ],
+                    "observe_visual": [
+                        "use a reference crop, not the whole sheet",
+                        "set an equivalent candidate view",
+                        "save/open screenshot and call compare_images",
+                        "write a discrepancy ledger",
+                    ],
+                    "react": (
+                        "Call evaluate_model_checkpoint and obey continue/rework."
+                    ),
+                    "ledger_fields": list(DISCREPANCY_LEDGER_FIELDS),
+                },
+            },
+            "drawing_reconstruction": {
+                "resource": "freecad://workflows/drawing-reconstruction",
+                "prompt": "reproduce_from_drawing",
+                "blocking_discrepancy_categories": sorted(
+                    BLOCKING_DISCREPANCY_CATEGORIES
+                ),
+                "uncertainty_categories": sorted(UNCERTAINTY_CATEGORIES),
+                "requirements": [
+                    "open the source pixels with open_image",
+                    "create an evidence table before modeling",
+                    "compare equivalent views only",
+                    "stop rather than invent unreadable dimensions",
+                    "accept feature by feature, not by overall resemblance",
+                ],
+            },
+            "model_modification": {
+                "resource": "freecad://workflows/model-modification",
+                "prompt": "modify_existing_model",
+                "requirements": [
+                    "inspect history, constraints, expressions, dependencies, and Tip",
+                    "modify the earliest semantic owner of the requested change",
+                    "prefer parameter/constraint edits over appended workaround geometry",
+                    "record baseline invariants before editing",
+                    "verify requested change and absence of regressions",
+                ],
+            },
+            "tool_selection_policy": {
+                "priority": [
+                    "standard domain-specific MCP tool",
+                    "standard generic MCP tool",
+                    "safe_execute for one missing/invalid operation",
+                    "execute_python only as a last-resort diagnostic or unsupported operation",
+                ],
+                "fallback_requirements": [
+                    "state why the standard tool is insufficient",
+                    "limit code to one operation",
+                    "validate immediately",
+                    "preserve parametric design intent",
+                ],
             },
             "version_compatibility": {
                 "description": "FreeCAD API changes across versions",
@@ -409,164 +498,155 @@ undo()  # Reverts the box creation""",
                         "versions_affected": "FreeCAD 1.0+ vs earlier",
                         "old_api": "sketch.Support = (plane_obj, [''])",
                         "new_api": "sketch.AttachmentSupport = [(plane_obj, '')]",
-                        "safe_pattern": """Use hasattr to detect:
-if hasattr(sketch, 'AttachmentSupport'):
-    sketch.AttachmentSupport = [(plane_obj, '')]
-else:
-    sketch.Support = (plane_obj, [''])
-sketch.MapMode = 'FlatFace'""",
+                        "note": "MCP tools handle this compatibility layer.",
                     },
                     "body_object_creation": {
-                        "description": "Creating objects inside PartDesign bodies",
-                        "correct": "sketch = body.newObject('Sketcher::SketchObject', 'Sketch')",
-                        "incorrect": "sketch = doc.addObject('...'); body.addObject(sketch)",
-                        "reason": "body.newObject() ensures proper parent-child relationships",
+                        "correct": (
+                            "body.newObject('Sketcher::SketchObject', 'Sketch')"
+                        ),
+                        "incorrect": "doc.addObject(...); body.addObject(sketch)",
                     },
                 },
             },
             "gui_vs_headless": {
-                "description": "Understanding GUI mode limitations",
-                "check_gui": "Use get_freecad_version() - check 'gui_available' field",
+                "description": "Visual checkpoints require a GUI-enabled FreeCAD session",
+                "check_gui": "Use get_freecad_version() and inspect gui_available",
                 "gui_only_features": [
-                    "get_screenshot() - capturing views",
-                    "set_object_visibility() - show/hide objects",
-                    "set_object_color() - color changes",
-                    "set_display_mode() - wireframe/shaded",
-                    "Camera controls (zoom, view angles)",
+                    "get_screenshot",
+                    "view/camera controls",
+                    "visibility/color/display controls",
                 ],
                 "headless_safe_features": [
-                    "All document operations",
-                    "All object creation/modification",
-                    "All export/import operations",
-                    "Validation and inspection",
-                    "Python code execution",
+                    "document and object operations",
+                    "validation and inspection",
+                    "import/export",
                 ],
-                "graceful_degradation": """GUI tools return structured errors in headless mode:
-{
-    "success": false,
-    "error": "GUI not available - ... cannot be set in headless mode"
-}
-Check for this pattern and handle gracefully.""",
             },
             "common_pitfalls": {
                 "standalone_features": {
-                    "problem": "Creating PartDesign features outside a Body",
-                    "symptom": "Features fail to compute or show errors",
-                    "solution": "Always create a Body first, then features inside it",
+                    "problem": "PartDesign features outside a Body",
+                    "solution": "Create features inside one intended Body.",
+                },
+                "valid_but_wrong": {
+                    "problem": "Shape is valid but differs from the drawing",
+                    "solution": (
+                        "Run geometric and visual/requirement validation as separate gates."
+                    ),
+                },
+                "whole_sheet_comparison": {
+                    "problem": "Candidate compared with an entire drawing sheet",
+                    "solution": "Crop and compare one equivalent view at a time.",
+                },
+                "observation_without_reaction": {
+                    "problem": "Screenshot is inspected but the plan continues unchanged",
+                    "solution": (
+                        "Write a discrepancy ledger and call evaluate_model_checkpoint."
+                    ),
                 },
                 "unconstrained_sketches": {
-                    "problem": "Sketches with free degrees of freedom",
-                    "symptom": "Geometry moves unexpectedly on recompute",
-                    "solution": """Add constraints or use the construction mode.
-Check with: sketch.solve() returns DoF count (0 = fully constrained)""",
-                },
-                "invalid_booleans": {
-                    "problem": "Boolean operations on non-overlapping shapes",
-                    "symptom": "Empty or invalid result shape",
-                    "solution": """Verify shapes overlap before boolean:
-1. Check bounding boxes overlap
-2. Use validate_object() on result
-3. Have fallback strategy if boolean fails""",
-                },
-                "shape_type_mismatch": {
-                    "problem": "Operations require specific shape types",
-                    "symptom": "Error about wrong shape type",
-                    "examples": {
-                        "fillet_edges": "Requires solid shape, not mesh or compound",
-                        "export_stl": "Works with any shape but quality depends on tessellation",
-                        "boolean_operation": "Requires solid shapes, not curves or faces",
-                    },
+                    "problem": "Sketches have unintended degrees of freedom",
+                    "solution": "Inspect sketch status and constrain design intent.",
                 },
                 "document_state": {
-                    "problem": "Operating on wrong or no active document",
-                    "symptom": "Object not found or wrong object modified",
-                    "solution": """Always:
-1. Check get_active_document() returns expected document
-2. Use explicit doc_name parameter when available
-3. Create new document if starting fresh work""",
+                    "problem": "Wrong document or duplicate Body modified",
+                    "solution": "Pass doc_name explicitly and reuse the intended state.",
                 },
             },
             "recommended_workflows": {
                 "creating_parts": {
                     "steps": [
-                        "1. create_document(name='...')",
-                        "2. create_partdesign_body(name='Body')",
-                        "3. create_sketch(body_name='Body', plane='XY_Plane')",
-                        "4. Add geometry: add_sketch_rectangle/circle/line",
-                        "5. pad_sketch(sketch_name='...', length=...)",
-                        "6. Add features: fillets, chamfers, pockets",
-                        "7. validate_document() to check health",
-                        "8. Export: export_step/stl/3mf",
+                        "inspect/reuse document",
+                        "create Body and parameter table",
+                        "build additive blank",
+                        "checkpoint each feature",
+                        "perform cuts",
+                        "apply finishing features",
+                        "final feature-by-feature acceptance",
                     ],
                 },
                 "modifying_existing": {
                     "steps": [
-                        "1. open_document(path='...')",
-                        "2. list_objects() to see what exists",
-                        "3. inspect_object(name='...') for details",
-                        "4. Use safe_execute() for modifications",
-                        "5. validate_document() after changes",
-                        "6. save_document()",
+                        "inspect current model and dependencies",
+                        "record baseline invariants",
+                        "edit semantic owner",
+                        "validate and compare",
+                        "rework or accept",
+                        "save",
                     ],
                 },
                 "debugging_issues": {
                     "steps": [
-                        "1. get_console_output(lines=50) for error messages",
-                        "2. validate_document() to find invalid objects",
-                        "3. inspect_object() on problem objects",
-                        "4. Check object State - look for 'Error' entries",
-                        "5. Use undo() to revert to known good state",
-                        "6. recompute_document() to refresh all objects",
-                    ],
-                },
-                "safe_experimentation": {
-                    "description": "When trying operations that might fail",
-                    "steps": [
-                        "1. save_document() first (backup)",
-                        "2. Use safe_execute() with validate_after=True",
-                        "3. If failed, operation auto-reverts",
-                        "4. Or use get_undo_redo_status() before, undo() after",
+                        "get_console_output",
+                        "validate_document",
+                        "inspect_object and dependencies",
+                        "undo failed operation",
+                        "confirm previous Tip/state",
+                        "retry with corrected cause",
                     ],
                 },
             },
             "error_recovery": {
-                "invalid_geometry": {
-                    "detection": "validate_object() returns is_valid=false",
-                    "recovery": [
-                        "1. undo() to revert last operation",
-                        "2. Try different parameters (larger fillet radius, etc.)",
-                        "3. Simplify the operation (fewer features at once)",
-                        "4. Check source sketch is closed and valid",
-                    ],
-                },
-                "recompute_failure": {
-                    "detection": "object State contains 'Error' or 'Invalid'",
-                    "recovery": [
-                        "1. inspect_object() to see error details",
-                        "2. Check parent objects are valid",
-                        "3. May need to delete and recreate feature",
-                        "4. recompute_document() after fixes",
-                    ],
-                },
-                "sketch_errors": {
-                    "detection": "Sketch won't close or pad fails",
-                    "common_causes": [
-                        "Open contour (lines don't connect)",
-                        "Self-intersection",
-                        "Zero-length elements",
-                        "Overlapping geometry",
-                    ],
-                    "recovery": "Recreate sketch with simpler geometry",
-                },
+                "invalid_geometry": [
+                    "undo failed feature",
+                    "confirm previous valid state",
+                    "diagnose support/direction/parameters",
+                    "retry one corrected feature",
+                ],
+                "visual_mismatch": [
+                    "do not continue to the next feature",
+                    "classify discrepancy",
+                    "undo/rework current feature",
+                    "repeat same-view checkpoint",
+                ],
+                "ambiguous_reference": [
+                    "stop",
+                    "identify exact unreadable or conflicting evidence",
+                    "ask user",
+                ],
             },
             "performance_tips": {
-                "minimize_recomputes": "Group multiple changes, recompute once at end",
-                "batch_operations": "Use execute_python for multiple related operations",
-                "use_validate_document": "Check all objects at once vs individual validate_object calls",
-                "incremental_building": "Build complex models step-by-step, validating each step",
+                "context": (
+                    "Keep startup rules concise; load task-specific workflow only when needed."
+                ),
+                "images": (
+                    "Use overview for layout and high-resolution crops for dimensions."
+                ),
+                "checkpoints": (
+                    "One major feature per checkpoint limits rollback scope."
+                ),
+                "execution": (
+                    "Do not batch unrelated operations in execute_python."
+                ),
             },
         }
         return json.dumps(best_practices, indent=2)
+
+    @mcp.resource("freecad://workflows/drawing-reconstruction")
+    async def resource_drawing_reconstruction() -> str:
+        """Get the canonical drawing-to-model workflow."""
+        return json.dumps(
+            {
+                "description": "Mandatory workflow for reconstructing a model from drawings",
+                "prompt": "reproduce_from_drawing",
+                "workflow_markdown": DRAWING_RECONSTRUCTION_WORKFLOW,
+                "blocking_categories": sorted(BLOCKING_DISCREPANCY_CATEGORIES),
+                "uncertainty_categories": sorted(UNCERTAINTY_CATEGORIES),
+                "ledger_fields": list(DISCREPANCY_LEDGER_FIELDS),
+            },
+            indent=2,
+        )
+
+    @mcp.resource("freecad://workflows/model-modification")
+    async def resource_model_modification() -> str:
+        """Get the canonical existing-model modification workflow."""
+        return json.dumps(
+            {
+                "description": "Mandatory workflow for changing existing models",
+                "prompt": "modify_existing_model",
+                "workflow_markdown": MODEL_MODIFICATION_WORKFLOW,
+            },
+            indent=2,
+        )
 
     @mcp.resource("freecad://capabilities")
     async def resource_capabilities() -> str:
@@ -1314,6 +1394,26 @@ Check with: sketch.solve() returns DoF count (0 = fully constrained)""",
                         },
                     ],
                 },
+                "images_and_checkpoints": {
+                    "description": "Drawing delivery, cropping, visual comparison, and deterministic reaction gates",
+                    "tools": [
+                        {
+                            "name": "open_image",
+                            "description": "Return local drawing/screenshot pixels as MCP ImageContent",
+                            "key_params": ["path", "max_dimension"],
+                        },
+                        {
+                            "name": "compare_images",
+                            "description": "Side-by-side reference/candidate image; requires discrepancy ledger",
+                            "key_params": ["reference_path", "candidate_path"],
+                        },
+                        {
+                            "name": "evaluate_model_checkpoint",
+                            "description": "Return continue/rework from checkpoint evidence",
+                            "key_params": ["checkpoint_name", "geometry_valid", "discrepancies"],
+                        },
+                    ],
+                },
                 "view": {
                     "description": "View and GUI control (some require GUI mode)",
                     "tools": [
@@ -1525,6 +1625,14 @@ Check with: sketch.solve() returns DoF count (0 = fully constrained)""",
                     "description": "★ RECOMMENDED: Read first - AI guidance, best practices, version compatibility, common pitfalls",
                 },
                 {
+                    "uri": "freecad://workflows/drawing-reconstruction",
+                    "description": "Mandatory drawing-to-model ACT-OBSERVE-REACT workflow",
+                },
+                {
+                    "uri": "freecad://workflows/model-modification",
+                    "description": "Mandatory workflow for changing existing parametric models",
+                },
+                {
                     "uri": "freecad://version",
                     "description": "FreeCAD version and build information",
                 },
@@ -1571,13 +1679,23 @@ Check with: sketch.solve() returns DoF count (0 = fully constrained)""",
             ],
             "prompts": [
                 {
-                    "name": "freecad-startup",
-                    "description": "★ RECOMMENDED: Auto-load on connection - Essential startup guidance and session checklist",
+                    "name": "freecad_startup",
+                    "description": "Session bootstrap and task router; client invocation is not automatic",
                     "key_params": [],
                 },
                 {
-                    "name": "freecad-guidance",
-                    "description": "Task-specific AI guidance (general, partdesign, sketching, boolean, export, debugging, validation)",
+                    "name": "reproduce_from_drawing",
+                    "description": "Mandatory drawing reconstruction and reaction-gate workflow",
+                    "key_params": ["reference_path", "target_document"],
+                },
+                {
+                    "name": "modify_existing_model",
+                    "description": "Workflow for preserving design intent while modifying a model",
+                    "key_params": ["model_path", "change_request", "reference_path"],
+                },
+                {
+                    "name": "freecad_guidance",
+                    "description": "Task-specific guidance including drawing, modification, and visual validation",
                     "key_params": ["task_type"],
                 },
                 {

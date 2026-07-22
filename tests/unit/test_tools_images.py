@@ -141,3 +141,22 @@ async def test_fastmcp_serializes_open_image_as_image_content(tmp_path):
     assert isinstance(result, CallToolResult)
     assert result.isError is False
     assert any(isinstance(item, ImageContent) for item in result.content)
+
+
+@pytest.mark.asyncio
+async def test_compare_images_requires_reaction_gate(registered_tools, tmp_path):
+    """compare_images metadata should make the next reaction step explicit."""
+    reference = tmp_path / "reference.png"
+    candidate = tmp_path / "candidate.png"
+    _write_image(reference)
+    _write_image(candidate)
+
+    result = await registered_tools["compare_images"](
+        str(reference),
+        str(candidate),
+    )
+
+    metadata = result.structuredContent
+    assert metadata["assessment_status"] == "not_evaluated"
+    assert "evaluate_model_checkpoint" in metadata["required_next_step"]["action"]
+    assert "observed" in metadata["required_next_step"]["ledger_fields"]

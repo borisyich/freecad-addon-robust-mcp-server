@@ -439,6 +439,7 @@ The Robust MCP Server provides **150+ tools** organized into categories. Tools m
 | `get_screenshot`        | Return a FreeCAD view as MCP image content with a global X/Y/Z corner cross by default | GUI  |
 | `open_image`            | Open a local drawing or saved screenshot         | Both |
 | `compare_images`        | Compare reference and candidate side by side     | Both |
+| `evaluate_model_checkpoint` | Enforce continue/rework reaction gate | Both |
 | `set_view_angle`        | Set camera to standard views (Front, Top, etc.) | GUI  |
 | `fit_all`               | Zoom to fit all objects in view                 | GUI  |
 | `zoom_in`               | Zoom in by a factor                             | GUI  |
@@ -449,6 +450,17 @@ The Robust MCP Server provides **150+ tools** organized into categories. Tools m
 | `set_object_color`      | Set object color as RGB values                  | GUI  |
 | `list_workbenches`      | List available FreeCAD workbenches              | All  |
 | `activate_workbench`    | Switch to a different workbench                 | All  |
+
+
+### Agent workflow bootstrap
+
+The repository root `AGENTS.md` is the canonical durable instruction file for Codex. The same rules are mirrored in `.clinerules/freecad-modeling.md` and `.agents/AGENT.md`. MCP prompts and resources are task-specific context and may require explicit invocation by the client.
+
+- New model from a drawing: prompt `reproduce_from_drawing` or resource `freecad://workflows/drawing-reconstruction`.
+- Existing-model change: prompt `modify_existing_model` or resource `freecad://workflows/model-modification`.
+- After every major feature: validate geometry, compare equivalent views, write a discrepancy ledger, then call `evaluate_model_checkpoint`.
+
+`compare_images` is not an automatic correctness metric. Continue only when the checkpoint tool returns `decision=continue`.
 
 #### Undo/Redo (3 tools)
 

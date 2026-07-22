@@ -16,7 +16,7 @@ MCP Resources are read-only endpoints that provide context about FreeCAD's curre
 
 ## Available Resources
 
-The Robust MCP Server provides 12 resources for querying FreeCAD state:
+The Robust MCP Server provides state resources plus task-specific workflow resources:
 
 ### freecad://capabilities
 
@@ -37,6 +37,19 @@ Returns a comprehensive JSON catalog of all available tools, resources, and prom
   "prompts": ["freecad-help", "create-parametric-part", ...]
 }
 ```
+
+
+### freecad://best-practices
+
+Returns the main structured policy for tool selection, PartDesign, ACT-OBSERVE-REACT checkpoints, drawing reconstruction, model modification, stop criteria, and rollback.
+
+### freecad://workflows/drawing-reconstruction
+
+Returns the complete workflow used by the `reproduce_from_drawing` prompt, including evidence extraction, same-view comparison, discrepancy ledgers, and blocking conditions.
+
+### freecad://workflows/model-modification
+
+Returns the design-intent-preserving workflow used by the `modify_existing_model` prompt.
 
 ### freecad://version
 
@@ -269,7 +282,7 @@ Gets recent FreeCAD console output.
 
 ## Using Resources in Prompts
 
-When talking to an AI assistant connected via MCP, resources are automatically available. The AI can read them to understand context.
+When an MCP client connects, it can discover these resources. Discovery does not guarantee that every resource is automatically inserted into the model context. The user, client, or agent must read the relevant resource. Keep durable rules in the client-native repository instruction file (`AGENTS.md` for Codex and `.clinerules/` for Cline).
 
 **Example conversation:**
 

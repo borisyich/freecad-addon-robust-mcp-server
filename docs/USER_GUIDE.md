@@ -342,7 +342,9 @@ export_step(file_path="/path/to/bracket.step")
 Take a screenshot of the bracket from an isometric view
 ```
 
-The agent should use `get_screenshot(view_angle="Isometric", return_image=True)` so the pixels are returned as MCP image content. The global X/Y/Z corner cross is included by default (`show_corner_cross=True`, `corner_cross_size=10`) so the agent can verify camera and model orientation. The screenshot pipeline paints this triad into the PNG after `saveImage`, because FreeCAD's native screen-space corner cross is not guaranteed to survive off-screen rendering. Check `corner_cross_embedded=true` and `corner_cross_render_mode="qimage_overlay"` in the metadata. Set `show_corner_cross=False` only for a clean presentation image. Use `open_image(path)` for drawings already stored on disk and `compare_images(reference_path, candidate_path)` for a labelled side-by-side check.
+The agent should use `get_screenshot(view_angle="Isometric", return_image=True)` so the pixels are returned as MCP image content. The global X/Y/Z corner cross is included by default (`show_corner_cross=True`, `corner_cross_size=10`) so the agent can verify camera and model orientation. The screenshot pipeline paints this triad into the PNG after `saveImage`, because FreeCAD's native screen-space corner cross is not guaranteed to survive off-screen rendering. Check `corner_cross_embedded=true` and `corner_cross_render_mode="qimage_overlay"` in the metadata. Set `show_corner_cross=False` only for a clean presentation image.
+
+For drawing work, call `open_image(path)` for the overview. Compare only equivalent views. After `compare_images`, write a discrepancy ledger and call `evaluate_model_checkpoint`; a side-by-side image by itself is not acceptance. Continue only when the returned decision is `continue`.
 
 ---
 
@@ -374,10 +376,11 @@ This makes it easier to reference objects later.
 
 For complex parts, build step by step:
 
-1. Create the basic shape
-1. Verify it looks correct
-1. Add features one at a time
-1. Check after each major operation
+1. Create one major feature.
+1. Recompute and validate shape, Body Tip, solid count, dimensions, and volume effect.
+1. Capture an equivalent-view screenshot and compare it with a reference crop.
+1. Write a discrepancy ledger and call `evaluate_model_checkpoint`.
+1. Continue, rework, or ask the user according to the returned decision.
 
 ### 5. Save Frequently
 

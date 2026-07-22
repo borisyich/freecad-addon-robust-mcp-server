@@ -16,6 +16,9 @@ Available resources:
     - freecad://macros - Available macros
     - freecad://console - Recent console output
     - freecad://active-document - Currently active document
+    - freecad://best-practices - Canonical engineering guidance
+    - freecad://workflows/drawing-reconstruction - Drawing reconstruction workflow
+    - freecad://workflows/model-modification - Existing-model modification workflow
 """
 
 from freecad_mcp.resources.freecad import register_resources

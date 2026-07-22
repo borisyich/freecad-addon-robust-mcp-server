@@ -23,8 +23,8 @@ For detailed documentation including parameters and examples, see [MCP Tools Ref
 | [Sketcher Constraints](#sketcher-constraints)   | 17    | Sketch constraints and dimensions    |
 | [Spreadsheet](#spreadsheet-tools)               | 10    | Parametric design with spreadsheets  |
 | [Draft ShapeString](#draft-tools)               | 6     | 3D text geometry for emboss/engrave  |
-| [Validation](#validation-tools)                 | 4     | Object/document health checking      |
-| [View & Display](#view-tools)                   | 11    | View control, screenshots (GUI only) |
+| [Validation](#validation-tools)                 | 5     | Object/document health and reaction gates |
+| [View & Display](#view-tools)                   | 14    | Views, screenshots, image crops/comparison |
 | [Export/Import](#export-tools)                  | 7     | File format conversion               |
 | [Macros](#macro-tools)                          | 6     | Macro management                     |
 | [Utility](#utility-tools)                       | 7     | Undo/redo, parts library             |

@@ -12,6 +12,7 @@ Tools are organized by category:
 - export: Export functionality tools
 - macros: Macro management tools
 - images: Local image delivery and comparison tools
+- checkpoints: Deterministic ACT-OBSERVE-REACT workflow gates
 - view: View and screenshot tools
 - validation: Object and document validation tools
 """
@@ -19,6 +20,7 @@ Tools are organized by category:
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from freecad_mcp.tools.checkpoints import register_checkpoint_tools
 from freecad_mcp.tools.documents import register_document_tools
 from freecad_mcp.tools.draft import register_draft_tools
 from freecad_mcp.tools.execution import register_execution_tools
@@ -33,6 +35,7 @@ from freecad_mcp.tools.view import register_view_tools
 
 __all__ = [
     "register_all_tools",
+    "register_checkpoint_tools",
     "register_document_tools",
     "register_draft_tools",
     "register_execution_tools",
@@ -54,6 +57,7 @@ def register_all_tools(mcp: Any, get_bridge_func: Callable[[], Awaitable[Any]]) 
         mcp: The FastMCP (Robust MCP Server) instance (Any due to lack of stubs).
         get_bridge_func: Async function returning the active bridge connection.
     """
+    register_checkpoint_tools(mcp)
     register_execution_tools(mcp, get_bridge_func)
     register_document_tools(mcp, get_bridge_func)
     register_object_tools(mcp, get_bridge_func)

@@ -130,6 +130,7 @@ nav:
       - MCP Macro Tools: guide/macros.md
       - Tools Overview: guide/tools.md
       - Agent Modeling Patterns: guide/agent-modeling-patterns.md
+      - Agent Guidance Architecture: guide/agent-guidance-architecture.md
       - MCP Resources: guide/resources.md
       - Detailed User Guide: USER_GUIDE.md
       - Tools Reference: MCP_TOOLS_REFERENCE.md
@@ -143,6 +144,7 @@ nav:
       - Contributing: development/contributing.md
       - Architecture: development/architecture.md
       - Detailed Architecture: development/architecture-detailed.md
+      - Agent CAD System Audit: development/agent-cad-system-audit.md
       - Tooling Roadmap: development/tooling-roadmap.md
       - Release Process: development/releasing.md
       - MkDocs Guide: development/mkdocs-guide.md

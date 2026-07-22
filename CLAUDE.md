@@ -1,8 +1,10 @@
 # CLAUDE.md - AI Assistant Guidelines for This Project
 
-> For FreeCAD part construction, follow `.clinerules/freecad-modeling.md`.
-> It defines feature ordering, parametric modeling, validation, rollback, and
-> visual verification rules for engineering agents.
+> For FreeCAD modeling, drawing reconstruction, and model modification, follow
+> the root `AGENTS.md`. The same canonical rules are mirrored in
+> `.clinerules/freecad-modeling.md`. They define task
+> routing, parametric modeling, ACT-OBSERVE-REACT checkpoints, discrepancy
+> ledgers, stop criteria, rollback, and final acceptance.
 
 ## Project Overview
 
@@ -1322,8 +1324,6 @@ The following tools in `src/freecad_mcp/tools/view.py` check `FreeCAD.GuiUp`:
 - `zoom_in` / `zoom_out`
 - `set_camera_position`
 - `get_screenshot`
-- `open_image`
-- `compare_images`
 
 ### Implementing Transaction Support for Undo/Redo
 
@@ -2028,7 +2028,8 @@ The MCP server provides a `freecad://capabilities` resource that returns a compl
 | ----------------------- | ----------------------------------------------------------- |
 | `get_screenshot`        | Capture a view as MCP image content with a camera-aware X/Y/Z triad composited into the PNG by default. **Requires GUI mode.** |
 | `open_image`            | Open a local image and return MCP image content. |
-| `compare_images`        | Return a labelled side-by-side visual comparison. |
+| `compare_images`        | Return a labelled side-by-side visual comparison; it does not approve the checkpoint. |
+| `evaluate_model_checkpoint` | Enforce `continue`, `rework` from checkpoint evidence. |
 | `set_view_angle`        | Set camera to standard views (front, top, isometric, etc.). |
 | `fit_all`               | Zoom to fit all objects in view.                            |
 | `zoom_in` / `zoom_out`  | Adjust zoom level.                                          |
@@ -2054,7 +2055,7 @@ The MCP server provides a `freecad://capabilities` resource that returns a compl
 | `validate_object`   | Check object health (shape validity, error states, recompute status).                 |
 | `validate_document` | Check health of all objects in document, return summary of invalid/error objects.     |
 | `undo_if_invalid`   | Check document health and automatically undo last operation if invalid objects exist. |
-| `safe_execute`      | Execute Python code with automatic validation and rollback on failure.                |
+| `safe_execute`      | Fallback-only Python execution with validation and rollback when standard tools are insufficient. |
 
 ### Export/Import Tools
 

@@ -13,6 +13,7 @@ from PIL import Image as PILImage
 from PIL import ImageDraw, ImageOps, UnidentifiedImageError
 
 from freecad_mcp.config import get_config
+from freecad_mcp.guidance import DISCREPANCY_LEDGER_FIELDS
 
 SUPPORTED_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
 MAX_IMAGE_BYTES = 25 * 1024 * 1024
@@ -202,6 +203,8 @@ def register_image_tools(mcp: Any) -> None:
         The left panel is always REFERENCE and the right panel is CANDIDATE.
         This does not claim pixel-perfect alignment or compute a correctness score;
         it gives the vision model both images in one unambiguous visual context.
+        After this call, the agent must write a discrepancy ledger and call
+        ``evaluate_model_checkpoint`` before continuing to the next feature.
 
         Args:
             reference_path: Drawing or expected reference image.
@@ -270,6 +273,17 @@ def register_image_tools(mcp: Any) -> None:
                 "width": comparison.width,
                 "height": comparison.height,
                 "saved_path": saved_path,
+                "assessment_status": "not_evaluated",
+                "comparison_limitations": [
+                    "This tool only arranges images side by side.",
+                    "It does not align geometry or compute CAD correctness.",
+                    "Reference and candidate must show equivalent views.",
+                ],
+                "required_next_step": {
+                    "action": "write_discrepancy_ledger_then_call_evaluate_model_checkpoint",
+                    "ledger_fields": list(DISCREPANCY_LEDGER_FIELDS),
+                    "decision_values": ["continue", "rework"],
+                },
             }
             return image_tool_result(
                 payload,

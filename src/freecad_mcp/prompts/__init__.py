@@ -4,6 +4,11 @@ This package contains reusable prompt templates for common FreeCAD tasks.
 Prompts guide users through complex workflows and provide best practices.
 
 Available prompts:
+    Session and Engineering Workflows:
+        - freecad_startup: Session bootstrap and task router
+        - reproduce_from_drawing: Drawing-to-model ACT-OBSERVE-REACT workflow
+        - modify_existing_model: Existing-model modification workflow
+
     Design Workflows:
         - design_part: Guided parametric part design
         - create_sketch_guide: 2D sketch creation

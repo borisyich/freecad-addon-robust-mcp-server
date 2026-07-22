@@ -462,6 +462,27 @@ class TestFreecadResources:
         assert "performance_tips" in data
 
     @pytest.mark.asyncio
+    async def test_resource_drawing_reconstruction_workflow(
+        self, register_resources: dict[str, Callable[..., Any]], mock_bridge: AsyncMock
+    ) -> None:
+        resource = register_resources["freecad://workflows/drawing-reconstruction"]
+        data = json.loads(await resource())
+
+        assert data["prompt"] == "reproduce_from_drawing"
+        assert "ACT → OBSERVE → REACT" in data["workflow_markdown"]
+        assert "wrong_count" in data["blocking_categories"]
+
+    @pytest.mark.asyncio
+    async def test_resource_model_modification_workflow(
+        self, register_resources: dict[str, Callable[..., Any]], mock_bridge: AsyncMock
+    ) -> None:
+        resource = register_resources["freecad://workflows/model-modification"]
+        data = json.loads(await resource())
+
+        assert data["prompt"] == "modify_existing_model"
+        assert "design intent" in data["workflow_markdown"].lower()
+
+    @pytest.mark.asyncio
     async def test_resource_capabilities(
         self, register_resources: dict[str, Callable[..., Any]], mock_bridge: AsyncMock
     ) -> None:

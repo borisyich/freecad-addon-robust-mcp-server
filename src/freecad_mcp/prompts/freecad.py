@@ -13,6 +13,12 @@ Prompt Categories:
 
 from typing import Any
 
+from freecad_mcp.guidance import (
+    DRAWING_RECONSTRUCTION_WORKFLOW,
+    MODEL_MODIFICATION_WORKFLOW,
+    VISUAL_CHECKPOINT_PROTOCOL,
+)
+
 
 def register_prompts(mcp: Any, get_bridge: Any) -> None:  # noqa: ARG001
     """Register FreeCAD prompts with the Robust MCP Server.
@@ -23,16 +29,16 @@ def register_prompts(mcp: Any, get_bridge: Any) -> None:  # noqa: ARG001
             for interface consistency with other register functions).
     """
     # =========================================================================
-    # Session Initialization Prompt (RECOMMENDED: Auto-load on connection)
+    # Session bootstrap prompt (explicit invocation may be required)
     # =========================================================================
 
     @mcp.prompt()
     async def freecad_startup() -> str:
         """Essential startup guidance for AI assistants.
 
-        **RECOMMENDED**: Configure your MCP client to automatically invoke
-        this prompt when connecting to the FreeCAD MCP server. This provides
-        critical context for reliable FreeCAD operations.
+        Clients can discover this prompt, but invocation may require explicit
+        user or client configuration. Repository instruction files remain the
+        durable bootstrap layer.
 
         This prompt provides:
         - Session initialization checklist
@@ -50,84 +56,101 @@ def register_prompts(mcp: Any, get_bridge: Any) -> None:  # noqa: ARG001
                 guidance = await mcp.get_prompt("freecad_startup")
                 print(guidance)  # Displays session initialization checklist
         """
-        return """# FreeCAD MCP Session Initialized
+        return """# FreeCAD MCP session bootstrap
 
-## IMPORTANT: Read Before Starting
-
-You are connected to the FreeCAD Robust MCP Server. Follow these guidelines for reliable operations.
-
----
+This MCP prompt is discoverable by clients, but clients are not required to
+invoke it automatically. Durable rules must also exist in the client-native
+bootstrap file: root `AGENTS.md` for Codex, `.clinerules/` for Cline, and the
+applicable project instruction file for other clients.
 
 ## Session Checklist (Do These First)
 
-1. **Verify connection**: Call `get_connection_status()` to confirm FreeCAD is responding
-2. **Check capabilities**: Read `freecad://best-practices` resource for detailed guidance
-3. **Check GUI mode**: Call `get_freecad_version()` - note `gui_available` field
-   - If `false`: Screenshot and visibility tools won't work (this is OK for modeling)
+1. `get_connection_status()`
+2. `get_freecad_version()` and check `gui_available`
+3. `get_active_document()` / `list_documents()`; reuse the intended document
+4. Read `freecad://best-practices`
 
----
+## Route the task before modeling
+
+- Drawing/image to new model: invoke `reproduce_from_drawing` or read
+  `freecad://workflows/drawing-reconstruction`.
+- Change an existing model: invoke `modify_existing_model` or read
+  `freecad://workflows/model-modification`.
+- Ordinary PartDesign task: use `freecad_guidance(task_type="partdesign")`.
 
 ## Critical Rules
 
-### Transaction Support (Undo/Redo)
-**ALL tool operations are wrapped in transactions** - every change can be undone:
-- Use `undo()` to revert any operation
-- Use `redo()` to redo after undo
-- Use `get_undo_redo_status()` to see available undo steps
-
-### For Parametric Parts (PartDesign)
-```
-1. ALWAYS create Body first: create_partdesign_body(name="Body")
-2. Create sketches ON the body: create_sketch(body_name="Body", plane="XY_Plane")
-3. Extrude with: pad_sketch(sketch_name="...", length=...)
-4. VALIDATE after each feature: validate_object(object_name="...")
-```
-
-### For Error Prevention
-- **All operations support undo** - simply call `undo()` if something goes wrong
-- **Use safe_execute()** for risky operations - auto-undoes on failure
-- **Use validate_document()** to check all objects after complex operations
-
-### Version Compatibility
-The MCP tools automatically handle FreeCAD version differences (1.0 vs older).
-No special handling needed on your part.
-
----
+- Prefer standard MCP tools. `safe_execute` and `execute_python` are fallback
+  mechanisms only when a required standard tool is missing or demonstrably
+  invalid.
+- Use one explicit document and one PartDesign Body per part; do not hide errors
+  in duplicate documents or Bodies.
+- Validate FreeCAD geometry and requirement correspondence separately. A valid
+  solid can still be the wrong part.
+- After each major feature, complete ACT → OBSERVE → REACT:
+  validate geometry, save/open an equivalent-view screenshot, compare against a
+  reference crop, write a discrepancy ledger, and call
+  `evaluate_model_checkpoint`. Continue only when it returns `continue`.
+- If a required drawing value is unreadable or ambiguous, stop and ask the user.
+- On failure, undo/remove only the failed feature and confirm the previous valid
+  Body Tip/state is restored before retrying.
 
 ## Quick Reference
 
-| Task | Tool(s) |
-|------|---------|
-| Create parametric part | `create_partdesign_body` → `create_sketch` → `pad_sketch` |
-| Simple primitive | `create_box`, `create_cylinder`, `create_sphere` |
-| Combine shapes | `boolean_operation(operation="fuse/cut/common")` or `fuse_all` |
-| Add sketch constraints | `constrain_horizontal`, `constrain_distance`, etc. |
-| Check for errors | `validate_object` or `validate_document` |
-| Debug issues | `get_console_output(lines=50)` |
-| Undo any operation | `undo()` (all operations are undoable) |
-| Safe execution | `safe_execute(code="...", validate_after=True)` |
+| Goal | Tools |
+|---|---|
+| Read a drawing | `open_image` |
+| Parametric base | `create_partdesign_body` → `create_sketch` → `pad_sketch` |
+| Geometry validation | `validate_object`, `validate_document` |
+| Visual evidence | `set_view_angle`, `get_screenshot`, `open_image`, `compare_images` |
+| Reaction gate | `evaluate_model_checkpoint` |
+| Rollback | `undo`, `get_undo_redo_status` |
 
----
-
-## GUI-Only Tools (Skip in Headless Mode)
-
-These require `gui_available=true`:
-- `get_screenshot()`, `set_object_visibility()`, `set_object_color()`
-- Camera controls: `zoom_in()`, `zoom_out()`, `set_view_angle()`
-
-All other tools work in both GUI and headless modes.
-
----
-
-For detailed guidance on specific tasks, use the `freecad-guidance` prompt with:
-- `task_type="partdesign"` - Parametric modeling workflow
-- `task_type="sketching"` - 2D sketch creation
-- `task_type="boolean"` - Boolean operations
-- `task_type="debugging"` - Troubleshooting
-- `task_type="validation"` - Checking model health
-
-Or read the full `freecad://best-practices` resource for comprehensive documentation.
+GUI screenshot tools require `gui_available=true`.
 """
+
+    # =========================================================================
+    # Drawing and modification workflow prompts
+    # =========================================================================
+
+    @mcp.prompt()
+    async def reproduce_from_drawing(
+        reference_path: str = "",
+        target_document: str = "",
+    ) -> str:
+        """Return the mandatory drawing-to-model workflow.
+
+        Args:
+            reference_path: Optional path to the source drawing/image.
+            target_document: Optional intended FreeCAD document name.
+        """
+        context = (
+            "# Task context\n\n"
+            f"- Reference path: `{reference_path or 'not supplied'}`\n"
+            f"- Target document: `{target_document or 'not supplied'}`\n\n"
+        )
+        return context + DRAWING_RECONSTRUCTION_WORKFLOW
+
+    @mcp.prompt()
+    async def modify_existing_model(
+        model_path: str = "",
+        change_request: str = "",
+        reference_path: str = "",
+    ) -> str:
+        """Return the mandatory workflow for changing an existing model.
+
+        Args:
+            model_path: Optional FCStd path or document identifier.
+            change_request: Requested model change.
+            reference_path: Optional drawing/image supporting the change.
+        """
+        context = (
+            "# Task context\n\n"
+            f"- Model: `{model_path or 'active document'}`\n"
+            f"- Change request: {change_request or 'not supplied'}\n"
+            f"- Reference path: `{reference_path or 'not supplied'}`\n\n"
+        )
+        return context + MODEL_MODIFICATION_WORKFLOW
 
     # =========================================================================
     # AI Guidance Prompts
@@ -150,6 +173,9 @@ Or read the full `freecad://best-practices` resource for comprehensive documenta
                 - "export": File export operations
                 - "debugging": Troubleshooting issues
                 - "validation": Checking model health
+                - "drawing_reconstruction": Build a model from drawing views
+                - "model_modification": Modify an existing parametric model
+                - "visual_validation": ACT-OBSERVE-REACT checkpoint protocol
 
         Returns:
             Targeted guidance for the task type.
@@ -170,7 +196,7 @@ Or read the full `freecad://best-practices` resource for comprehensive documenta
 ## Key Principles
 - **All Operations are Undoable**: Every tool operation is wrapped in a transaction
 - **Validate Early**: After any geometry creation, use `validate_object()` to check validity
-- **Use safe_execute()**: For risky operations with automatic rollback on failure
+- **Prefer standard tools**: Use `safe_execute()` only when a standard tool is missing or demonstrably invalid
 - **Check Version Compatibility**: FreeCAD 1.x changed some APIs (see best-practices resource)
 
 ## Undo/Redo Support
@@ -403,7 +429,7 @@ Check these fields:
 4. `recompute_document()` - Refresh everything
 
 ## Using safe_execute
-For risky operations:
+Use this only when standard MCP tools cannot perform the required operation:
 ```
 safe_execute(
     code="... risky Python code ...",
@@ -443,7 +469,7 @@ Checks document and auto-undoes if problems:
 - Returns both validation and undo results
 
 ### safe_execute(code, validate_after, auto_undo_on_failure)
-Protected code execution:
+Fallback protected code execution; do not use it instead of available standard tools:
 - Wraps code in transaction
 - Validates result if validate_after=True
 - Auto-reverts if validation fails and auto_undo_on_failure=True
@@ -475,6 +501,9 @@ safe_execute(
 - Object.State - FreeCAD error flags
 - Shape existence - Object has geometry
 - Recompute state - Object up to date""",
+            "drawing_reconstruction": DRAWING_RECONSTRUCTION_WORKFLOW,
+            "model_modification": MODEL_MODIFICATION_WORKFLOW,
+            "visual_validation": VISUAL_CHECKPOINT_PROTOCOL,
         }
 
         return guidance.get(task_type, guidance["general"])

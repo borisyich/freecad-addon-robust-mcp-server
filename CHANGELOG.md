@@ -10,6 +10,12 @@
 - Added an optional world-space `direction` argument to `pad_sketch`. This avoids relying on plane-specific `Reversed` semantics, which can differ with sketch support orientation. The tool now reports `sketch_normal`, `effective_direction`, and the resolved `reversed` value.
 - Added multimodal image delivery: `get_screenshot(return_image=True)`, `open_image(path)`, and `compare_images(reference_path, candidate_path)` now return real MCP `ImageContent` instead of relying on paths or base64 text.
 - Fixed the global X/Y/Z corner indicator in screenshots. FreeCAD's native corner cross is a screen-space feedback decoration and can be omitted by `saveImage`; `get_screenshot(show_corner_cross=True)` now derives the projected axes from the active camera and composites the triad into the PNG using Qt `QImage`/`QPainter`.
+- Added root `AGENTS.md` and synchronized Codex/Cline/repository engineering rules.
+- Added `reproduce_from_drawing` and `modify_existing_model` MCP prompts.
+- Added `freecad://workflows/drawing-reconstruction` and `freecad://workflows/model-modification` resources.
+- Reworked `freecad_startup` into a compact task router and clarified that MCP prompts/resources are discoverable but not guaranteed to be auto-injected by every client.
+- Added deterministic `evaluate_model_checkpoint` decisions (`continue`, `rework`) from geometry evidence, visual-checkpoint status, unresolved dimensions, and a structured discrepancy ledger.
+- Reworked best practices, documentation, and tests around ACT → OBSERVE → REACT, same-view comparison, stop criteria, design-intent-preserving model edits, and standard-tool-first execution.
 
 This project uses **component-specific versioning**. Each component has its own
 release notes and version history.

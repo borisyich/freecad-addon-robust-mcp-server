@@ -942,8 +942,27 @@ compare_images(
 ) -> CallToolResult
 ```
 
-This is a visual comparison aid; it does not claim automatic geometric
-alignment or a correctness score.
+This is a visual comparison aid; it does not perform geometric alignment or calculate a correctness score. The result metadata has `assessment_status="not_evaluated"` and requires a discrepancy ledger followed by `evaluate_model_checkpoint`. Reference and candidate must show equivalent views.
+
+#### evaluate_model_checkpoint
+
+Apply a deterministic reaction policy after geometric validation and visual comparison.
+
+```python
+evaluate_model_checkpoint(
+    checkpoint_name: str,
+    geometry_valid: bool,
+    solid_count: int | None = None,
+    expected_solid_count: int | None = 1,
+    dimension_checks_passed: bool = True,
+    visual_comparison_performed: bool = False,
+    view_match_confirmed: bool = True,
+    unresolved_dimensions: list[str] | None = None,
+    discrepancies: list[dict] | None = None,
+) -> dict
+```
+
+The decision is `continue`, `rework`. The tool does not inspect pixels; it enforces stop criteria against the agent-authored evidence. Do not create the next feature unless `can_continue=true`.
 
 ### View Control
 
