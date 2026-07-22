@@ -2026,7 +2026,7 @@ The MCP server provides a `freecad://capabilities` resource that returns a compl
 
 | Tool                    | Description                                                 |
 | ----------------------- | ----------------------------------------------------------- |
-| `get_screenshot`        | Capture a view and return MCP image content. **Requires GUI mode.** |
+| `get_screenshot`        | Capture a view as MCP image content with a camera-aware X/Y/Z triad composited into the PNG by default. **Requires GUI mode.** |
 | `open_image`            | Open a local image and return MCP image content. |
 | `compare_images`        | Return a labelled side-by-side visual comparison. |
 | `set_view_angle`        | Set camera to standard views (front, top, isometric, etc.). |

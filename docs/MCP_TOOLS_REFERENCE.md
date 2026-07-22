@@ -890,6 +890,8 @@ get_screenshot(
     doc_name: str | None = None,
     fit_all: bool = True,
     background: str = "White",
+    show_corner_cross: bool = True,
+    corner_cross_size: int = 10,
     save_to_disk: bool = False,
     output_path: str | None = None,
     return_image: bool = True,
@@ -900,6 +902,17 @@ get_screenshot(
 With `return_image=True`, the result contains real MCP `ImageContent`, so a
 multimodal agent can inspect the pixels. A path or base64 string shown as text
 is not equivalent to visual context.
+
+`show_corner_cross=True` is the default. It adds the global X/Y/Z orientation
+indicator to the lower-right corner of the PNG. FreeCAD's native corner cross is
+a screen-space feedback decoration and is not reliably included by
+`View3DInventorPy.saveImage`; the MCP screenshot pipeline therefore derives the
+axis directions from the active camera orientation and composites the triad into
+the saved PNG with Qt `QImage`/`QPainter`.
+
+`corner_cross_size` is an approximate percentage of the canvas and accepts
+values from 1 to 100. Set `show_corner_cross=False` only for clean presentation
+images. Any native interactive-view setting is restored after capture.
 
 **View angles:** `Isometric`, `Front`, `Back`, `Top`, `Bottom`, `Left`, `Right`, `FitAll`
 

@@ -26,13 +26,15 @@ get_screenshot(
     doc_name="PartDocument",
     fit_all=True,
     background="White",
+    show_corner_cross=True,
+    corner_cross_size=10,
     save_to_disk=True,
     output_path="screenshots/after_ring.png",
     return_data=False,
 )
 ```
 
-The image is returned as MCP `ImageContent` for actual visual inspection, while disk saving retains a reproducible checkpoint. Keep `return_data=False` so base64 is not duplicated as text metadata.
+The image is returned as MCP `ImageContent` for actual visual inspection, while disk saving retains a reproducible checkpoint. The global X/Y/Z corner cross is painted into the resulting PNG from the active camera orientation, rather than relying on FreeCAD's native screen overlay. Require `corner_cross_embedded=true` and `corner_cross_render_mode="qimage_overlay"` before treating the screenshot as orientation evidence. Keep `return_data=False` so base64 is not duplicated as text metadata.
 
 ## Bracket regression
 

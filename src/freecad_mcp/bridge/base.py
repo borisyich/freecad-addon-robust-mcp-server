@@ -493,6 +493,8 @@ class FreecadBridge(ABC):
         doc_name: str | None = None,
         fit_all: bool = True,
         background: str = "White",
+        show_corner_cross: bool = True,
+        corner_cross_size: int = 10,
         save_to_disk: bool = False,
         output_path: str | None = None,
         return_data: bool = True,
@@ -506,6 +508,8 @@ class FreecadBridge(ABC):
             doc_name: Document name (uses active if None).
             fit_all: Fit visible geometry after setting the view.
             background: FreeCAD saveImage background mode.
+            show_corner_cross: Show the global X/Y/Z corner orientation indicator.
+            corner_cross_size: Approximate percentage of the view used by the indicator.
             save_to_disk: Persist the screenshot on disk.
             output_path: Optional explicit path for persisted output.
             return_data: Return base64 image data in the result.

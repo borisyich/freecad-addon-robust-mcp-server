@@ -27,6 +27,8 @@ def register_view_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> N
         doc_name: str | None = None,
         fit_all: bool = True,
         background: str = "White",
+        show_corner_cross: bool = True,
+        corner_cross_size: int = 10,
         save_to_disk: bool = False,
         output_path: str | None = None,
         return_image: bool = True,
@@ -47,6 +49,10 @@ def register_view_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> N
             doc_name: Document to activate and capture. Uses active document if None.
             fit_all: Fit all visible objects after setting the view.
             background: FreeCAD saveImage mode: ``White`` or ``Current``.
+            show_corner_cross: Show the global X/Y/Z orientation indicator in
+                the lower-right corner. Defaults to True for engineering review.
+            corner_cross_size: Approximate percentage of the 3D-view canvas used
+                by the corner cross. Must be between 1 and 100.
             save_to_disk: Persist the PNG on disk.
             output_path: Optional PNG path. When omitted, FreeCAD creates a file
                 under ``./screenshots`` when disk saving is enabled.
@@ -79,6 +85,8 @@ def register_view_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> N
             return image_error("width and height must be positive")
         if background not in {"White", "Current"}:
             return image_error("background must be 'White' or 'Current'")
+        if not 1 <= corner_cross_size <= 100:
+            return image_error("corner_cross_size must be between 1 and 100")
         if output_path is not None and not save_to_disk:
             return image_error("output_path requires save_to_disk=True")
         if not save_to_disk and not return_image and not return_data:
@@ -93,6 +101,8 @@ def register_view_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> N
             doc_name=doc_name,
             fit_all=fit_all,
             background=background,
+            show_corner_cross=show_corner_cross,
+            corner_cross_size=corner_cross_size,
             save_to_disk=save_to_disk,
             output_path=output_path,
             return_data=need_base64,

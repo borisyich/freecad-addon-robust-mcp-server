@@ -436,7 +436,7 @@ The Robust MCP Server provides **150+ tools** organized into categories. Tools m
 
 | Tool                    | Description                                     | Mode |
 | ----------------------- | ----------------------------------------------- | ---- |
-| `get_screenshot`        | Return a FreeCAD view as real MCP image content | GUI  |
+| `get_screenshot`        | Return a FreeCAD view as MCP image content with a global X/Y/Z corner cross by default | GUI  |
 | `open_image`            | Open a local drawing or saved screenshot         | Both |
 | `compare_images`        | Compare reference and candidate side by side     | Both |
 | `set_view_angle`        | Set camera to standard views (Front, Top, etc.) | GUI  |

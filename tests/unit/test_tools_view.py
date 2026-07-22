@@ -159,10 +159,25 @@ class TestViewTools:
             doc_name=None,
             fit_all=True,
             background="White",
+            show_corner_cross=True,
+            corner_cross_size=10,
             save_to_disk=True,
             output_path="/tmp/bracket.png",
             return_data=False,
         )
+
+    @pytest.mark.asyncio
+    async def test_get_screenshot_rejects_invalid_corner_cross_size(
+        self, register_tools, mock_bridge
+    ):
+        """Corner-cross size must be a sensible percentage of the canvas."""
+        result = await register_tools["get_screenshot"](corner_cross_size=0)
+
+        assert result.isError is True
+        assert "corner_cross_size must be between 1 and 100" in (
+            result.structuredContent["error"]
+        )
+        mock_bridge.get_screenshot.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_get_screenshot_rejects_unused_output_path(

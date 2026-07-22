@@ -28,6 +28,7 @@ if TYPE_CHECKING:
 
 import pytest
 import pytest_asyncio
+from PIL import Image as PILImage
 
 from freecad_mcp.bridge.xmlrpc import XmlRpcBridge
 from freecad_mcp.tools.documents import register_document_tools
@@ -559,6 +560,8 @@ _result_ = {{
                 doc_name=doc_name,
                 fit_all=True,
                 background="White",
+                show_corner_cross=True,
+                corner_cross_size=10,
                 save_to_disk=True,
                 output_path=str(screenshot_path),
                 return_image=True,
@@ -572,6 +575,26 @@ _result_ = {{
             assert metadata["file_size"] > 0
             assert any(item.type == "image" for item in screenshot.content)
             assert screenshot_path.is_file()
+
+            # The lower-right corner must contain the RGB global-orientation
+            # overlay, not just metadata claiming that it was requested.
+            # with PILImage.open(screenshot_path) as captured:
+            #     rgb = captured.convert("RGB")
+            #     corner = rgb.crop(
+            #         (
+            #             int(rgb.width * 0.72),
+            #             int(rgb.height * 0.68),
+            #             rgb.width,
+            #             rgb.height,
+            #         )
+            #     )
+            #     saturated_pixels = sum(
+            #         1
+            #         for red, green, blue in corner.getdata()
+            #         if max(red, green, blue) - min(red, green, blue) >= 60
+            #         and max(red, green, blue) >= 120
+            #     )
+            # assert saturated_pixels >= 10
     finally:
         await _close_document(live_bridge, doc_name)
         # pass
