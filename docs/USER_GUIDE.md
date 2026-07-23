@@ -504,3 +504,17 @@ If the MCP bridge isn't responding:
 - See [MCP_TOOLS_REFERENCE.md](MCP_TOOLS_REFERENCE.md) for detailed API documentation
 - Explore the FreeCAD wiki for advanced techniques
 - Practice with simple parts before attempting complex assemblies
+
+## Examples of user prompts
+
+### drawing from https://huggingface.co/spaces/HuggingAI4Engineering/CADGenBench № 128
+The target drawing of the part is located at "path\to\image.png".
+Task: Act as a designer and lay out the part in a plan of action for constructing a 3D model of the part.
+Next, use freecad-mcp and 3D model the part.
+IMPORTANT:
+1. The 3D model must be parametric for easy editing.
+2. Use the "act-observe-reaction" engineering cycle.
+For a full description of the work and available skills, please refer to the file path\to\freecad-addon-robust-mcp-server\AGENTS.md.
+Also, use the MCP resources and prompts – they describe many useful and important things for a design engineer.
+3. Verify every step of your work.
+4. The default safe_execute and execute_python tools are not required. Use them only in cases where you cannot complete the task using other standard mcp tools.
