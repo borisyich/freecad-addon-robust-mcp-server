@@ -2028,6 +2028,7 @@ The MCP server provides a `freecad://capabilities` resource that returns a compl
 | ----------------------- | ----------------------------------------------------------- |
 | `get_screenshot`        | Capture a view as MCP image content with a camera-aware X/Y/Z triad composited into the PNG by default. **Requires GUI mode.** |
 | `open_image`            | Open a local image and return MCP image content. |
+| `open_image_tiles`      | Return a numbered overview and enlarged overlapping fragments. |
 | `compare_images`        | Return a labelled side-by-side visual comparison; it does not approve the checkpoint. |
 | `evaluate_model_checkpoint` | Enforce `continue`, `rework` from checkpoint evidence. |
 | `set_view_angle`        | Set camera to standard views (front, top, isometric, etc.). |

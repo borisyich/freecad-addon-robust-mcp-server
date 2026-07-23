@@ -79,14 +79,19 @@ the model matches the reference.
 1. Call `open_image(reference_path)` so the model receives pixels, not only a
    filesystem path.
 2. Inspect the whole sheet only for layout and view identification.
-3. Create an evidence table before modeling. Each row must contain:
+3. If you can't recognize some features call `open_image_tiles(reference_path)` so the model receives a numbered
+   overview and overlapping enlarged fragments, not only a filesystem path.
+4. Inspect the overview for global layout and inspect every fragment for local
+   geometry and dimensions. Cropping gives each region more visual tokens;
+   upscaling does not recover information absent from the source pixels.
+5. Reconcile features crossing tile boundaries using the overlap and overview.
+6. Create an evidence table before modeling. Each row must contain:
    - feature or requirement;
    - explicit dimension/value;
    - source view or crop;
    - status: `explicit`, `derived`, or `assumed`;
    - confidence and unresolved questions.
-4. If a required dimension is unreadable, contradictory, or missing, stop and ask
-   the user. Do not invent a convenient value and continue silently.
+7. If a required dimension is unreadable, contradictory, or missing, you need to make a guess based on scale. Do not invent a convenient value and continue silently - you should write all these cases in response.
 
 Minimum feature inventory:
 
@@ -121,7 +126,9 @@ boss, bend, Pocket, Hole, cut, pattern, fillet, or chamfer:
 
 ### ACT
 
-Execute exactly one logically reviewable feature. Recompute the document.
+Execute exactly one logically reviewable feature. Recompute the document. The
+server then changes the workflow phase to `observation_required` and rejects the
+next protected modeling operation.
 
 ### OBSERVE — geometry
 
@@ -158,7 +165,8 @@ and the discrepancy ledger.
   and repeat the same checkpoint.
 
 A screenshot without a written discrepancy ledger and reaction decision is not a
-completed observation.
+completed observation. The server verifies that validation, a disk screenshot,
+`open_image` of that exact screenshot, and `compare_images` actually occurred.
 
 ## 4. Blocking conditions
 
@@ -194,7 +202,9 @@ single "looks similar" judgment. Verify:
 MODEL_MODIFICATION_WORKFLOW: Final[str] = r"""# Existing model modification workflow
 
 Use this workflow when changing an existing FreeCAD model, including changes
-requested from a drawing or image.
+requested from a drawing or image. Start with
+`begin_modeling_workflow(task_type="model_modification", ...)` and submit the
+structured baseline/change plan before editing.
 
 ## 1. Preserve design intent first
 

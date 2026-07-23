@@ -618,7 +618,7 @@ For a fully constrained sketch:
 The sketch can then be:
 - Padded (extruded) with `pad_sketch`
 - Pocketed (cut) with `pocket_sketch`
-- Revolved with `execute_python` using PartDesign Revolution
+- Revolved with `revolution_sketch`
 """
 
     @mcp.prompt()
@@ -826,56 +826,20 @@ Use `inspect_object` with `include_shape=True` to get:
 - Vertex/edge/face counts
 - Validity status
 
-## Detailed Analysis with Python
+## Detailed Analysis with Typed Tools
 
-### Bounding Box
-```python
-execute_python('''
-obj = FreeCAD.ActiveDocument.getObject("ObjectName")
-bb = obj.Shape.BoundBox
-_result_ = {
-    "min": [bb.XMin, bb.YMin, bb.ZMin],
-    "max": [bb.XMax, bb.YMax, bb.ZMax],
-    "size": [bb.XLength, bb.YLength, bb.ZLength],
-    "center": [bb.Center.x, bb.Center.y, bb.Center.z]
-}
-''')
-```
+1. Call `inspect_object(object_name="ObjectName", include_shape=True)`.
+2. Read the returned bounding box, volume, area, topology counts, placement,
+   dependencies, and readable properties.
+3. Call `validate_object(object_name="ObjectName")` for geometric validity.
+4. Call `validate_document()` when downstream features or Body Tip state may be
+   affected.
+5. Use `get_screenshot` only after the geometric checks and compare an equivalent
+   reference view.
 
-### Center of Mass
-```python
-execute_python('''
-obj = FreeCAD.ActiveDocument.getObject("ObjectName")
-com = obj.Shape.CenterOfMass
-_result_ = {"x": com.x, "y": com.y, "z": com.z}
-''')
-```
-
-### Moments of Inertia
-```python
-execute_python('''
-obj = FreeCAD.ActiveDocument.getObject("ObjectName")
-moi = obj.Shape.MatrixOfInertia
-_result_ = {
-    "Ixx": moi.A11, "Iyy": moi.A22, "Izz": moi.A33,
-    "Ixy": moi.A12, "Ixz": moi.A13, "Iyz": moi.A23
-}
-''')
-```
-
-## Validation
-Check for geometry issues:
-```python
-execute_python('''
-obj = FreeCAD.ActiveDocument.getObject("ObjectName")
-shape = obj.Shape
-_result_ = {
-    "is_valid": shape.isValid(),
-    "is_closed": shape.isClosed() if hasattr(shape, 'isClosed') else None,
-    "has_shape": shape.ShapeType != "Compound" or len(shape.Solids) > 0
-}
-''')
-```
+Do not replace these typed inspections with direct Python. If a required physical
+property is not exposed, report the missing field so a dedicated MCP tool can be
+added.
 """
 
     @mcp.prompt()
@@ -899,30 +863,20 @@ recompute_document()  # Force full recompute
 ### 2. Invalid Shape
 **Symptom:** Boolean operations fail, export errors
 **Diagnosis:**
-```python
-execute_python('''
-obj = FreeCAD.ActiveDocument.getObject("ObjectName")
-_result_ = {
-    "valid": obj.Shape.isValid(),
-    "type": obj.Shape.ShapeType,
-    "check": obj.Shape.check() if hasattr(obj.Shape, 'check') else "N/A"
-}
-''')
+```text
+validate_object(object_name="ObjectName")
+inspect_object(object_name="ObjectName", include_shape=True)
 ```
+If invalid, undo the failed feature and confirm the previous Body Tip is valid.
 
 ### 3. Sketch Not Fully Constrained
 **Symptom:** Sketch geometry moves unexpectedly
 **Check constraints:**
-```python
-execute_python('''
-sketch = FreeCAD.ActiveDocument.getObject("SketchName")
-_result_ = {
-    "dof": sketch.solve(),  # Degrees of freedom
-    "constraint_count": sketch.ConstraintCount,
-    "geometry_count": sketch.GeometryCount
-}
-''')
+```text
+get_sketch_info(sketch_name="SketchName")
 ```
+Inspect degrees of freedom, conflicting/redundant constraints, open geometry,
+and under-constrained elements before creating the 3D feature.
 
 ### 4. Object Dependencies
 **Symptom:** Can't delete object, unexpected behavior
@@ -1165,27 +1119,18 @@ get_connection_status()
 - Try increasing timeout values
 - Check FreeCAD console for errors
 
-## Execution Issues
+## Tool Execution Issues
 
-### Code Execution Timeout
-- Increase timeout_ms parameter
-- Break complex operations into smaller steps
-- Check for infinite loops in code
+### Operation Timeout
+- increase the server timeout only after confirming the operation is valid;
+- split the CAD change into one typed feature per call;
+- inspect FreeCAD console output and document state;
+- do not replace the failed typed operation with arbitrary Python.
 
 ### No Result Returned
-- Ensure you set `_result_ = value` in your code
-- Check for exceptions in stderr
-
-**Debug execution:**
-```python
-execute_python('''
-try:
-    # Your code
-    _result_ = {"success": True, "data": result}
-except Exception as e:
-    _result_ = {"success": False, "error": str(e)}
-''')
-```
+- check `get_connection_status` and `get_console_output`;
+- verify that the expected FreeCAD document is active;
+- retry only the same typed operation after identifying the cause.
 
 ## GUI Issues
 

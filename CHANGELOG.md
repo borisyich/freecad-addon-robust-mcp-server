@@ -16,6 +16,7 @@
 - Reworked `freecad_startup` into a compact task router and clarified that MCP prompts/resources are discoverable but not guaranteed to be auto-injected by every client.
 - Added deterministic `evaluate_model_checkpoint` decisions (`continue`, `rework`) from geometry evidence, visual-checkpoint status, unresolved dimensions, and a structured discrepancy ledger.
 - Reworked best practices, documentation, and tests around ACT → OBSERVE → REACT, same-view comparison, stop criteria, design-intent-preserving model edits, and standard-tool-first execution.
+- Added `open_image_tiles`, which returns a numbered overview and up to nine enlarged overlapping drawing fragments as labelled MCP image blocks. Each tile includes an image-only `VISUAL ACK` challenge that strict workflows require in the submitted plan, proving that tile pixels were actually inspected rather than merely acknowledged by index.
 
 This project uses **component-specific versioning**. Each component has its own
 release notes and version history.

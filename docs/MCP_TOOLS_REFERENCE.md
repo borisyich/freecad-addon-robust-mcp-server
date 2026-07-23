@@ -927,6 +927,33 @@ open_image(path: str, max_dimension: int = 4096) -> CallToolResult
 Supported formats: PNG, JPEG, WebP. Relative paths are resolved from the MCP
 server working directory. Local file access must be enabled.
 
+#### open_image_tiles
+
+Return a numbered overview and ordered, enlarged, overlapping fragments.
+
+```python
+open_image_tiles(
+    path: str,
+    rows: int = 2,
+    columns: int = 3,
+    overlap_percent: float = 12.0,
+    tile_max_dimension: int = 1600,
+    include_overview: bool = True,
+    save_to_disk: bool = True,
+    output_dir: str | None = None,
+) -> CallToolResult
+```
+
+The result contains one text block before every image, identifying the fragment
+number, grid position, source pixel rectangle, overlap, and resize scale. Each
+detail image also contains a `VISUAL ACK` code that is deliberately omitted from
+metadata; strict workflows require the model to read and submit every code. The
+overview preserves global context. Cropping gives small drawing details a larger
+visual budget; upscaling does not recover information absent from the source.
+A maximum of nine tiles is allowed. Tiles are saved by default under
+`./image_tiles/<source>_<grid>` so `compare_images` can use an exact reference
+fragment instead of the whole sheet.
+
 #### compare_images
 
 Create a labelled side-by-side image with `REFERENCE` on the left and

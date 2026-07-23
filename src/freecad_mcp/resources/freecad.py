@@ -1403,13 +1403,18 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                             "key_params": ["path", "max_dimension"],
                         },
                         {
+                            "name": "open_image_tiles",
+                            "description": "Return indexed overview plus enlarged overlapping drawing fragments",
+                            "key_params": ["path", "rows", "columns", "overlap_percent"],
+                        },
+                        {
                             "name": "compare_images",
                             "description": "Side-by-side reference/candidate image; requires discrepancy ledger",
                             "key_params": ["reference_path", "candidate_path"],
                         },
                         {
                             "name": "evaluate_model_checkpoint",
-                            "description": "Return continue/rework from checkpoint evidence",
+                            "description": "Return continue/rework/ask_user from checkpoint evidence",
                             "key_params": ["checkpoint_name", "geometry_valid", "discrepancies"],
                         },
                     ],
@@ -1748,7 +1753,8 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                     "description": "Debug a macro by checking console output",
                     "steps": [
                         "Use get_console_output(lines=50) to see recent errors",
-                        "Use execute_python to inspect document state",
+                        "Use list_objects, inspect_object, and validate_document to inspect state",
+                        "Use execute_python to advanced inspect document state",
                     ],
                 },
                 "create_simple_part": {

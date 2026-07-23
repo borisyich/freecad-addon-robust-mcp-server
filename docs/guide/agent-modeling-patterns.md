@@ -1,6 +1,6 @@
 # Modeling patterns for engineering agents
 
-The canonical client rule file is the root [`AGENTS.md`](../../AGENTS.md). It is mirrored in [`.clinerules/freecad-modeling.md`](../../.clinerules/freecad-modeling.md) and [`.agents/AGENT.md`](../../.agents/AGENT.md).
+The canonical client rule file is the root [`AGENTS.md`](../../AGENTS.md). It is mirrored in [`.clinerules/freecad-modeling.md`](../../.clinerules/freecad-modeling.md).
 
 For an explanation of what each client receives automatically and what must be invoked explicitly, see [Agent guidance architecture](agent-guidance-architecture.md).
 
@@ -68,6 +68,8 @@ Proceed only when `decision == "continue"`.
 ## Drawing preparation
 
 Use `open_image` for the overview, inspect individual views, sections, details, and dimension clusters. Compare a candidate only with the equivalent reference view. Do not compare an isometric model view with an orthographic drawing or a small candidate against an entire sheet. Also you may rotate candidate, and the get screenshot.
+
+By the way you can use `open_image_tiles` for dense sheets. It returns a numbered overview and overlapping enlarged fragments. Inspect every fragment, reconcile features crossing tile boundaries, and cite fragment numbers in the evidence table. Cropping gives local details more visual tokens; upscaling does not create information absent from the source. Compare a candidate only with the equivalent reference view.
 
 ## Recommended screenshot call
 

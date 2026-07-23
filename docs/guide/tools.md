@@ -374,6 +374,7 @@ Tools marked with **GUI** only work when FreeCAD is running in GUI mode.
 | ----------------------- | ---- | ---------------------------------- |
 | `get_screenshot`        | GUI  | Capture MCP image content; global X/Y/Z corner cross is enabled by default |
 | `open_image`            | Both | Open a local drawing/screenshot for vision |
+| `open_image_tiles`      | Both | Numbered overview plus enlarged overlapping fragments |
 | `compare_images`        | Both | Return labelled reference/candidate comparison |
 | `set_view_angle`        | Both | Set camera angle                   |
 | `fit_all`               | Both | Fit all objects in view            |

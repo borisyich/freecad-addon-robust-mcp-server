@@ -160,3 +160,57 @@ async def test_compare_images_requires_reaction_gate(registered_tools, tmp_path)
     assert metadata["assessment_status"] == "not_evaluated"
     assert "evaluate_model_checkpoint" in metadata["required_next_step"]["action"]
     assert "observed" in metadata["required_next_step"]["ledger_fields"]
+
+
+@pytest.mark.asyncio
+async def test_open_image_tiles_returns_overview_and_labelled_fragments(
+    registered_tools, tmp_path
+):
+    """Dense drawings should be delivered as overview plus overlapping tiles."""
+    drawing = tmp_path / "drawing.png"
+    output_dir = tmp_path / "tiles"
+    image = PILImage.new("RGB", (900, 600), "white")
+    image.save(drawing, format="PNG")
+
+    result = await registered_tools["open_image_tiles"](
+        str(drawing),
+        rows=2,
+        columns=3,
+        overlap_percent=10,
+        tile_max_dimension=800,
+        output_dir=str(output_dir),
+    )
+
+    assert result.isError is False
+    metadata = result.structuredContent
+    assert metadata["kind"] == "opened_image_tiles"
+    assert metadata["grid"]["tile_count"] == 6
+    assert metadata["grid"]["order"] == "row_major"
+    assert len(metadata["tiles"]) == 6
+    assert sum(isinstance(item, ImageContent) for item in result.content) == 7
+    assert (output_dir / "00_overview.png").is_file()
+    assert (output_dir / "01_r1_c1.png").is_file()
+
+    from freecad_mcp.tools.images import get_tile_visual_acknowledgements
+
+    challenges = get_tile_visual_acknowledgements(output_dir)
+    assert sorted(challenges) == [1, 2, 3, 4, 5, 6]
+    assert all(len(code) == 5 for code in challenges.values())
+    # The expected codes must not leak through model-visible metadata or labels.
+    model_visible = str(metadata) + " ".join(
+        getattr(item, "text", "") for item in result.content
+    )
+    assert all(code not in model_visible for code in challenges.values())
+
+
+@pytest.mark.asyncio
+async def test_open_image_tiles_rejects_excessive_grid(registered_tools, tmp_path):
+    drawing = tmp_path / "drawing.png"
+    _write_image(drawing)
+
+    result = await registered_tools["open_image_tiles"](
+        str(drawing), rows=4, columns=4
+    )
+
+    assert result.isError is True
+    assert "must not exceed 9" in result.structuredContent["error"]

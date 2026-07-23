@@ -438,6 +438,7 @@ The Robust MCP Server provides **150+ tools** organized into categories. Tools m
 | ----------------------- | ----------------------------------------------- | ---- |
 | `get_screenshot`        | Return a FreeCAD view as MCP image content with a global X/Y/Z corner cross by default | GUI  |
 | `open_image`            | Open a local drawing or saved screenshot         | Both |
+| `open_image_tiles`      | Return a numbered overview plus enlarged overlapping fragments | Both |
 | `compare_images`        | Compare reference and candidate side by side     | Both |
 | `evaluate_model_checkpoint` | Enforce continue/rework reaction gate | Both |
 | `set_view_angle`        | Set camera to standard views (Front, Top, etc.) | GUI  |
@@ -454,7 +455,7 @@ The Robust MCP Server provides **150+ tools** organized into categories. Tools m
 
 ### Agent workflow bootstrap
 
-The repository root `AGENTS.md` is the canonical durable instruction file for Codex. The same rules are mirrored in `.clinerules/freecad-modeling.md` and `.agents/AGENT.md`. MCP prompts and resources are task-specific context and may require explicit invocation by the client.
+The repository root `AGENTS.md` is the canonical durable instruction file for Codex. The same rules are mirrored in `.clinerules/freecad-modeling.md`. MCP prompts and resources are task-specific context and may require explicit invocation by the client.
 
 - New model from a drawing: prompt `reproduce_from_drawing` or resource `freecad://workflows/drawing-reconstruction`.
 - Existing-model change: prompt `modify_existing_model` or resource `freecad://workflows/model-modification`.
