@@ -79,7 +79,8 @@ See [Macros Guide](guide/macros.md) for details on using macros with the MCP ser
 | -------------------------------------------------- | ------------------------------------------------- |
 | [Getting Started](getting-started/installation.md) | Installation, configuration, and quick start      |
 | [User Guide](guide/connection-modes.md)            | Connection modes, workbench, macros, and tools    |
-| [Tools Reference](MCP_TOOLS_REFERENCE.md)          | Complete API reference for all 150+ MCP tools     |
+| [Tools Overview](guide/tools.md)                  | Exact generated inventory of all 150+ MCP tools  |
+| [Tools Reference](MCP_TOOLS_REFERENCE.md)          | Detailed signatures/examples for core tools      |
 | [API Reference](api/server.md)                     | Python API documentation                          |
 | [Development](development/contributing.md)         | Contributing, architecture, and development setup |
 | [Comparison](COMPARISON.md)                        | Compare with other FreeCAD MCP implementations    |

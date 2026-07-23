@@ -5,7 +5,6 @@ from __future__ import annotations
 import base64
 import io
 import json
-import secrets
 from pathlib import Path
 from typing import Any
 
@@ -20,36 +19,6 @@ SUPPORTED_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
 MAX_IMAGE_BYTES = 25 * 1024 * 1024
 MAX_IMAGE_PIXELS = 100_000_000
 PILImage.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
-
-_VISUAL_ACK_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-_TILE_VISUAL_ACK_REGISTRY: dict[str, dict[int, str]] = {}
-
-
-def _visual_ack_registry_key(output_dir: str | Path) -> str:
-    """Normalize a tile-output directory without exposing challenge codes."""
-    return str(Path(output_dir).expanduser().resolve()).replace("\\", "/").casefold()
-
-
-def register_tile_visual_acknowledgements(
-    output_dir: str | Path,
-    acknowledgements: dict[int, str],
-) -> None:
-    """Store image-only tile challenges for the server-side workflow guard."""
-    _TILE_VISUAL_ACK_REGISTRY[_visual_ack_registry_key(output_dir)] = {
-        int(index): str(code).strip().upper()
-        for index, code in acknowledgements.items()
-    }
-
-
-def get_tile_visual_acknowledgements(output_dir: str | Path) -> dict[int, str]:
-    """Return a copy of image-only tile challenges for internal enforcement."""
-    return dict(_TILE_VISUAL_ACK_REGISTRY.get(_visual_ack_registry_key(output_dir), {}))
-
-
-def _new_visual_ack_code(length: int = 5) -> str:
-    """Create an OCR-friendly code that is drawn only inside a tile image."""
-    return "".join(secrets.choice(_VISUAL_ACK_ALPHABET) for _ in range(length))
-
 
 def _json_text(payload: dict[str, Any]) -> TextContent:
     """Create compact, model-visible JSON metadata."""
@@ -275,9 +244,8 @@ def _label_tile(
     rows: int,
     columns: int,
     box: tuple[int, int, int, int],
-    visual_ack_code: str,
 ) -> PILImage.Image:
-    """Add an explicit header and image-only acknowledgement challenge."""
+    """Add an explicit source-region header to one delivered tile."""
     source = image.convert("RGB")
     header_height = max(88, round(min(source.size) * 0.11))
     canvas = PILImage.new("RGB", (source.width, source.height + header_height), "white")
@@ -292,19 +260,7 @@ def _label_tile(
     info_font = ImageFont.load_default(
         size=max(16, round(min(source.size) * 0.022))
     )
-    ack_font = ImageFont.load_default(
-        size=max(22, round(min(source.size) * 0.032))
-    )
-    draw.text((14, 9), text, fill="black", font=info_font)
-    # This code intentionally exists only in delivered pixels and the server's
-    # private in-memory registry. It is omitted from MCP metadata/text so the
-    # workflow can verify that the model actually inspected each tile image.
-    draw.text(
-        (14, max(43, header_height - 39)),
-        f"VISUAL ACK: {visual_ack_code}",
-        fill=(20, 70, 185),
-        font=ack_font,
-    )
+    draw.text((14, max(12, (header_height - 18) // 2)), text, fill="black", font=info_font)
     draw.rectangle((0, 0, canvas.width - 1, canvas.height - 1), outline=(90, 90, 90))
     return canvas
 
@@ -402,8 +358,9 @@ def register_image_tools(mcp: Any) -> None:
 
         The result contains an optional numbered overview followed by ordered
         text/image pairs. Every text block identifies the tile number, grid
-        position, source pixel rectangle, overlap, and resize scale. The model must
-        inspect every returned image before submitting its construction plan.
+        position, source pixel rectangle, overlap, and resize scale. This gives the
+        model both global context and higher-resolution local evidence without
+        imposing a separate workflow or acknowledgement protocol.
 
         Args:
             path: Source drawing or reference image.
@@ -483,12 +440,9 @@ def register_image_tools(mcp: Any) -> None:
             else:
                 overview_path = None
 
-            visual_acknowledgements: dict[int, str] = {}
             for index, (row, column, left, top, right, bottom) in enumerate(
                 boxes, start=1
             ):
-                visual_ack_code = _new_visual_ack_code()
-                visual_acknowledgements[index] = visual_ack_code
                 crop = source.crop((left, top, right, bottom))
                 resized, scale = _resize_tile(crop, tile_max_dimension)
                 labelled = _label_tile(
@@ -500,7 +454,6 @@ def register_image_tools(mcp: Any) -> None:
                     rows=rows,
                     columns=columns,
                     box=(left, top, right, bottom),
-                    visual_ack_code=visual_ack_code,
                 )
                 saved_path: str | None = None
                 if target_dir is not None:
@@ -514,8 +467,8 @@ def register_image_tools(mcp: Any) -> None:
                     f"{column + 1}/{columns}; source rectangle "
                     f"x={left}:{right}, y={top}:{bottom}; overlap="
                     f"{overlap_percent:.1f}%; resize scale={scale:.3f}. "
-                    "Read the VISUAL ACK code printed in this image header. Inspect all "
-                    "visible dimensions, feature boundaries, hole counts, radii, hidden "
+                    "Inspect all visible dimensions, feature boundaries, hole counts, "
+                    "radii, hidden "
                     "lines, section marks, and continuations into "
                     "overlapping neighbour fragments. Do not treat this crop as an "
                     "independent drawing or infer symmetry from the crop alone."
@@ -541,12 +494,6 @@ def register_image_tools(mcp: Any) -> None:
                     }
                 )
 
-            if target_dir is not None:
-                register_tile_visual_acknowledgements(
-                    target_dir,
-                    visual_acknowledgements,
-                )
-
             payload = {
                 "success": True,
                 "kind": "opened_image_tiles",
@@ -560,20 +507,14 @@ def register_image_tools(mcp: Any) -> None:
                 },
                 "tile_max_dimension": tile_max_dimension,
                 "overview_included": include_overview,
-                "visual_ack_required": True,
-                "visual_ack_instruction": (
-                    "Read the VISUAL ACK code printed inside every detail image and "
-                    "submit index/code pairs with submit_modeling_plan. Codes are "
-                    "intentionally absent from metadata and text blocks."
-                ),
                 "saved_to_disk": save_to_disk,
                 "output_dir": str(target_dir) if target_dir is not None else None,
                 "overview_saved_path": overview_path,
                 "tiles": tile_metadata,
-                "required_next_step": (
-                    "Inspect every returned fragment, record its image-only VISUAL "
-                    "ACK code, reconcile overlaps with the overview, then submit the "
-                    "acknowledgements, structured evidence table, and feature plan."
+                "recommended_review": (
+                    "Inspect every returned fragment, reconcile overlaps with the "
+                    "overview, and record dimensions/features with their fragment "
+                    "indices before choosing the modeling strategy."
                 ),
                 "limitations": [
                     "Upscaling does not recover detail absent from the source pixels.",
@@ -598,8 +539,9 @@ def register_image_tools(mcp: Any) -> None:
         The left panel is always REFERENCE and the right panel is CANDIDATE.
         This does not claim pixel-perfect alignment or compute a correctness score;
         it gives the vision model both images in one unambiguous visual context.
-        After this call, the agent must write a discrepancy ledger and call
-        ``evaluate_model_checkpoint`` before continuing to the next feature.
+        When the comparison exposes a meaningful mismatch, describe the concrete
+        discrepancy and rework the causal feature. ``evaluate_model_checkpoint``
+        remains available when a formal ledger is useful, but is not mandatory.
 
         Args:
             reference_path: Drawing or expected reference image.
@@ -674,10 +616,10 @@ def register_image_tools(mcp: Any) -> None:
                     "It does not align geometry or compute CAD correctness.",
                     "Reference and candidate must show equivalent views.",
                 ],
-                "required_next_step": {
-                    "action": "write_discrepancy_ledger_then_call_evaluate_model_checkpoint",
-                    "ledger_fields": list(DISCREPANCY_LEDGER_FIELDS),
-                    "decision_values": ["continue", "rework", "ask_user"],
+                "recommended_review": {
+                    "action": "describe_concrete_discrepancies_and_rework_if_needed",
+                    "optional_ledger_fields": list(DISCREPANCY_LEDGER_FIELDS),
+                    "optional_decision_values": ["continue", "rework"],
                 },
             }
             return image_tool_result(

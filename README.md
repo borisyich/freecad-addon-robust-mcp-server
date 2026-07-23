@@ -45,17 +45,17 @@ An [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server that 
         - [Headless Mode](#headless-mode)
         - [Embedded Mode (Linux Only)](#embedded-mode-linux-only)
     - [Available Tools](#available-tools)
-      - [Execution & Debugging (5 tools)](#execution--debugging-5-tools)
-      - [Document Management (7 tools)](#document-management-7-tools)
-      - [Object Creation - Primitives (8 tools)](#object-creation---primitives-8-tools)
-      - [Object Management (12 tools)](#object-management-12-tools)
-      - [PartDesign - Sketching (14 tools)](#partdesign---sketching-14-tools)
-      - [PartDesign - Patterns & Edges (5 tools)](#partdesign---patterns--edges-5-tools)
-      - [View & Display (11 tools)](#view--display-11-tools)
-      - [Undo/Redo (3 tools)](#undoredo-3-tools)
-      - [Export/Import (7 tools)](#exportimport-7-tools)
-      - [Macro Management (6 tools)](#macro-management-6-tools)
-      - [Parts Library (2 tools)](#parts-library-2-tools)
+      - [Execution & Debugging](#execution--debugging)
+      - [Document Management](#document-management)
+      - [Object Creation - Primitives](#object-creation---primitives)
+      - [Object Management](#object-management)
+      - [PartDesign - Sketching](#partdesign---sketching-and-core-features)
+      - [PartDesign - Patterns & Edges](#partdesign---patterns--edges)
+      - [View & Display](#view--display)
+      - [Undo/Redo](#undoredo)
+      - [Export/Import](#exportimport)
+      - [Macro Management](#macro-management)
+      - [Parts Library](#parts-library)
   - [For Developers](#for-developers)
   - [Robust MCP Server Development](#robust-mcp-server-development)
     - [Prerequisites](#prerequisites)
@@ -347,7 +347,7 @@ FREECAD_MODE=embedded freecad-mcp
 
 ### Available Tools
 
-The Robust MCP Server provides **150+ tools** organized into categories. Tools marked with **GUI** require FreeCAD to be running in GUI mode; they will return an error in headless mode.
+The server currently registers **150+ MCP tools**. The tables below list common tools rather than duplicating the exact inventory. See the generated [Tools Overview](docs/guide/tools.md) or the MCP client's discovered tool list for the authoritative inventory; [MCP Tools Reference](docs/MCP_TOOLS_REFERENCE.md) provides detailed examples for core tools, while `freecad://capabilities` is a curated runtime overview. Tools marked with **GUI** require FreeCAD to be running in GUI mode; they return a structured error in headless mode.
 
 #### Execution & Debugging (5 tools)
 
@@ -440,7 +440,7 @@ The Robust MCP Server provides **150+ tools** organized into categories. Tools m
 | `open_image`            | Open a local drawing or saved screenshot         | Both |
 | `open_image_tiles`      | Return a numbered overview plus enlarged overlapping fragments | Both |
 | `compare_images`        | Compare reference and candidate side by side     | Both |
-| `evaluate_model_checkpoint` | Enforce continue/rework reaction gate | Both |
+| `evaluate_model_checkpoint` | Optional deterministic continue/rework assessment | Both |
 | `set_view_angle`        | Set camera to standard views (Front, Top, etc.) | GUI  |
 | `fit_all`               | Zoom to fit all objects in view                 | GUI  |
 | `zoom_in`               | Zoom in by a factor                             | GUI  |
@@ -453,15 +453,38 @@ The Robust MCP Server provides **150+ tools** organized into categories. Tools m
 | `activate_workbench`    | Switch to a different workbench                 | All  |
 
 
-### Agent workflow bootstrap
+### Agent engineering guidance
 
-The repository root `AGENTS.md` is the canonical durable instruction file for Codex. The same rules are mirrored in `.clinerules/freecad-modeling.md`. MCP prompts and resources are task-specific context and may require explicit invocation by the client.
+Detailed modeling policy lives in the repository Skill:
 
-- New model from a drawing: prompt `reproduce_from_drawing` or resource `freecad://workflows/drawing-reconstruction`.
-- Existing-model change: prompt `modify_existing_model` or resource `freecad://workflows/model-modification`.
-- After every major feature: validate geometry, compare equivalent views, write a discrepancy ledger, then call `evaluate_model_checkpoint`.
+```text
+.agents/skills/freecad-engineering/SKILL.md
+```
 
-`compare_images` is not an automatic correctness metric. Continue only when the checkpoint tool returns `decision=continue`.
+The root `AGENTS.md` is a short Codex router to `$freecad-engineering`; Cline
+uses `.clinerules/freecad-modeling.md`. When the server runs from the repository checkout, MCP clients can read the
+same Skill from `freecad://skills/freecad-engineering`. Prompts and
+`freecad://best-practices` provide routing/context rather than copied policies.
+
+The Skill classifies likely stock and manufacturing process, covers milling,
+turning, and sheet-metal strategies, and requires native editable parametric
+structure unless the user explicitly requests direct B-rep output.
+`execute_python`, `safe_execute`, and `run_macro` remain available.
+
+After any model creation or geometry change, call `validate_parametric_model`
+immediately before the final response and summarize the actual Bodies, Tips,
+history, sketches, solver state, direct solids, and warnings. The report is
+informative and does not by itself prove drawing correspondence.
+
+#### Validation & diagnostics (5 tools)
+
+| Tool | Description | Mode |
+| --- | --- | --- |
+| `validate_object` | Check one object's shape and FreeCAD state | All |
+| `validate_document` | Check geometric health across a document | All |
+| `validate_parametric_model` | Report Bodies, Tips, ordered history, sketch solver/profile state, expressions, and solids outside Bodies | All |
+| `undo_if_invalid` | Undo after invalid document state | All |
+| `safe_execute` | Run Python with optional validation and rollback | All |
 
 #### Undo/Redo (3 tools)
 

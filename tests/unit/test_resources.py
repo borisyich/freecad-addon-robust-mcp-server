@@ -418,69 +418,49 @@ class TestFreecadResources:
         assert data["count"] == 3
 
     @pytest.mark.asyncio
+    async def test_resource_engineering_skill(
+        self, register_resources: dict[str, Callable[..., Any]], mock_bridge: AsyncMock
+    ) -> None:
+        resource = register_resources["freecad://skills/freecad-engineering"]
+        result = await resource()
+
+        assert "name: freecad-engineering" in result
+        assert "validate_parametric_model" in result
+        assert "Milling" in result
+        assert "Turning" in result
+        assert "Sheet-metal" in result
+
+    @pytest.mark.asyncio
     async def test_resource_best_practices(
         self, register_resources: dict[str, Callable[..., Any]], mock_bridge: AsyncMock
     ) -> None:
-        """freecad://best-practices should return AI guidance."""
-        resource_best_practices = register_resources["freecad://best-practices"]
-        result = await resource_best_practices()
-        data = json.loads(result)
+        resource = register_resources["freecad://best-practices"]
+        data = json.loads(await resource())
 
-        # Should have description
-        assert "description" in data
-        assert "Best Practices" in data["description"]
-
-        # Should have critical patterns section
-        assert "critical_patterns" in data
-        assert "validation_first" in data["critical_patterns"]
-        assert "partdesign_workflow" in data["critical_patterns"]
-        assert "transaction_safety" in data["critical_patterns"]
-
-        # Should have version compatibility section
-        assert "version_compatibility" in data
-        assert "critical_changes" in data["version_compatibility"]
-        assert "sketch_attachment" in data["version_compatibility"]["critical_changes"]
-
-        # Should have GUI vs headless guidance
-        assert "gui_vs_headless" in data
-        assert "gui_only_features" in data["gui_vs_headless"]
-        assert "headless_safe_features" in data["gui_vs_headless"]
-
-        # Should have common pitfalls
-        assert "common_pitfalls" in data
-        assert "standalone_features" in data["common_pitfalls"]
-
-        # Should have recommended workflows
-        assert "recommended_workflows" in data
-        assert "creating_parts" in data["recommended_workflows"]
-        assert "debugging_issues" in data["recommended_workflows"]
-
-        # Should have error recovery section
-        assert "error_recovery" in data
-
-        # Should have performance tips
-        assert "performance_tips" in data
+        assert data["canonical_resource"] == "freecad://skills/freecad-engineering"
+        assert data["mandatory_final_diagnostic"] == "validate_parametric_model"
+        assert "single source" in " ".join(data["notes"]).lower()
 
     @pytest.mark.asyncio
     async def test_resource_drawing_reconstruction_workflow(
         self, register_resources: dict[str, Callable[..., Any]], mock_bridge: AsyncMock
     ) -> None:
         resource = register_resources["freecad://workflows/drawing-reconstruction"]
-        data = json.loads(await resource())
+        result = await resource()
 
-        assert data["prompt"] == "reproduce_from_drawing"
-        assert "ACT → OBSERVE → REACT" in data["workflow_markdown"]
-        assert "wrong_count" in data["blocking_categories"]
+        assert "$freecad-engineering" in result
+        assert "Reconstruct from drawings or images" in result
+        assert "validate_parametric_model" in result
 
     @pytest.mark.asyncio
     async def test_resource_model_modification_workflow(
         self, register_resources: dict[str, Callable[..., Any]], mock_bridge: AsyncMock
     ) -> None:
         resource = register_resources["freecad://workflows/model-modification"]
-        data = json.loads(await resource())
+        result = await resource()
 
-        assert data["prompt"] == "modify_existing_model"
-        assert "design intent" in data["workflow_markdown"].lower()
+        assert "$freecad-engineering" in result
+        assert "Modify existing models" in result
 
     @pytest.mark.asyncio
     async def test_resource_capabilities(
@@ -502,6 +482,40 @@ class TestFreecadResources:
 
         # Should have prompts section
         assert "prompts" in data
+
+
+    @pytest.mark.asyncio
+    async def test_resource_capabilities_includes_all_prompts(
+        self, register_resources: dict[str, Callable[..., Any]], mock_bridge: AsyncMock
+    ) -> None:
+        """Capability overview should list every registered prompt without stale names."""
+        from freecad_mcp.prompts.freecad import register_prompts
+
+        prompt_mcp = MagicMock()
+        prompt_mcp._registered_prompts = {}
+
+        def prompt_decorator() -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+            def wrapper(func: Callable[..., Any]) -> Callable[..., Any]:
+                prompt_mcp._registered_prompts[func.__name__] = func
+                return func
+
+            return wrapper
+
+        prompt_mcp.prompt = prompt_decorator
+
+        async def get_bridge() -> AsyncMock:
+            return mock_bridge
+
+        register_prompts(prompt_mcp, get_bridge)
+
+        resource_capabilities = register_resources["freecad://capabilities"]
+        data = json.loads(await resource_capabilities())
+        capability_names = {
+            item.get("name") for item in data.get("prompts", []) if item.get("name")
+        }
+        registered_names = set(prompt_mcp._registered_prompts)
+
+        assert capability_names == registered_names
 
     @pytest.mark.asyncio
     async def test_resource_capabilities_includes_all_resources(

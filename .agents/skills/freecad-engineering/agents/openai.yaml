@@ -1,0 +1,11 @@
+interface:
+  display_name: "FreeCAD Engineering"
+  short_description: "Parametric mechanical CAD modeling in FreeCAD"
+  default_prompt: "Use $freecad-engineering for this FreeCAD modeling task."
+policy:
+  allow_implicit_invocation: true
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "freecad"
+      description: "Local FreeCAD Robust MCP server"

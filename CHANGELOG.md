@@ -16,7 +16,19 @@
 - Reworked `freecad_startup` into a compact task router and clarified that MCP prompts/resources are discoverable but not guaranteed to be auto-injected by every client.
 - Added deterministic `evaluate_model_checkpoint` decisions (`continue`, `rework`) from geometry evidence, visual-checkpoint status, unresolved dimensions, and a structured discrepancy ledger.
 - Reworked best practices, documentation, and tests around ACT → OBSERVE → REACT, same-view comparison, stop criteria, design-intent-preserving model edits, and standard-tool-first execution.
-- Added `open_image_tiles`, which returns a numbered overview and up to nine enlarged overlapping drawing fragments as labelled MCP image blocks. Each tile includes an image-only `VISUAL ACK` challenge that strict workflows require in the submitted plan, proving that tile pixels were actually inspected rather than merely acknowledged by index.
+- Added `open_image_tiles`, which returns a numbered overview and up to nine enlarged overlapping drawing fragments as labelled MCP image blocks. The current implementation uses explicit fragment metadata and prompts without a separate visual-acknowledgement gate.
+- Added the repository Skill `.agents/skills/freecad-engineering/SKILL.md` as the
+  single source of detailed CAD-engineering guidance. Root `AGENTS.md`, Cline
+  rules, MCP prompts, and MCP resources now route to it instead of copying the
+  same workflow.
+- Added informative `validate_parametric_model`, reporting documents, Bodies,
+  Tips, ordered Body history, sketches, solver/profile state, constraint
+  diagnostics, expressions, and solid objects outside Bodies. Project guidance
+  requires calling it immediately before the final response after geometry
+  changes, but the report is not a rigid server-side pass/fail gate.
+- Expanded process-oriented guidance for plate/block milling, turning from
+  round/tube/hex stock, sheet-metal bending/forming, hybrid parts, datum strategy,
+  feature ordering, and autonomous drawing interpretation.
 
 This project uses **component-specific versioning**. Each component has its own
 release notes and version history.

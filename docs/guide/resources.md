@@ -16,40 +16,40 @@ MCP Resources are read-only endpoints that provide context about FreeCAD's curre
 
 ## Available Resources
 
-The Robust MCP Server provides state resources plus task-specific workflow resources:
+The server registers **16 resources**: state resources plus lightweight routes
+to the canonical engineering Skill.
 
 ### freecad://capabilities
 
-Returns a comprehensive JSON catalog of all available tools, resources, and prompts.
+Returns a curated catalog of key tools, all registered resources/prompts, and common usage patterns. The MCP client tool list and [Tools Overview](tools.md) are authoritative for the exact tool inventory.
 
-**Use case:** Understanding what the Robust MCP Server can do.
+### freecad://skills/freecad-engineering
 
-**Example response:**
+When the server runs from a repository checkout containing the Skill, returns the exact contents of:
 
-```json
-{
-  "tools": {
-    "execution": ["execute_python", "get_freecad_version", ...],
-    "documents": ["create_document", "open_document", ...],
-    ...
-  },
-  "resources": ["freecad://capabilities", "freecad://documents", ...],
-  "prompts": ["freecad-help", "create-parametric-part", ...]
-}
+```text
+.agents/skills/freecad-engineering/SKILL.md
 ```
 
+This is the single detailed modeling policy for stock/process classification,
+parametric construction, milling, turning, sheet metal, drawing reconstruction,
+model modification, and final validation.
 
 ### freecad://best-practices
 
-Returns the main structured policy for tool selection, PartDesign, ACT-OBSERVE-REACT checkpoints, drawing reconstruction, model modification, stop criteria, and rollback.
+Returns a compact JSON index containing the canonical Skill path/resource and
+the required final diagnostic tool. It intentionally does not duplicate the
+Skill.
 
 ### freecad://workflows/drawing-reconstruction
 
-Returns the complete workflow used by the `reproduce_from_drawing` prompt, including evidence extraction, same-view comparison, discrepancy ledgers, and blocking conditions.
+Returns task-specific context that routes drawing reconstruction into the
+`$freecad-engineering` Skill. It is not a separate mandatory state machine.
 
 ### freecad://workflows/model-modification
 
-Returns the design-intent-preserving workflow used by the `modify_existing_model` prompt.
+Returns task-specific context that routes existing-model changes into the same
+Skill.
 
 ### freecad://version
 
@@ -312,7 +312,7 @@ AI: [Reads freecad://documents resource]
 
 | URI                                       | Description                              |
 | ----------------------------------------- | ---------------------------------------- |
-| `freecad://capabilities`                  | All available tools, resources, prompts  |
+| `freecad://capabilities`                  | Curated capability overview and patterns |
 | `freecad://version`                       | FreeCAD version and build info           |
 | `freecad://status`                        | Connection status and mode               |
 | `freecad://documents`                     | List of open documents                   |
@@ -324,6 +324,10 @@ AI: [Reads freecad://documents resource]
 | `freecad://workbenches/active`            | Currently active workbench               |
 | `freecad://macros`                        | Available macros                         |
 | `freecad://console`                       | Recent console output                    |
+| `freecad://skills/freecad-engineering`    | Canonical engineering Skill text         |
+| `freecad://best-practices`                 | Compact Skill/validator index             |
+| `freecad://workflows/drawing-reconstruction` | Drawing-task route to the Skill          |
+| `freecad://workflows/model-modification`   | Existing-model route to the Skill         |
 
 ---
 
@@ -344,5 +348,5 @@ async def my_custom_resource(param: str) -> str:
 
 ## Next Steps
 
-- [Tools Reference](tools.md) - Complete API for MCP tools
+- [Tools Overview](tools.md) - Exact generated MCP tool inventory
 - [Connection Modes](connection-modes.md) - How to connect to FreeCAD

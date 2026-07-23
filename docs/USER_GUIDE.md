@@ -344,11 +344,16 @@ Take a screenshot of the bracket from an isometric view
 
 The agent should use `get_screenshot(view_angle="Isometric", return_image=True)` so the pixels are returned as MCP image content. The global X/Y/Z corner cross is included by default (`show_corner_cross=True`, `corner_cross_size=10`) so the agent can verify camera and model orientation. The screenshot pipeline paints this triad into the PNG after `saveImage`, because FreeCAD's native screen-space corner cross is not guaranteed to survive off-screen rendering. Check `corner_cross_embedded=true` and `corner_cross_render_mode="qimage_overlay"` in the metadata. Set `show_corner_cross=False` only for a clean presentation image.
 
-For drawing work, call `open_image(path)` for the overview. Compare only equivalent views. After `compare_images`, write a discrepancy ledger and call `evaluate_model_checkpoint`; a side-by-side image by itself is not acceptance. Continue only when the returned decision is `continue`.
+For drawing work, call `open_image(path)` for the overview and use `open_image_tiles` when local dimensions/features are too small. Compare only equivalent views. `compare_images` is visual assistance rather than an automatic correctness metric; use formal checkpoints only when the task benefits from them.
 
 ---
 
 ## Tips and Best Practices
+
+The canonical engineering policy is `.agents/skills/freecad-engineering/SKILL.md`
+(or MCP resource `freecad://skills/freecad-engineering`). It classifies stock and
+process, covers milling/turning/sheet-metal strategies, and requires
+`validate_parametric_model` before the final response after geometry changes.
 
 ### 1. Be Specific with Dimensions
 
@@ -376,11 +381,11 @@ This makes it easier to reference objects later.
 
 For complex parts, build step by step:
 
-1. Create one major feature.
-1. Recompute and validate shape, Body Tip, solid count, dimensions, and volume effect.
-1. Capture an equivalent-view screenshot and compare it with a reference crop.
-1. Write a discrepancy ledger and call `evaluate_model_checkpoint`.
-1. Continue, rework, or ask the user according to the returned decision.
+1. Create one logically reviewable feature.
+1. Recompute and inspect shape, Body Tip, solid count, dimensions, and volume effect.
+1. Use an equivalent-view screenshot when visual evidence is useful.
+1. Rework invalid or clearly incorrect geometry before adding dependent features.
+1. Immediately before the final response, call `validate_parametric_model` and summarize its findings.
 
 ### 5. Save Frequently
 
@@ -402,9 +407,9 @@ For manufacturing or 3D printing:
 "Export as STEP for CNC machining and STL for 3D printing"
 ```
 
-### 8. Use the execute_python Tool for Advanced Operations
+### 8. Python and macros remain available
 
-For operations not covered by the standard tools, Claude can execute custom Python:
+`execute_python`, `safe_execute`, and `run_macro` may be used whenever they are the clearest reliable method. When producing a parametric part, they should still create native Bodies, sketches, constraints, and semantic features rather than only a final direct Shape:
 
 ```text
 "Calculate the volume and center of mass of the part"

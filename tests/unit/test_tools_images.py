@@ -144,8 +144,8 @@ async def test_fastmcp_serializes_open_image_as_image_content(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_compare_images_requires_reaction_gate(registered_tools, tmp_path):
-    """compare_images metadata should make the next reaction step explicit."""
+async def test_compare_images_returns_optional_review_guidance(registered_tools, tmp_path):
+    """compare_images should suggest review without imposing a rigid gate."""
     reference = tmp_path / "reference.png"
     candidate = tmp_path / "candidate.png"
     _write_image(reference)
@@ -158,8 +158,10 @@ async def test_compare_images_requires_reaction_gate(registered_tools, tmp_path)
 
     metadata = result.structuredContent
     assert metadata["assessment_status"] == "not_evaluated"
-    assert "evaluate_model_checkpoint" in metadata["required_next_step"]["action"]
-    assert "observed" in metadata["required_next_step"]["ledger_fields"]
+    review = metadata["recommended_review"]
+    assert review["action"] == "describe_concrete_discrepancies_and_rework_if_needed"
+    assert "observed" in review["optional_ledger_fields"]
+    assert review["optional_decision_values"] == ["continue", "rework"]
 
 
 @pytest.mark.asyncio
@@ -191,16 +193,9 @@ async def test_open_image_tiles_returns_overview_and_labelled_fragments(
     assert (output_dir / "00_overview.png").is_file()
     assert (output_dir / "01_r1_c1.png").is_file()
 
-    from freecad_mcp.tools.images import get_tile_visual_acknowledgements
-
-    challenges = get_tile_visual_acknowledgements(output_dir)
-    assert sorted(challenges) == [1, 2, 3, 4, 5, 6]
-    assert all(len(code) == 5 for code in challenges.values())
-    # The expected codes must not leak through model-visible metadata or labels.
-    model_visible = str(metadata) + " ".join(
-        getattr(item, "text", "") for item in result.content
-    )
-    assert all(code not in model_visible for code in challenges.values())
+    assert "visual_ack_required" not in metadata
+    assert "submit_modeling_plan" not in str(metadata)
+    assert "Inspect every returned fragment" in metadata["recommended_review"]
 
 
 @pytest.mark.asyncio

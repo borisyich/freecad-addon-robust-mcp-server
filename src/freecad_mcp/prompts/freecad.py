@@ -1,7 +1,7 @@
 """FreeCAD Robust MCP prompts for common CAD tasks.
 
-This module provides reusable prompt templates that help Claude
-understand FreeCAD concepts and guide users through complex tasks.
+This module provides reusable prompt templates that help MCP-compatible AI
+assistants understand FreeCAD concepts and work through complex tasks.
 
 Prompt Categories:
     - Design Workflows: Part design, sketching, modeling
@@ -15,6 +15,9 @@ from typing import Any
 
 from freecad_mcp.guidance import (
     DRAWING_RECONSTRUCTION_WORKFLOW,
+    ENGINEERING_SKILL_RELATIVE_PATH,
+    ENGINEERING_SKILL_RESOURCE_URI,
+    FINAL_PARAMETRIC_VALIDATION_TOOL,
     MODEL_MODIFICATION_WORKFLOW,
     VISUAL_CHECKPOINT_PROTOCOL,
 )
@@ -56,27 +59,20 @@ def register_prompts(mcp: Any, get_bridge: Any) -> None:  # noqa: ARG001
                 guidance = await mcp.get_prompt("freecad_startup")
                 print(guidance)  # Displays session initialization checklist
         """
-        return """# FreeCAD MCP session bootstrap
+        return f"""# FreeCAD MCP session bootstrap
 
-This MCP prompt is discoverable by clients, but clients are not required to
-invoke it automatically. Durable rules must also exist in the client-native
-bootstrap file: root `AGENTS.md` for Codex, `.clinerules/` for Cline, and the
-applicable project instruction file for other clients.
+For any task that creates, reconstructs, modifies, repairs, or validates a
+mechanical model, activate `$freecad-engineering`. The canonical policy is
+`{ENGINEERING_SKILL_RELATIVE_PATH}` and is also available through
+`{ENGINEERING_SKILL_RESOURCE_URI}`.
 
-## Session Checklist (Do These First)
+## Session Checklist
 
-1. `get_connection_status()`
-2. `get_freecad_version()` and check `gui_available`
-3. `get_active_document()` / `list_documents()`; reuse the intended document
-4. Read `freecad://best-practices`
-
-## Route the task before modeling
-
-- Drawing/image to new model: invoke `reproduce_from_drawing` or read
-  `freecad://workflows/drawing-reconstruction`.
-- Change an existing model: invoke `modify_existing_model` or read
-  `freecad://workflows/model-modification`.
-- Ordinary PartDesign task: use `freecad_guidance(task_type="partdesign")`.
+1. Check connection and FreeCAD/GUI availability.
+2. Inspect and reuse the intended document.
+3. Read/activate the engineering Skill before modeling.
+4. Choose the likely stock form and dominant process before selecting the base
+   feature.
 
 ## Critical Rules
 
@@ -91,20 +87,25 @@ applicable project instruction file for other clients.
   validate geometry, save/open an equivalent-view screenshot, compare against a
   reference crop, write a discrepancy ledger, and call
   `evaluate_model_checkpoint`. Continue only when it returns `continue`.
-- If a required drawing value is unreadable or ambiguous, stop and ask the user.
-- On failure, undo/remove only the failed feature and confirm the previous valid
-  Body Tip/state is restored before retrying.
+- Preserve native editable design intent: Body, sketches, constraints, and
+  semantic PartDesign history unless the user explicitly asks for direct B-rep.
+- `execute_python`, `safe_execute`, and `run_macro` are always available. Using
+  them does not waive the parametric/editability expectations in the Skill.
+- Resolve drawing ambiguity autonomously using the most consistent evidence and
+  disclose assumptions.
+- Immediately before the final user-facing response after any geometry change,
+  call `{FINAL_PARAMETRIC_VALIDATION_TOOL}` and summarize significant findings.
 
 ## Quick Reference
 
 | Goal | Tools |
 |---|---|
-| Read a drawing | `open_image` |
-| Parametric base | `create_partdesign_body` → `create_sketch` → `pad_sketch` |
-| Geometry validation | `validate_object`, `validate_document` |
+| Read a drawing | `open_image`, `open_image_tiles` |
+| Parametric base | `create_partdesign_body` → `create_sketch` → PartDesign feature |
+| Geometry health | `validate_object`, `validate_document` |
+| Final structure report | `{FINAL_PARAMETRIC_VALIDATION_TOOL}` |
 | Visual evidence | `set_view_angle`, `get_screenshot`, `open_image`, `compare_images` |
-| Reaction gate | `evaluate_model_checkpoint` |
-| Rollback | `undo`, `get_undo_redo_status` |
+| Recovery | `undo`, `safe_execute`, `execute_python`, `run_macro` |
 
 GUI screenshot tools require `gui_available=true`.
 """
@@ -118,7 +119,7 @@ GUI screenshot tools require `gui_available=true`.
         reference_path: str = "",
         target_document: str = "",
     ) -> str:
-        """Return the mandatory drawing-to-model workflow.
+        """Route a drawing-to-model task to the canonical engineering Skill.
 
         Args:
             reference_path: Optional path to the source drawing/image.
@@ -137,7 +138,7 @@ GUI screenshot tools require `gui_available=true`.
         change_request: str = "",
         reference_path: str = "",
     ) -> str:
-        """Return the mandatory workflow for changing an existing model.
+        """Route an existing-model task to the canonical engineering Skill.
 
         Args:
             model_path: Optional FCStd path or document identifier.
@@ -500,7 +501,16 @@ safe_execute(
 - Shape.isValid() - Geometry integrity
 - Object.State - FreeCAD error flags
 - Shape existence - Object has geometry
-- Recompute state - Object up to date""",
+- Recompute state - Object up to date
+
+### validate_parametric_model(doc_name, recompute, include_sketch_constraints)
+Mandatory final informative scan after creating or changing geometry:
+- reports Bodies, Tips, ordered history, and shape validity;
+- reports sketches, solver/profile status, remaining DoF, supports, and expressions;
+- reports standalone/direct solids and significant warnings;
+- does not by itself prove drawing correspondence or manufacturability.
+
+Call it immediately before the final user-facing response and summarize the findings.""",
             "drawing_reconstruction": DRAWING_RECONSTRUCTION_WORKFLOW,
             "model_modification": MODEL_MODIFICATION_WORKFLOW,
             "visual_validation": VISUAL_CHECKPOINT_PROTOCOL,

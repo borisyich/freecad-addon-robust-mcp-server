@@ -1,11 +1,11 @@
 """FreeCAD Robust MCP resources for exposing FreeCAD state.
 
 This module provides MCP resources that expose FreeCAD's current state
-as read-only data. Resources are URI-addressable data that Claude can
-access to understand the current FreeCAD environment.
+as read-only data. Resources are URI-addressable data that MCP-compatible
+assistants can access to understand the current FreeCAD environment.
 
 Resource URIs:
-    - freecad://capabilities - Complete list of all available tools/resources
+    - freecad://capabilities - Curated capability overview and usage patterns
     - freecad://version - FreeCAD version information
     - freecad://status - Connection and runtime status
     - freecad://documents - List of open documents
@@ -13,9 +13,10 @@ Resource URIs:
     - freecad://documents/{name}/objects - Objects in a document
     - freecad://objects/{doc_name}/{obj_name} - Object details
     - freecad://active-document - Currently active document
-    - freecad://best-practices - Canonical engineering guidance
-    - freecad://workflows/drawing-reconstruction - Drawing reconstruction workflow
-    - freecad://workflows/model-modification - Existing-model modification workflow
+    - freecad://skills/freecad-engineering - Canonical engineering Skill
+    - freecad://best-practices - Compact Skill/validator index
+    - freecad://workflows/drawing-reconstruction - Drawing-task Skill route
+    - freecad://workflows/model-modification - Existing-model Skill route
     - freecad://workbenches - Available workbenches
     - freecad://workbenches/active - Currently active workbench
     - freecad://macros - Available macros
@@ -23,12 +24,16 @@ Resource URIs:
 """
 
 import json
+from pathlib import Path
 from typing import Any
 
 from freecad_mcp.guidance import (
     BLOCKING_DISCREPANCY_CATEGORIES,
     DISCREPANCY_LEDGER_FIELDS,
     DRAWING_RECONSTRUCTION_WORKFLOW,
+    ENGINEERING_SKILL_RELATIVE_PATH,
+    ENGINEERING_SKILL_RESOURCE_URI,
+    FINAL_PARAMETRIC_VALIDATION_TOOL,
     MODEL_MODIFICATION_WORKFLOW,
     UNCERTAINTY_CATEGORIES,
 )
@@ -321,340 +326,61 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
             indent=2,
         )
 
+    def _engineering_skill_text() -> str:
+        """Read the canonical repository skill without duplicating its content."""
+        repo_root = Path(__file__).resolve().parents[3]
+        skill_path = repo_root / ENGINEERING_SKILL_RELATIVE_PATH
+        try:
+            return skill_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            return (
+                "# FreeCAD engineering skill unavailable\n\n"
+                f"Expected `{ENGINEERING_SKILL_RELATIVE_PATH}` but it could not "
+                f"be read: {exc}"
+            )
+
+    @mcp.resource("freecad://skills/freecad-engineering")
+    async def resource_engineering_skill() -> str:
+        """Return the canonical FreeCAD engineering Skill text."""
+        return _engineering_skill_text()
+
     @mcp.resource("freecad://best-practices")
     async def resource_best_practices() -> str:
-        """Get FreeCAD best practices and AI guidance.
-
-        This resource provides comprehensive guidance for AI assistants
-        working with FreeCAD, covering API patterns, version compatibility,
-        validation workflows, and common pitfalls.
-
-        Use this resource at the start of a FreeCAD session to understand
-        best practices for reliable CAD operations.
-
-        Returns:
-            JSON string containing best practices and guidance.
-
-        Example:
-            Read via MCP resource mechanism::
-
-                # In an MCP client
-                best_practices = await mcp.read_resource("freecad://best-practices")
-                data = json.loads(best_practices)
-                print(data["critical_patterns"])  # Shows validation_first, partdesign_workflow
-        """
-        best_practices = {
-            "description": "FreeCAD Best Practices and AI Guidance",
-            "purpose": (
-                "Reference for reliable parametric modeling, drawing reconstruction, "
-                "existing-model modification, validation, and rollback"
-            ),
-            "delivery_note": {
-                "important": (
-                    "MCP resources and prompts are exposed to the client but are not "
-                    "guaranteed to be inserted automatically into every model turn."
-                ),
-                "client_bootstrap_files": {
-                    "Codex": "AGENTS.md",
-                    "Cline": ".clinerules/freecad-modeling.md",
-                    "repository_agents": ".agents/AGENT.md",
-                    "Claude/project development": "CLAUDE.md",
-                },
-                "task_prompts": [
-                    "freecad_startup",
-                    "reproduce_from_drawing",
-                    "modify_existing_model",
-                    "freecad_guidance",
+        """Return a compact index to the canonical engineering Skill."""
+        return json.dumps(
+            {
+                "description": "FreeCAD engineering guidance index",
+                "canonical_skill": ENGINEERING_SKILL_RELATIVE_PATH,
+                "canonical_resource": ENGINEERING_SKILL_RESOURCE_URI,
+                "mandatory_final_diagnostic": FINAL_PARAMETRIC_VALIDATION_TOOL,
+                "notes": [
+                    "The Skill is the single source of detailed modeling policy.",
+                    "execute_python, safe_execute, and run_macro remain available.",
+                    "The final validator is informative and does not prove drawing correspondence.",
                 ],
             },
-            "critical_patterns": {
-                "validation_first": {
-                    "description": (
-                        "Validate geometry after every major feature, but do not confuse "
-                        "shape validity with requirement correctness."
-                    ),
-                    "pattern": [
-                        "recompute the document",
-                        "validate the new feature and document",
-                        "confirm Body Tip and solid count",
-                        "confirm positive added/removed volume and expected bounds",
-                        "run same-view visual correspondence checks",
-                    ],
-                    "tools": [
-                        "validate_object",
-                        "validate_document",
-                        "inspect_object",
-                        "get_screenshot",
-                        "compare_images",
-                        "evaluate_model_checkpoint",
-                    ],
-                },
-                "partdesign_workflow": {
-                    "description": "Proper parametric PartDesign workflow",
-                    "rules": [
-                        "reuse one explicit document",
-                        "use one PartDesign Body per part and keep one contiguous solid",
-                        "centralize key dimensions in Spreadsheet aliases or named constraints",
-                        "build additive blank before cuts; fillets/chamfers last",
-                        "pass explicit world-space directions for direction-sensitive features",
-                        "do not guess FaceN/EdgeN; select by geometry",
-                    ],
-                    "sequence": [
-                        "create_document or reuse intended document",
-                        "create_partdesign_body",
-                        "create and constrain sketch",
-                        "create one feature",
-                        "validate geometry",
-                        "perform visual checkpoint",
-                    ],
-                    "tools": [
-                        "create_partdesign_body",
-                        "create_sketch",
-                        "pad_sketch",
-                        "pocket_sketch",
-                    ],
-                },
-                "transaction_safety": {
-                    "description": "Rollback the failed operation, not the entire design",
-                    "rules": [
-                        "all modifying tools are transactional and support undo",
-                        "on failure undo/delete only the failed feature",
-                        "confirm the previous valid Body Tip/state is restored",
-                        "do not create duplicate documents or Bodies to hide errors",
-                        "safe_execute/execute_python are fallback mechanisms only",
-                    ],
-                    "tools": [
-                        "undo",
-                        "redo",
-                        "undo_if_invalid",
-                        "get_undo_redo_status",
-                        "safe_execute",
-                    ],
-                },
-                "act_observe_react": {
-                    "description": "Mandatory checkpoint after each major feature",
-                    "act": "Create exactly one logically reviewable feature and recompute.",
-                    "observe_geometry": [
-                        "validate shape and document",
-                        "check Body Tip and solid count",
-                        "check dimensions, bounds, placement, and volume effect",
-                    ],
-                    "observe_visual": [
-                        "use a reference crop, not the whole sheet",
-                        "set an equivalent candidate view",
-                        "save/open screenshot and call compare_images",
-                        "write a discrepancy ledger",
-                    ],
-                    "react": (
-                        "Call evaluate_model_checkpoint and obey continue/rework."
-                    ),
-                    "ledger_fields": list(DISCREPANCY_LEDGER_FIELDS),
-                },
-            },
-            "drawing_reconstruction": {
-                "resource": "freecad://workflows/drawing-reconstruction",
-                "prompt": "reproduce_from_drawing",
-                "blocking_discrepancy_categories": sorted(
-                    BLOCKING_DISCREPANCY_CATEGORIES
-                ),
-                "uncertainty_categories": sorted(UNCERTAINTY_CATEGORIES),
-                "requirements": [
-                    "open the source pixels with open_image",
-                    "create an evidence table before modeling",
-                    "compare equivalent views only",
-                    "stop rather than invent unreadable dimensions",
-                    "accept feature by feature, not by overall resemblance",
-                ],
-            },
-            "model_modification": {
-                "resource": "freecad://workflows/model-modification",
-                "prompt": "modify_existing_model",
-                "requirements": [
-                    "inspect history, constraints, expressions, dependencies, and Tip",
-                    "modify the earliest semantic owner of the requested change",
-                    "prefer parameter/constraint edits over appended workaround geometry",
-                    "record baseline invariants before editing",
-                    "verify requested change and absence of regressions",
-                ],
-            },
-            "tool_selection_policy": {
-                "priority": [
-                    "standard domain-specific MCP tool",
-                    "standard generic MCP tool",
-                    "safe_execute for one missing/invalid operation",
-                    "execute_python only as a last-resort diagnostic or unsupported operation",
-                ],
-                "fallback_requirements": [
-                    "state why the standard tool is insufficient",
-                    "limit code to one operation",
-                    "validate immediately",
-                    "preserve parametric design intent",
-                ],
-            },
-            "version_compatibility": {
-                "description": "FreeCAD API changes across versions",
-                "critical_changes": {
-                    "sketch_attachment": {
-                        "versions_affected": "FreeCAD 1.0+ vs earlier",
-                        "old_api": "sketch.Support = (plane_obj, [''])",
-                        "new_api": "sketch.AttachmentSupport = [(plane_obj, '')]",
-                        "note": "MCP tools handle this compatibility layer.",
-                    },
-                    "body_object_creation": {
-                        "correct": (
-                            "body.newObject('Sketcher::SketchObject', 'Sketch')"
-                        ),
-                        "incorrect": "doc.addObject(...); body.addObject(sketch)",
-                    },
-                },
-            },
-            "gui_vs_headless": {
-                "description": "Visual checkpoints require a GUI-enabled FreeCAD session",
-                "check_gui": "Use get_freecad_version() and inspect gui_available",
-                "gui_only_features": [
-                    "get_screenshot",
-                    "view/camera controls",
-                    "visibility/color/display controls",
-                ],
-                "headless_safe_features": [
-                    "document and object operations",
-                    "validation and inspection",
-                    "import/export",
-                ],
-            },
-            "common_pitfalls": {
-                "standalone_features": {
-                    "problem": "PartDesign features outside a Body",
-                    "solution": "Create features inside one intended Body.",
-                },
-                "valid_but_wrong": {
-                    "problem": "Shape is valid but differs from the drawing",
-                    "solution": (
-                        "Run geometric and visual/requirement validation as separate gates."
-                    ),
-                },
-                "whole_sheet_comparison": {
-                    "problem": "Candidate compared with an entire drawing sheet",
-                    "solution": "Crop and compare one equivalent view at a time.",
-                },
-                "observation_without_reaction": {
-                    "problem": "Screenshot is inspected but the plan continues unchanged",
-                    "solution": (
-                        "Write a discrepancy ledger and call evaluate_model_checkpoint."
-                    ),
-                },
-                "unconstrained_sketches": {
-                    "problem": "Sketches have unintended degrees of freedom",
-                    "solution": "Inspect sketch status and constrain design intent.",
-                },
-                "document_state": {
-                    "problem": "Wrong document or duplicate Body modified",
-                    "solution": "Pass doc_name explicitly and reuse the intended state.",
-                },
-            },
-            "recommended_workflows": {
-                "creating_parts": {
-                    "steps": [
-                        "inspect/reuse document",
-                        "create Body and parameter table",
-                        "build additive blank",
-                        "checkpoint each feature",
-                        "perform cuts",
-                        "apply finishing features",
-                        "final feature-by-feature acceptance",
-                    ],
-                },
-                "modifying_existing": {
-                    "steps": [
-                        "inspect current model and dependencies",
-                        "record baseline invariants",
-                        "edit semantic owner",
-                        "validate and compare",
-                        "rework or accept",
-                        "save",
-                    ],
-                },
-                "debugging_issues": {
-                    "steps": [
-                        "get_console_output",
-                        "validate_document",
-                        "inspect_object and dependencies",
-                        "undo failed operation",
-                        "confirm previous Tip/state",
-                        "retry with corrected cause",
-                    ],
-                },
-            },
-            "error_recovery": {
-                "invalid_geometry": [
-                    "undo failed feature",
-                    "confirm previous valid state",
-                    "diagnose support/direction/parameters",
-                    "retry one corrected feature",
-                ],
-                "visual_mismatch": [
-                    "do not continue to the next feature",
-                    "classify discrepancy",
-                    "undo/rework current feature",
-                    "repeat same-view checkpoint",
-                ],
-                "ambiguous_reference": [
-                    "stop",
-                    "identify exact unreadable or conflicting evidence",
-                    "ask user",
-                ],
-            },
-            "performance_tips": {
-                "context": (
-                    "Keep startup rules concise; load task-specific workflow only when needed."
-                ),
-                "images": (
-                    "Use overview for layout and high-resolution crops for dimensions."
-                ),
-                "checkpoints": (
-                    "One major feature per checkpoint limits rollback scope."
-                ),
-                "execution": (
-                    "Do not batch unrelated operations in execute_python."
-                ),
-            },
-        }
-        return json.dumps(best_practices, indent=2)
+            indent=2,
+        )
 
     @mcp.resource("freecad://workflows/drawing-reconstruction")
     async def resource_drawing_reconstruction() -> str:
-        """Get the canonical drawing-to-model workflow."""
-        return json.dumps(
-            {
-                "description": "Mandatory workflow for reconstructing a model from drawings",
-                "prompt": "reproduce_from_drawing",
-                "workflow_markdown": DRAWING_RECONSTRUCTION_WORKFLOW,
-                "blocking_categories": sorted(BLOCKING_DISCREPANCY_CATEGORIES),
-                "uncertainty_categories": sorted(UNCERTAINTY_CATEGORIES),
-                "ledger_fields": list(DISCREPANCY_LEDGER_FIELDS),
-            },
-            indent=2,
-        )
+        """Route drawing reconstruction tasks to the canonical Skill."""
+        return DRAWING_RECONSTRUCTION_WORKFLOW
 
     @mcp.resource("freecad://workflows/model-modification")
     async def resource_model_modification() -> str:
-        """Get the canonical existing-model modification workflow."""
-        return json.dumps(
-            {
-                "description": "Mandatory workflow for changing existing models",
-                "prompt": "modify_existing_model",
-                "workflow_markdown": MODEL_MODIFICATION_WORKFLOW,
-            },
-            indent=2,
-        )
+        """Route existing-model changes to the canonical Skill."""
+        return MODEL_MODIFICATION_WORKFLOW
 
     @mcp.resource("freecad://capabilities")
     async def resource_capabilities() -> str:
-        """Get comprehensive list of all MCP capabilities.
+        """Get a curated overview of MCP capabilities.
 
-        This resource provides a complete catalog of all available tools,
-        resources, and prompts. Use this to discover what functionality
-        is available when working with the FreeCAD Robust MCP Server.
+        This resource provides key tools, all registered resource URIs and
+        prompt names, plus common usage patterns. The MCP client's discovered
+        tool list and ``docs/guide/tools.md`` are authoritative for the exact
+        tool inventory because this human-oriented catalog is intentionally
+        curated rather than duplicating every schema.
 
         Returns:
             JSON string containing:
@@ -664,7 +390,7 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                 - examples: Common usage patterns
         """
         capabilities = {
-            "description": "FreeCAD Robust MCP Server - Control FreeCAD via Model Context Protocol",
+            "description": "Curated FreeCAD Robust MCP capability overview; use client tool discovery for the exact tool inventory.",
             "tools": {
                 "execution": {
                     "description": "Execute Python code and access console",
@@ -1395,7 +1121,7 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                     ],
                 },
                 "images_and_checkpoints": {
-                    "description": "Drawing delivery, cropping, visual comparison, and deterministic reaction gates",
+                    "description": "Drawing delivery, cropping, visual comparison, and optional checkpoint assessment",
                     "tools": [
                         {
                             "name": "open_image",
@@ -1409,12 +1135,12 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                         },
                         {
                             "name": "compare_images",
-                            "description": "Side-by-side reference/candidate image; requires discrepancy ledger",
+                            "description": "Side-by-side reference/candidate image for qualitative review",
                             "key_params": ["reference_path", "candidate_path"],
                         },
                         {
                             "name": "evaluate_model_checkpoint",
-                            "description": "Return continue/rework/ask_user from checkpoint evidence",
+                            "description": "Optionally return continue/rework from checkpoint evidence",
                             "key_params": ["checkpoint_name", "geometry_valid", "discrepancies"],
                         },
                     ],
@@ -1608,6 +1334,15 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                             "key_params": ["doc_name"],
                         },
                         {
+                            "name": "validate_parametric_model",
+                            "description": "Informative document scan of Bodies, Tips, history, sketches, solver state, and solids outside Bodies",
+                            "key_params": [
+                                "doc_name",
+                                "recompute",
+                                "include_sketch_constraints",
+                            ],
+                        },
+                        {
                             "name": "undo_if_invalid",
                             "description": "Check last operation and undo if it created invalid geometry",
                             "key_params": ["doc_name"],
@@ -1623,19 +1358,23 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
             "resources": [
                 {
                     "uri": "freecad://capabilities",
-                    "description": "This resource - lists all available capabilities",
+                    "description": "This resource - curated capability overview; use discovered tool schemas for exact inventory",
+                },
+                {
+                    "uri": "freecad://skills/freecad-engineering",
+                    "description": "Canonical FreeCAD engineering Skill used for model creation and modification",
                 },
                 {
                     "uri": "freecad://best-practices",
-                    "description": "★ RECOMMENDED: Read first - AI guidance, best practices, version compatibility, common pitfalls",
+                    "description": "Compact index to the canonical engineering Skill and final diagnostic",
                 },
                 {
                     "uri": "freecad://workflows/drawing-reconstruction",
-                    "description": "Mandatory drawing-to-model ACT-OBSERVE-REACT workflow",
+                    "description": "Drawing-reconstruction route into the canonical engineering Skill",
                 },
                 {
                     "uri": "freecad://workflows/model-modification",
-                    "description": "Mandatory workflow for changing existing parametric models",
+                    "description": "Existing-model route into the canonical engineering Skill",
                 },
                 {
                     "uri": "freecad://version",
@@ -1690,7 +1429,7 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                 },
                 {
                     "name": "reproduce_from_drawing",
-                    "description": "Mandatory drawing reconstruction and reaction-gate workflow",
+                    "description": "Drawing reconstruction route to the canonical engineering Skill; visual checks are risk-based, not a rigid gate",
                     "key_params": ["reference_path", "target_document"],
                 },
                 {
@@ -1704,43 +1443,43 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                     "key_params": ["task_type"],
                 },
                 {
-                    "name": "design-part",
+                    "name": "design_part",
                     "description": "Guided workflow for designing parametric parts",
                     "key_params": ["description", "units"],
                 },
                 {
-                    "name": "create-sketch-guide",
+                    "name": "create_sketch_guide",
                     "description": "Guide for creating 2D sketches",
                     "key_params": ["shape_type", "plane"],
                 },
                 {
-                    "name": "boolean-operations-guide",
+                    "name": "boolean_operations_guide",
                     "description": "Guide for boolean operations (fuse, cut, common)",
                 },
                 {
-                    "name": "export-guide",
+                    "name": "export_guide",
                     "description": "Guide for exporting models (STEP, STL, OBJ, IGES)",
                     "key_params": ["target_format"],
                 },
                 {
-                    "name": "import-guide",
+                    "name": "import_guide",
                     "description": "Guide for importing files",
                     "key_params": ["source_format"],
                 },
                 {
-                    "name": "analyze-shape",
+                    "name": "analyze_shape",
                     "description": "Guide for shape analysis (volume, area, etc.)",
                 },
                 {
-                    "name": "debug-model",
+                    "name": "debug_model",
                     "description": "Troubleshooting guide for model issues",
                 },
                 {
-                    "name": "macro-development",
+                    "name": "macro_development",
                     "description": "Guide for developing FreeCAD macros",
                 },
                 {
-                    "name": "python-api-reference",
+                    "name": "python_api_reference",
                     "description": "Quick reference for FreeCAD Python API",
                 },
                 {

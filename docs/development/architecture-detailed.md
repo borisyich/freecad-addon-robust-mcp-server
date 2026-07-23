@@ -257,11 +257,16 @@ freecad_mcp/
 │
 ├── tools/                    # MCP tool implementations (150+ tools)
 │   ├── __init__.py
-│   ├── execution.py         # Python execution & debugging (4 tools)
+│   ├── execution.py         # Python execution & debugging (5 tools)
 │   ├── documents.py         # Document management (7 tools)
-│   ├── objects.py           # Object creation/manipulation (12 tools)
-│   ├── partdesign.py        # PartDesign parametric modeling (19 tools)
-│   ├── view.py              # View, camera, display (11 tools)
+│   ├── objects.py           # Part/CSG object operations (40 tools)
+│   ├── partdesign.py        # PartDesign/Sketcher modeling (50 tools)
+│   ├── spreadsheet.py       # Spreadsheet parameters (10 tools)
+│   ├── draft.py             # Draft ShapeString/text tools (6 tools)
+│   ├── images.py            # Local image delivery/comparison (3 tools)
+│   ├── checkpoints.py       # Optional discrepancy assessment (1 tool)
+│   ├── view.py              # View, camera, display (18 tools)
+│   ├── validation.py        # Geometry/parametric diagnostics (5 tools)
 │   ├── export.py            # Export/import operations (7 tools)
 │   └── macros.py            # Macro management (6 tools)
 │

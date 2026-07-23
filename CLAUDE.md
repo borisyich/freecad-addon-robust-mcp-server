@@ -1,10 +1,10 @@
 # CLAUDE.md - AI Assistant Guidelines for This Project
 
-> For FreeCAD modeling, drawing reconstruction, and model modification, follow
-> the root `AGENTS.md`. The same canonical rules are mirrored in
-> `.clinerules/freecad-modeling.md`. They define task
-> routing, parametric modeling, ACT-OBSERVE-REACT checkpoints, discrepancy
-> ledgers, stop criteria, rollback, and final acceptance.
+> For tasks that operate FreeCAD on a mechanical model, the canonical engineering
+> policy is `.agents/skills/freecad-engineering/SKILL.md`. Root `AGENTS.md` and
+> `.clinerules/freecad-modeling.md` are short client routers, not duplicated
+> policy. After any geometry change, call `validate_parametric_model` before the
+> final user-facing response.
 
 ## Project Overview
 
@@ -1781,7 +1781,7 @@ When Claude Code is connected to the FreeCAD Robust MCP server, the following to
 
 ### Discovering Capabilities at Runtime
 
-The MCP server provides a `freecad://capabilities` resource that returns a complete JSON catalog of all available tools, resources, and prompts. This is the authoritative source for what's available.
+The MCP server provides a `freecad://capabilities` resource with a curated JSON overview of key tools, all resources/prompts, and common patterns. The MCP client's discovered tool schemas and `docs/guide/tools.md` are authoritative for the exact tool inventory.
 
 ### Updating Documentation When Tools Change
 
@@ -1789,7 +1789,7 @@ The MCP server provides a `freecad://capabilities` resource that returns a compl
 
 | File                                   | What to Update                                    |
 | -------------------------------------- | ------------------------------------------------- |
-| `src/freecad_mcp/resources/freecad.py` | `freecad://capabilities` resource (tool catalog)  |
+| `src/freecad_mcp/resources/freecad.py` | Curated capability overview when key tools/categories change |
 | `src/freecad_mcp/prompts/freecad.py`   | AI guidance prompts (tool references, workflows)  |
 | `docs/guide/tools.md`                  | User-facing tool reference (categories, tables)   |
 | `CLAUDE.md` (this file)                | Tools Reference section (if adding new category)  |
@@ -2030,7 +2030,7 @@ The MCP server provides a `freecad://capabilities` resource that returns a compl
 | `open_image`            | Open a local image and return MCP image content. |
 | `open_image_tiles`      | Return a numbered overview and enlarged overlapping fragments. |
 | `compare_images`        | Return a labelled side-by-side visual comparison; it does not approve the checkpoint. |
-| `evaluate_model_checkpoint` | Enforce `continue`, `rework` from checkpoint evidence. |
+| `evaluate_model_checkpoint` | Optionally derive `continue` or `rework` from supplied checkpoint evidence. |
 | `set_view_angle`        | Set camera to standard views (front, top, isometric, etc.). |
 | `fit_all`               | Zoom to fit all objects in view.                            |
 | `zoom_in` / `zoom_out`  | Adjust zoom level.                                          |
@@ -2053,10 +2053,11 @@ The MCP server provides a `freecad://capabilities` resource that returns a compl
 
 | Tool                | Description                                                                           |
 | ------------------- | ------------------------------------------------------------------------------------- |
-| `validate_object`   | Check object health (shape validity, error states, recompute status).                 |
-| `validate_document` | Check health of all objects in document, return summary of invalid/error objects.     |
-| `undo_if_invalid`   | Check document health and automatically undo last operation if invalid objects exist. |
-| `safe_execute`      | Fallback-only Python execution with validation and rollback when standard tools are insufficient. |
+| `validate_object`          | Check one object's shape validity, state, and recompute status. |
+| `validate_document`        | Check geometric health across the document. |
+| `validate_parametric_model` | Final informative scan of Bodies, Tips, ordered history, sketches, solver/profile state, constraints, expressions, and solids outside Bodies. |
+| `undo_if_invalid`          | Check document health and automatically undo the last operation when invalid objects exist. |
+| `safe_execute`             | Execute Python with optional validation and rollback; always available. |
 
 ### Export/Import Tools
 

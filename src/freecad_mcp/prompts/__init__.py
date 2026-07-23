@@ -6,7 +6,7 @@ Prompts guide users through complex workflows and provide best practices.
 Available prompts:
     Session and Engineering Workflows:
         - freecad_startup: Session bootstrap and task router
-        - reproduce_from_drawing: Drawing-to-model ACT-OBSERVE-REACT workflow
+        - reproduce_from_drawing: Route drawing-to-model tasks to the engineering Skill
         - modify_existing_model: Existing-model modification workflow
 
     Design Workflows:

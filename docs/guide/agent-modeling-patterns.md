@@ -1,99 +1,47 @@
-# Modeling patterns for engineering agents
+# Agent modeling patterns
 
-The canonical client rule file is the root [`AGENTS.md`](../../AGENTS.md). It is mirrored in [`.clinerules/freecad-modeling.md`](../../.clinerules/freecad-modeling.md).
-
-For an explanation of what each client receives automatically and what must be invoked explicitly, see [Agent guidance architecture](agent-guidance-architecture.md).
-
-## Task-specific workflow entry points
-
-| Task | MCP prompt | MCP resource |
-|---|---|---|
-| New model from drawing/image | `reproduce_from_drawing` | `freecad://workflows/drawing-reconstruction` |
-| Modify existing model | `modify_existing_model` | `freecad://workflows/model-modification` |
-| General PartDesign work | `freecad_guidance(task_type="partdesign")` | `freecad://best-practices` |
-
-## Why feature validity is not enough
-
-FreeCAD may create a valid feature that does not implement the intended design—for example, a Pad extruded away from the Body, a valid cut in the wrong position, or the wrong number of patterned holes. Every major feature therefore has two independent gates:
-
-1. FreeCAD geometric validity and measurable effect;
-2. correspondence to the drawing or change request.
-
-## Mandatory checkpoint
+The canonical modeling guidance is the repository Skill:
 
 ```text
-one feature
-→ recompute and validate
-→ same-view screenshot
-→ open saved pixels
-→ compare with a reference crop
-→ discrepancy ledger
-→ evaluate_model_checkpoint
-→ continue / rework
+.agents/skills/freecad-engineering/SKILL.md
 ```
 
-A call to `compare_images` alone is not acceptance.
+Codex can activate it as `$freecad-engineering`. MCP clients can read the same
+text from:
 
-### Required discrepancy ledger
-
-```json
-{
-  "category": "wrong_count",
-  "severity": "major",
-  "expected": "4 mounting holes",
-  "observed": "3 mounting holes",
-  "evidence": "screenshots/front_holes_compare.png",
-  "proposed_reaction": "undo the pattern and recreate four occurrences"
-}
+```text
+freecad://skills/freecad-engineering
 ```
 
-### Reaction gate example
+## Core pattern
 
-```python
-evaluate_model_checkpoint(
-    checkpoint_name="MountingHolePattern",
-    geometry_valid=True,
-    solid_count=1,
-    expected_solid_count=1,
-    dimension_checks_passed=True,
-    visual_comparison_performed=True,
-    view_match_confirmed=True,
-    unresolved_dimensions=[],
-    discrepancies=[...],
-)
-```
+Before selecting a base feature, classify:
 
-Proceed only when `decision == "continue"`.
+- likely stock: plate/block, sheet, round/tube, hex, profile, preform, or hybrid;
+- dominant process: milling, turning, sheet-metal bending/forming, or hybrid.
 
-## Drawing preparation
+The classification should guide the model history:
 
-Use `open_image` for the overview, inspect individual views, sections, details, and dimension clusters. Compare a candidate only with the equivalent reference view. Do not compare an isometric model view with an orthographic drawing or a small candidate against an entire sheet. Also you may rotate candidate, and the get screenshot.
+- prismatic machined parts commonly start from an additive base or a stock-like
+  block followed by progressive removals;
+- turned parts commonly start from a constrained half-profile and Revolution;
+- sheet-metal parts require constant nominal thickness, connected panels/bends,
+  and explicit treatment of bend radius/allowance assumptions.
 
-By the way you can use `open_image_tiles` for dense sheets. It returns a numbered overview and overlapping enlarged fragments. Inspect every fragment, reconcile features crossing tile boundaries, and cite fragment numbers in the evidence table. Cropping gives local details more visual tokens; upscaling does not create information absent from the source. Compare a candidate only with the equivalent reference view.
+Use stable datums, constrained sketches, semantic PartDesign features, and a
+feature order that preserves design intent. Holes, patterns, small details, and
+edge treatments should normally be delayed until the supporting form is stable.
 
-## Recommended screenshot call
+## Verification
 
-```python
-get_screenshot(
-    return_image=True,
-    view_angle="Front",
-    doc_name="PartDocument",
-    fit_all=True,
-    background="White",
-    show_corner_cross=True,
-    corner_cross_size=10,
-    save_to_disk=True,
-    output_path="screenshots/front_after_pad.png",
-    return_data=False,
-)
-```
+Use lightweight checks proportional to risk rather than a mandatory state
+machine after every operation:
 
-Open the saved PNG with `open_image` before comparison. The corner cross is orientation evidence, not proof of the part's placement relative to the global origin.
+- `get_sketch_info` for sketch solver/profile state;
+- `validate_object` and `validate_document` for geometry health;
+- screenshots and equivalent-view comparisons for visual evidence;
+- `validate_parametric_model` for the mandatory final structural report.
 
-## Existing-model modification
-
-Inspect the history, aliases, constraints, expressions, dependencies, Tip, bounds, and baseline screenshots before changing anything. Modify the earliest feature or parameter that semantically owns the request. Avoid appending compensating geometry that merely hides an incorrect upstream model.
-
-## Fallback code policy
-
-Use standard MCP tools first. `safe_execute` and `execute_python` are allowed only for a missing or demonstrably invalid standard operation. State the reason, keep the code local to one feature, and run the full checkpoint immediately afterward.
+The validator is informative. It reports actual Bodies, Tips, history, sketches,
+constraints, and direct solids, but does not prove that the model matches a
+reference drawing or is manufacturable.

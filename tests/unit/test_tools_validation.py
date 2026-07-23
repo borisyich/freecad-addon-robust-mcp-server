@@ -339,6 +339,72 @@ class TestValidationTools:
         assert result["valid"] is False
         assert "No active document" in result["summary"]
 
+
+    # ========== validate_parametric_model tests ==========
+
+    @pytest.mark.asyncio
+    async def test_validate_parametric_model_report(
+        self, register_tools, mock_bridge
+    ):
+        report = {
+            "informational": True,
+            "assessment": "review_recommended",
+            "summary": "One Body and two sketches inspected.",
+            "bodies": [{"name": "Body", "valid": True}],
+            "findings": [
+                {
+                    "severity": "warning",
+                    "category": "sketch_under_constrained",
+                    "object": "Sketch001",
+                    "message": "Sketch is under-constrained (2 remaining DoF).",
+                }
+            ],
+        }
+        mock_bridge.execute_python = AsyncMock(
+            return_value=ExecutionResult(
+                success=True,
+                result=report,
+                stdout="",
+                stderr="",
+                execution_time_ms=1.0,
+                error_traceback=None,
+            )
+        )
+
+        tool = register_tools["validate_parametric_model"]
+        result = await tool(
+            doc_name="Bracket",
+            recompute=True,
+            include_sketch_constraints=True,
+        )
+
+        assert result == report
+        generated_code = mock_bridge.execute_python.call_args[0][0]
+        assert "Bracket" in generated_code
+        assert "if True:" in generated_code
+
+    @pytest.mark.asyncio
+    async def test_validate_parametric_model_failure_is_informative(
+        self, register_tools, mock_bridge
+    ):
+        mock_bridge.execute_python = AsyncMock(
+            return_value=ExecutionResult(
+                success=False,
+                result=None,
+                stdout="",
+                stderr="",
+                execution_time_ms=1.0,
+                error_traceback="FreeCAD execution failed",
+            )
+        )
+
+        tool = register_tools["validate_parametric_model"]
+        result = await tool()
+
+        assert result["informational"] is True
+        assert result["assessment"] == "unavailable"
+        assert "FreeCAD execution failed" in result["summary"]
+
     # ========== undo_if_invalid tests ==========
 
     @pytest.mark.asyncio
@@ -690,6 +756,7 @@ class TestValidationToolsRegistration:
         expected_tools = [
             "validate_object",
             "validate_document",
+            "validate_parametric_model",
             "undo_if_invalid",
             "safe_execute",
         ]

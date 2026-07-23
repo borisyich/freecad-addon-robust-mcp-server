@@ -1,210 +1,168 @@
 # Agent + MCP + FreeCAD system audit
 
-## Objective
+## Scope
 
-The target system must reliably support three related tasks:
+The repository supports three different concerns that must remain separate:
 
-1. reconstruct a parametric 3D model from a drawing or image;
-2. modify an existing parametric model from a textual or visual change request;
-3. detect incorrect intermediate results and react before errors accumulate.
+1. **agent guidance** — how to choose a modeling strategy and preserve design intent;
+2. **MCP capability** — tools that create, inspect, render, and modify FreeCAD objects;
+3. **evidence/diagnostics** — what the document actually contains and whether the
+   geometry and parametric structure require review.
 
-The core requirement is not merely tool execution. It is a closed engineering loop in which every major action produces evidence, an explicit discrepancy analysis, and a controlled state transition.
+A valid OpenCASCADE solid is not sufficient evidence of a good engineering
+model. Conversely, a diagnostic warning such as an intentionally
+under-constrained construction sketch is not automatically a failed part.
 
-## Current architecture
+## Current guidance architecture
 
 ```text
-user/reference drawing
+Codex/Cline project bootstrap
         ↓
-agent host (Codex, Cline, other MCP client)
+AGENTS.md or .clinerules (short routing rules)
         ↓
-client-native instructions + MCP prompts/resources/tool schemas
+.agents/skills/freecad-engineering/SKILL.md
         ↓
-freecad-mcp server
+optional Skill references for process-specific detail
         ↓
-XML-RPC/socket/embedded bridge
+MCP tools + FreeCAD document
         ↓
-FreeCAD document + GUI renderer
-        ↑
-geometry inspection + screenshots + image tools
+validate_parametric_model final structural report
 ```
 
-### Strengths already present
+### Single source of detailed policy
 
-- Broad standard-tool coverage for documents, PartDesign, Sketcher, validation, views, and export.
-- Transaction-based undo/redo and validation tools.
-- Improved feature tools that report measurable effects such as added/removed volume and direction.
-- Real MCP `ImageContent` from `open_image`, `get_screenshot`, and `compare_images`.
-- Camera-aware global-axis triad embedded in screenshots.
-- Existing engineering rules covering one Body, additive-before-subtractive order, explicit directions, and rollback.
+The canonical engineering guidance is:
 
-### Main failure found
+```text
+.agents/skills/freecad-engineering/SKILL.md
+```
 
-The previous workflow implemented `act` and part of `observe`, but not a binding `reaction` transition. The rule required screenshots and comparisons, yet:
+The root `AGENTS.md` is intentionally short. It tells Codex when the Skill is
+mandatory and requires the final diagnostic. Cline receives the same routing
+through `.clinerules/freecad-modeling.md`. MCP prompts and resources also point
+to the Skill rather than maintaining independent copies of the workflow.
 
-- `compare_images` only created a side-by-side image;
-- there was no mandatory discrepancy representation;
-- no categories were declared blocking;
-- no deterministic decision controlled whether the agent could continue;
-- whole-sheet and mismatched-view comparisons were not prohibited strongly enough;
-- a valid FreeCAD shape could be treated as success even when it was the wrong part.
+This reduces drift, but the delivery mechanisms are not equivalent:
 
-This allows an agent to acknowledge a mismatch and still add the next feature.
+- Codex reads applicable `AGENTS.md` files before work;
+- Codex initially sees Skill metadata and loads full `SKILL.md` when the Skill is
+  selected;
+- MCP prompts and resources are discoverable, but a client is not required to
+  inject every prompt/resource automatically;
+- tool descriptions are visible only when the corresponding MCP tool catalog is
+  loaded.
 
-## Guidance delivery audit
+Therefore, the root `AGENTS.md` remains necessary as a small router even though
+all detailed engineering content lives in the Skill.
 
-### Client-native files
+## Modeling policy
 
-These are the practical first layer and must contain concise non-negotiable rules:
+The current policy is deliberately **not** a rigid state machine. The agent may
+choose standard tools, `execute_python`, `safe_execute`, or `run_macro` according
+to the task. The required outcome is normally a native editable FreeCAD model
+with a meaningful Body/Sketch/PartDesign history, unless the user explicitly
+requests a disposable direct B-rep/imported-shape workflow.
 
-- Codex reads root `AGENTS.md` as repository guidance;
-- Cline loads applicable `.clinerules` files;
-- other hosts may use their own project instruction mechanism.
+The Skill first classifies:
 
-The former `.agents/AGENT.md` was not a reliable Codex bootstrap. A root `AGENTS.md` is now present, and the engineering rules are mirrored across supported repository files.
+- probable stock form: plate/block, sheet, round/tube, hex, profile, preform, or
+  hybrid;
+- dominant process: milling, turning, sheet-metal bending/forming, or hybrid.
 
-### MCP prompts
+That classification guides the base feature and feature dependency order. It is
+not a claim that the CAD tree must reproduce the literal shop-floor sequence.
 
-Prompts are discoverable templates, not a universal automatic startup channel. `freecad_startup` previously described itself as auto-loadable and contained generic advice that encouraged `safe_execute` too early. It now acts as a compact task router, while detailed workflows are isolated in:
+## Image delivery and visual reasoning
 
-- `reproduce_from_drawing`;
-- `modify_existing_model`;
-- task-specific `freecad_guidance` modes.
+`open_image` returns actual MCP `ImageContent` for one source image.
+`open_image_tiles` returns:
 
-### MCP resources
+- a numbered whole-image overview;
+- up to nine overlapping enlarged fragments;
+- a text block before every fragment identifying its grid location, source pixel
+  rectangle, overlap, and resize scale;
+- optional saved files for later same-view comparison.
 
-`freecad://best-practices` previously mixed general API advice, version notes, and execution examples, but lacked a drawing evidence model and reaction policy. It now exposes structured task routing, tool priority, dual validation, discrepancy categories, stop criteria, and workflow resources.
+This improves the amount of visual budget allocated to small dimensions and
+local geometry. It does not perform OCR, reconstruct missing pixels, infer CAD
+semantics, or prove that the model interpreted every fragment correctly.
 
-### Tool schemas/descriptions
+`compare_images` remains a qualitative side-by-side aid. It does not align the
+images or calculate correctness. A formal discrepancy ledger and
+`evaluate_model_checkpoint` are optional tools, not a mandatory global
+ACT-OBSERVE-REACT protocol.
 
-Tool descriptions are important because they are available when tools are discovered. Critical local constraints are now attached directly to the relevant tools:
+## Final parametric diagnostic
 
-- `compare_images`: no correctness score and mandatory next reaction step;
-- `evaluate_model_checkpoint`: deterministic workflow decision.
+`validate_parametric_model` is the final informative scan after geometry creation
+or modification. It reports:
 
-## Revised control loop
+- document metadata and object-type counts;
+- every `PartDesign::Body`, its state, shape validity, solid count, placement,
+  Tip, and ordered history;
+- history object type/role counts, dependencies, expressions, and shape summaries;
+- every sketch, solver status, remaining DoF, profile state, supports,
+  expressions, constraint-type counts, named constraints, and solver-reported
+  conflicting/redundant indices where available;
+- standalone sketches, Spreadsheets, and solid objects outside Bodies;
+- findings categorized as errors or warnings;
+- explicit limitations.
 
-### Pre-model evidence stage
+The report is intentionally not a hard pass/fail gate. It cannot prove:
 
-The agent must transform a drawing into an evidence map before construction:
+- correspondence to a drawing;
+- correctness of dimensions not encoded in model properties;
+- manufacturability, tolerances, fits, material, or process planning;
+- semantic design intent merely from object names/types.
 
-- identify views, sections, details, and coordinate orientation;
-- crop relevant regions at readable resolution;
-- inventory additive/subtractive features;
-- record dimensions, quantities, radii, angles, bends, and thickness;
-- label each item `explicit`, `derived`, or `assumed`;
-- stop on unresolved required dimensions.
+Project instructions require the agent to call the tool immediately before its
+final user-facing response after geometry changes and summarize significant
+findings. MCP itself cannot prevent a client/model from emitting text without a
+tool call, so this is an instruction-level requirement rather than a protocol
+lock. The report makes non-parametric shortcuts and unhealthy sketches visible
+when the requirement is followed.
 
-This prevents premature modeling from a vague global impression.
+## Documentation/code consistency findings
 
-### Feature checkpoint stage
+The current revision corrected the main drift found in the uploaded project:
 
-Each major feature is one checkpoint:
+- removed obsolete references to a missing `submit_modeling_plan` workflow;
+- removed image-only `VISUAL ACK` requirements from `open_image_tiles` and docs;
+- removed `ask_user` from checkpoint outcomes; ambiguity is handled
+  autonomously through best-supported assumptions and rework;
+- changed `compare_images` and `evaluate_model_checkpoint` from mandatory gates
+  to optional review aids;
+- kept `execute_python`, `safe_execute`, and `run_macro` registered;
+- aligned resource/prompt catalogs with the canonical Skill and final validator;
+- updated tool reference, user guide, configuration guide, changelog, and release
+  notes.
 
-1. **Act:** create one logically reviewable feature.
-2. **Observe geometry:** validate shape, Tip, solid count, dimensions, bounds, placement, and volume effect.
-3. **Observe correspondence:** compare an equivalent candidate view with a reference crop.
-4. **Describe:** write a complete discrepancy ledger.
-5. **React:** call `evaluate_model_checkpoint`.
+## Remaining technical risks
 
-The next feature is allowed only for `decision=continue`.
+1. **Instruction compliance is probabilistic.** `AGENTS.md` + Skill routing
+   strongly improves consistency but does not guarantee the model will call the
+   final validator.
+2. **Sketch solver API varies by FreeCAD version.** The validator uses guarded
+   feature detection and reports unavailable fields as empty/unknown rather than
+   failing the whole scan.
+3. **Topology naming remains fragile.** Generated `FaceN`/`EdgeN` references can
+   change after upstream edits. Prefer origin/datum planes and semantic
+   references where available.
+4. **Visual comparison is qualitative.** Future high-value additions are
+   canonical orthographic rendering, alignment, silhouette/contour metrics,
+   projected bounding-box checks, and hole/count measurements.
+5. **Sheet-metal approximations are limited.** Without a dedicated sheet-metal
+   feature set, a constant-thickness formed-state model does not validate bend
+   allowance or flat-pattern correctness.
 
-### Deterministic stop policy
+## Recommended next increments
 
-`evaluate_model_checkpoint` blocks continuation when:
-
-- geometry is invalid;
-- the visual checkpoint was skipped;
-- solid count, dimensions, or view equivalence fail;
-- the ledger is incomplete;
-- a missing/extra/wrong-count/wrong-position/wrong-orientation/profile/bend/silhouette/topology discrepancy exists;
-- any other discrepancy is major or critical.
-
-Unreadable dimensions, conflicting views, and insufficient evidence unless a geometry/rework failure must be resolved first.
-
-## Existing-model modification audit
-
-Model editing requires a different plan from greenfield construction. The main risks are:
-
-- appending workaround geometry rather than changing the semantic owner;
-- breaking downstream topological references;
-- losing expressions or constraints;
-- changing unrelated regions;
-- replacing a failed edit with a new Body/document.
-
-The revised workflow requires:
-
-- inspection of history, Tip, aliases, constraints, dependencies, visibility, and placement;
-- a baseline of invariants and views;
-- classification of the requested change;
-- editing the earliest semantic parameter/feature where practical;
-- one change per checkpoint;
-- regression checks for unaffected geometry.
-
-## What remains unsolved
-
-### 1. Visual comparison is still qualitative
-
-`compare_images` does not align views or compute geometry metrics. It depends on the VLM to identify discrepancies. The reaction gate improves behavior but does not make vision infallible.
-
-Recommended next tools:
-
-- canonical orthographic and section rendering;
-- reference/candidate registration and scale normalization;
-- silhouette IoU and contour-distance metrics;
-- bounding-box and projected-dimension error;
-- hole center, diameter, and count checks;
-- overlay and difference-map generation.
-
-### 2. Drawing parsing is not yet structured
-
-`compare_images` provides overview, but there is no persistent `DrawingSpec` or evidence graph. A future schema may be should store features, dimensions, source regions, confidence, and explicit/derived/assumed status.
-
-### 3. Checkpoint evidence is agent-authored
-
-The tool enforces policy on supplied evidence, but an agent can still omit or misclassify discrepancies. Future quantitative tools should feed checkpoint fields directly rather than relying entirely on prose.
-
-### 4. Workflow enforcement is not server-global
-
-MCP cannot guarantee that every host invokes a prompt/resource. Repository instruction files and tool-level requirements reduce this risk, but strict enforcement would require a stateful session controller that tracks required checkpoints between modifying tool calls.
-
-## Recommended roadmap
-
-### P0 — implemented in this revision
-
-- Root `AGENTS.md` and synchronized host rules.
-- Drawing reconstruction and model modification prompts/resources.
-- Drawing crop tool.
-- Explicit discrepancy ledger.
-- Deterministic reaction gate.
-- Compare-tool metadata requiring the next step.
-- Documentation and tests.
-
-### P1 — next practical increment
-
-- Render a standard multi-view checkpoint package: Front, Top, Right, Isometric, and optional section.
-- Add image overlay/difference views with scale and orientation normalization.
-- Add projected bbox, silhouette, and feature-count metrics.
-- Extend `evaluate_model_checkpoint` with quantitative metric thresholds.
-
-### P2 — structured drawing reasoning
-
-- Add `DrawingView`, `DrawingPrimitive`, dimension evidence, and feature hypothesis schemas.
-- Persist a drawing evidence ledger across the session.
-- Link each modeled feature to drawing evidence and acceptance results.
-
-### P3 — stateful workflow controller
-
-- Track document/Body/checkpoint state in the MCP server.
-- Mark a document as blocked after modifying operations until the required validation and reaction steps are completed.
-- Reject further feature creation when the previous checkpoint is unresolved.
-
-## Acceptance criteria for the system
-
-A drawing-to-model task is successful only when:
-
-- the source evidence was explicitly extracted;
-- every major feature passed geometric and correspondence gates;
-- every mismatch produced a reaction rather than silent continuation;
-- unresolved dimensions were escalated;
-- the model remains parametric and editable;
-- feature-by-feature final acceptance has no blocking discrepancies.
+- Add live integration fixtures for representative milling, turning, and
+  sheet-metal documents and snapshot the validator schema.
+- Add a compact human-readable formatter for `validate_parametric_model` while
+  retaining the full JSON report.
+- Add deterministic same-view rendering and image-registration tools before
+  introducing any stricter visual workflow.
+- Evaluate Skill activation and validator-call rate across Codex App/Cline logs;
+  tune the Skill description and root routing based on measured failures rather
+  than adding duplicated instructions.

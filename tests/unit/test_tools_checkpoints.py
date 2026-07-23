@@ -77,7 +77,7 @@ async def test_checkpoint_requires_rework_for_blocking_discrepancy(registered_to
 
 
 @pytest.mark.asyncio
-async def test_checkpoint_asks_user_for_unresolved_dimension(registered_tools):
+async def test_checkpoint_requires_autonomous_rework_for_unresolved_dimension(registered_tools):
     result = await registered_tools["evaluate_model_checkpoint"](
         checkpoint_name="WallThickness",
         geometry_valid=True,
@@ -88,10 +88,11 @@ async def test_checkpoint_asks_user_for_unresolved_dimension(registered_tools):
     assert result["decision"] == "rework"
     assert result["can_continue"] is False
     assert result["unresolved_reasons"]
+    assert "ask the user" not in result["required_action"].lower()
 
 
 @pytest.mark.asyncio
-async def test_rework_has_priority_over_user_question(registered_tools):
+async def test_geometry_rework_has_priority_over_uncertainty(registered_tools):
     result = await registered_tools["evaluate_model_checkpoint"](
         checkpoint_name="Pocket",
         geometry_valid=False,

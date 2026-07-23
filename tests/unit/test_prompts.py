@@ -76,6 +76,8 @@ class TestFreecadPrompts:
         # Should mention validation
         assert "validate" in result.lower()
         assert "safe_execute" in result or "undo" in result
+        assert "validate_parametric_model" in result
+        assert "$freecad-engineering" in result
 
     @pytest.mark.asyncio
     async def test_freecad_startup_contains_partdesign_guidance(
@@ -88,7 +90,7 @@ class TestFreecadPrompts:
         # Should mention PartDesign workflow
         assert "Body" in result
         assert "create_sketch" in result or "sketch" in result.lower()
-        assert "pad_sketch" in result or "pad" in result.lower()
+        assert "PartDesign" in result
 
     @pytest.mark.asyncio
     async def test_freecad_startup_mentions_gui_headless(
@@ -222,15 +224,15 @@ class TestFreecadPrompts:
 
 
     @pytest.mark.asyncio
-    async def test_drawing_reconstruction_prompt_contains_reaction_gate(
+    async def test_drawing_reconstruction_prompt_routes_to_skill(
         self, register_prompts: dict[str, Callable[..., Any]]
     ) -> None:
         prompt = register_prompts["reproduce_from_drawing"]
         result = await prompt(reference_path="drawing.png", target_document="Part")
 
-        assert "ACT → OBSERVE → REACT" in result
-        assert "evaluate_model_checkpoint" in result
-        assert "discrepancy ledger" in result.lower()
+        assert "$freecad-engineering" in result
+        assert "Reconstruct from drawings or images" in result
+        assert "validate_parametric_model" in result
         assert "drawing.png" in result
 
     @pytest.mark.asyncio
@@ -240,8 +242,9 @@ class TestFreecadPrompts:
         prompt = register_prompts["modify_existing_model"]
         result = await prompt(model_path="part.FCStd", change_request="add pocket")
 
-        assert "Preserve design intent" in result
-        assert "baseline" in result.lower()
+        assert "$freecad-engineering" in result
+        assert "Modify existing models" in result
+        assert "validate_parametric_model" in result
         assert "part.FCStd" in result
 
     # =========================================================================

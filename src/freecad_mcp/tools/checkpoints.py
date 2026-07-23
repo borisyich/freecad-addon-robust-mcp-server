@@ -1,4 +1,4 @@
-"""Deterministic checkpoint gates for agentic CAD workflows."""
+"""Optional deterministic checkpoint assessment for agentic CAD workflows."""
 
 from __future__ import annotations
 
@@ -52,11 +52,11 @@ def register_checkpoint_tools(mcp: Any) -> None:
         unresolved_dimensions: list[str] | None = None,
         discrepancies: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        """Convert observation evidence into a mandatory workflow decision.
+        """Convert observation evidence into an optional continue/rework decision.
 
-        Call this after a major modeling feature, after geometric validation and
-        visual comparison. The tool does not inspect pixels itself; it applies a
-        deterministic stop policy to the agent-authored discrepancy ledger.
+        Call this when a formal checkpoint ledger is useful after a major feature.
+        The tool does not inspect pixels itself; it applies deterministic rules to
+        the supplied evidence. It is not a server-wide workflow gate.
 
         Args:
             checkpoint_name: Human-readable feature/checkpoint identifier.
@@ -124,7 +124,7 @@ def register_checkpoint_tools(mcp: Any) -> None:
                 )
             if category in UNCERTAINTY_CATEGORIES:
                 unresolved_reasons.append(
-                    f"discrepancy #{item['index']} requires user clarification: {category}"
+                    f"discrepancy #{item['index']} requires an autonomous best-supported interpretation: {category}"
                 )
             elif category in BLOCKING_DISCREPANCY_CATEGORIES:
                 rework_reasons.append(
@@ -147,8 +147,9 @@ def register_checkpoint_tools(mcp: Any) -> None:
         elif unresolved_reasons:
             decision = "rework"
             required_action = (
-                "Stop modeling and ask the user for the unresolved dimensions or "
-                "interpretation before changing the model further."
+                "Reinspect all available views and dimensions, choose the most "
+                "geometrically consistent interpretation with the fewest unsupported "
+                "assumptions, record that assumption, and rework/recheck the feature."
             )
         else:
             decision = "continue"

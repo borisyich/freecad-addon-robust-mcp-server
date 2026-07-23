@@ -1,6 +1,6 @@
 # FreeCAD Robust MCP Server Tools Reference
 
-This document provides a comprehensive reference for all MCP tools available in the FreeCAD Robust MCP Server.
+This document provides detailed signatures and examples for core MCP tools. It is not the exact inventory of all registered tools. Use [Tools Overview](guide/tools.md) or the MCP client's discovered tool list for the authoritative 158-tool inventory.
 
 ---
 
@@ -8,16 +8,25 @@ This document provides a comprehensive reference for all MCP tools available in 
 
 The FreeCAD Robust MCP Server exposes tools organized into the following categories:
 
-| Category                        | Description                      | Tool Count |
-| ------------------------------- | -------------------------------- | ---------- |
-| [Execution](#execution-tools)   | Python execution and system info | 5          |
-| [Documents](#document-tools)    | Document management              | 7          |
-| [Objects](#object-tools)        | Object creation and manipulation | 22         |
-| [PartDesign](#partdesign-tools) | Parametric solid modeling        | 20         |
-| [Export](#export-tools)         | Import/export operations         | 7          |
-| [View](#view-tools)             | View control and screenshots     | 18         |
-| [Macros](#macro-tools)          | Macro management                 | 6          |
-| **Total**                       |                                  | **85**     |
+The exact generated inventory is grouped as follows:
+
+| Category | Tool Count |
+| --- | ---: |
+| Execution | 5 |
+| Documents | 7 |
+| Objects / Part | 40 |
+| PartDesign / Sketcher | 50 |
+| Spreadsheet | 10 |
+| Draft | 6 |
+| Images | 3 |
+| Checkpoints | 1 |
+| View | 18 |
+| Validation | 5 |
+| Export / Import | 7 |
+| Macros | 6 |
+| **Total** | **158** |
+
+The sections below retain deeper examples for commonly used tools; they do not repeat every generated entry.
 
 ---
 
@@ -945,12 +954,12 @@ open_image_tiles(
 ```
 
 The result contains one text block before every image, identifying the fragment
-number, grid position, source pixel rectangle, overlap, and resize scale. Each
-detail image also contains a `VISUAL ACK` code that is deliberately omitted from
-metadata; strict workflows require the model to read and submit every code. The
-overview preserves global context. Cropping gives small drawing details a larger
-visual budget; upscaling does not recover information absent from the source.
-A maximum of nine tiles is allowed. Tiles are saved by default under
+number, grid position, source pixel rectangle, overlap, and resize scale. The
+overview preserves global context while every fragment is delivered as a separate
+MCP image block with an explicit prompt describing what region it represents.
+Cropping gives small drawing details a larger visual budget; upscaling does not
+recover information absent from the source. A maximum of nine tiles is allowed.
+Tiles are saved by default under
 `./image_tiles/<source>_<grid>` so `compare_images` can use an exact reference
 fragment instead of the whole sheet.
 
@@ -1165,6 +1174,54 @@ Force recompute of all objects.
 
 ```python
 recompute(doc_name: str | None = None) -> dict
+```
+
+---
+
+## Validation Tools
+
+### validate_parametric_model
+
+Inspect the active or named document's editable parametric structure. This is an
+informative diagnostic, not a hard pass/fail gate. After creating or changing
+model geometry, call it immediately before the final user-facing response.
+
+```python
+validate_parametric_model(
+    doc_name: str | None = None,
+    recompute: bool = True,
+    include_sketch_constraints: bool = False,
+) -> dict
+```
+
+The report includes:
+
+- document metadata and counts;
+- each `PartDesign::Body`, shape validity, current Tip, and ordered history;
+- sketches with solver state (`fully_constrained`, `under_constrained`,
+  `over_constrained`, `conflicting`, `redundant`, or `solver_error`), remaining
+  degrees of freedom, solver-reported conflicting/redundant constraint indices,
+  profile state, supports, expressions, and constraint counts;
+- standalone sketches, Spreadsheets, and solid objects outside Bodies;
+- findings with `error` or `warning` severity;
+- limitations: it does not prove drawing correspondence, manufacturing process,
+  tolerances, or design intent.
+
+Set `include_sketch_constraints=True` only when individual constraint details are
+needed; it can make the response large.
+
+### Other validation tools
+
+```python
+validate_object(object_name: str, doc_name: str | None = None) -> dict
+validate_document(doc_name: str | None = None) -> dict
+undo_if_invalid(doc_name: str | None = None) -> dict
+safe_execute(
+    code: str,
+    doc_name: str | None = None,
+    validate_after: bool = True,
+    auto_undo_on_failure: bool = True,
+) -> dict
 ```
 
 ---

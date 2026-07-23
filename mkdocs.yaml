@@ -130,7 +130,9 @@ nav:
       - MCP Macro Tools: guide/macros.md
       - Tools Overview: guide/tools.md
       - Agent Modeling Patterns: guide/agent-modeling-patterns.md
+      - FreeCAD Engineering Skill: guide/freecad-engineering-skill.md
       - Agent Guidance Architecture: guide/agent-guidance-architecture.md
+      - MCP Prompts: guide/prompts.md
       - MCP Resources: guide/resources.md
       - Detailed User Guide: USER_GUIDE.md
       - Tools Reference: MCP_TOOLS_REFERENCE.md

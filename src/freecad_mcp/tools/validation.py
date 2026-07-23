@@ -10,6 +10,10 @@ may fail or create invalid geometry.
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from freecad_mcp.bridge._parametric_validation_runtime import (
+    build_parametric_validation_code,
+)
+
 
 def register_validation_tools(
     mcp: Any, get_bridge: Callable[[], Awaitable[Any]]
@@ -307,6 +311,88 @@ else:
             "objects_needing_recompute": [],
             "recompute_needed": False,
             "summary": result.error_traceback or "Validation failed",
+        }
+
+    @mcp.tool()
+    async def validate_parametric_model(
+        doc_name: str | None = None,
+        recompute: bool = True,
+        include_sketch_constraints: bool = False,
+    ) -> dict[str, Any]:
+        """Inspect the document's editable parametric structure before completion.
+
+        This is the mandatory final diagnostic for tasks that create or modify a
+        FreeCAD model. It is intentionally informative rather than a rigid gate:
+        it reports Bodies and Tips, ordered Body history, shape validity, sketch
+        solver/profile state, expressions, direct solid objects outside Bodies,
+        and actionable findings. Call it before the final user-facing response
+        and summarize significant findings instead of merely saying "done".
+
+        The tool does not verify that the model matches a drawing or that the
+        chosen manufacturing process is correct. Those remain separate visual,
+        dimensional, and engineering checks.
+
+        Args:
+            doc_name: Document to inspect. Uses the active document when omitted.
+            recompute: Recompute the document before inspection. Defaults to True.
+            include_sketch_constraints: Include every individual sketch constraint
+                with name, type, datum, driving/reference state, and index. Defaults
+                to False because large sketches can make the response very long.
+
+        Returns:
+            Informative report containing:
+                - assessment and human-readable summary
+                - document metadata and counts
+                - each PartDesign Body, its validity, shape, Tip, and ordered history
+                - each sketch with solver state, remaining DoF, profile state,
+                  support, expressions, and constraint type counts
+                - standalone sketches and solid objects outside Bodies
+                - findings with error/warning severity
+                - explicit limitations of the diagnostic
+        """
+        bridge = await get_bridge()
+        code = build_parametric_validation_code(
+            doc_name=doc_name,
+            recompute=recompute,
+            include_sketch_constraints=include_sketch_constraints,
+        )
+        result = await bridge.execute_python(code)
+        if result.success and result.result:
+            return result.result
+        error = result.error_traceback or "Parametric model validation failed"
+        return {
+            "informational": True,
+            "assessment": "unavailable",
+            "summary": error,
+            "document": None,
+            "counts": {
+                "bodies": 0,
+                "body_history_items": 0,
+                "sketches": 0,
+                "standalone_sketches": 0,
+                "spreadsheets": 0,
+                "uncontained_shape_objects": 0,
+            },
+            "sketch_solver_status_counts": {},
+            "bodies": [],
+            "standalone_sketches": [],
+            "uncontained_shape_objects": [],
+            "spreadsheets": [],
+            "findings": [
+                {
+                    "severity": "error",
+                    "category": "validation_execution_failed",
+                    "object": doc_name,
+                    "message": error,
+                }
+            ],
+            "completion_guidance": {
+                "required_before_user_response": True,
+                "report": ["validation execution failure"],
+            },
+            "limitations": [
+                "The FreeCAD-side diagnostic did not execute successfully."
+            ],
         }
 
     @mcp.tool()
