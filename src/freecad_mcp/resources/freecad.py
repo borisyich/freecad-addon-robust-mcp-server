@@ -1136,7 +1136,7 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                         {
                             "name": "compare_images",
                             "description": "Side-by-side reference/candidate image for qualitative review",
-                            "key_params": ["reference_path", "candidate_path"],
+                            "key_params": ["reference_path", "candidate_path", "view_context"],
                         },
                         {
                             "name": "evaluate_model_checkpoint",
@@ -1150,13 +1150,13 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                     "tools": [
                         {
                             "name": "get_screenshot",
-                            "description": "Capture 3D view screenshot (GUI only)",
-                            "key_params": ["file_path", "width", "height"],
+                            "description": "Capture a settled standard-view screenshot (GUI only)",
+                            "key_params": ["view_angle", "width", "height", "settle_time_seconds"],
                         },
                         {
                             "name": "set_view_angle",
-                            "description": "Set camera to standard views",
-                            "key_params": ["angle"],
+                            "description": "Set camera to standard views; Front=XZ, Top=XY, Left/Right=YZ",
+                            "key_params": ["view_angle"],
                         },
                         {
                             "name": "fit_all",

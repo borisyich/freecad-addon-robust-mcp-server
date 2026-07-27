@@ -16,6 +16,7 @@ def build_screenshot_code(
     save_to_disk: bool,
     output_path: str | None,
     return_data: bool,
+    settle_time_seconds: float = 2.0,
 ) -> str:
     """Build code that activates the target GUI document and saves its view.
 
@@ -24,6 +25,11 @@ def build_screenshot_code(
     coordinate cross are not guaranteed to be part of that scene image. The
     generated code therefore composites a deterministic X/Y/Z orientation
     indicator into the saved PNG with Qt after ``saveImage`` completes.
+
+    A short GUI-settling interval is inserted after changing the camera and
+    fitting the model. During that interval FreeCAD GUI events are processed and
+    the view is redrawn repeatedly so ``saveImage`` does not capture a stale
+    camera or incomplete fit animation.
     """
     return f'''
 import base64
@@ -308,6 +314,20 @@ try:
 except Exception:
     pass
 
+settle_time_seconds = max(0.0, float({settle_time_seconds!r}))
+if settle_time_seconds > 0.0:
+    settle_deadline = time.monotonic() + settle_time_seconds
+    while True:
+        FreeCADGui.updateGui()
+        try:
+            view.redraw()
+        except Exception:
+            pass
+        remaining = settle_deadline - time.monotonic()
+        if remaining <= 0.0:
+            break
+        time.sleep(min(0.05, remaining))
+
 save_to_disk = {save_to_disk!r}
 requested_output_path = {output_path!r}
 return_data = {return_data!r}
@@ -387,6 +407,7 @@ try:
         "corner_cross_embedded": bool(corner_cross_embedded),
         "corner_cross_render_mode": corner_cross_render_mode,
         "corner_cross_overlay": corner_cross_overlay,
+        "settle_time_seconds": settle_time_seconds,
     }}
 finally:
     if native_corner_cross_supported:

@@ -32,7 +32,8 @@ The Skill covers:
 - milling, turning, and sheet-metal modeling strategies;
 - editable Body/Sketch/PartDesign structure;
 - feature dependency/order guidance;
-- drawing-image inspection and assumptions;
+- drawing-view identification, FreeCAD plane/axis mapping, and dimension-axis evidence;
+- same-view and multi-view visual comparison;
 - existing-model modification;
 - lightweight intermediate validation;
 - mandatory final `validate_parametric_model` reporting.

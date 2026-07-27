@@ -344,7 +344,22 @@ Take a screenshot of the bracket from an isometric view
 
 The agent should use `get_screenshot(view_angle="Isometric", return_image=True)` so the pixels are returned as MCP image content. The global X/Y/Z corner cross is included by default (`show_corner_cross=True`, `corner_cross_size=10`) so the agent can verify camera and model orientation. The screenshot pipeline paints this triad into the PNG after `saveImage`, because FreeCAD's native screen-space corner cross is not guaranteed to survive off-screen rendering. Check `corner_cross_embedded=true` and `corner_cross_render_mode="qimage_overlay"` in the metadata. Set `show_corner_cross=False` only for a clean presentation image.
 
-For drawing work, call `open_image(path)` for the overview and use `open_image_tiles` when local dimensions/features are too small. Compare only equivalent views. `compare_images` is visual assistance rather than an automatic correctness metric; use formal checkpoints only when the task benefits from them.
+`get_screenshot` also waits `settle_time_seconds=2.0` by default after camera
+alignment and `fitAll`, while processing GUI events and redraws. This is
+important when an agent sets a standard view and immediately captures it.
+
+For drawing reconstruction, identify the view-to-plane map before modeling:
+Front/Rear → XZ with depth along Y; Top/Bottom → XY with depth along Z;
+Left/Right → YZ (ZOY) with depth along X. Select a sketch plane from the view
+that shows the feature's true profile, and obtain extrusion depth from another
+view or an explicit callout.
+
+Call `open_image(path)` for the overview and use `open_image_tiles` when local
+dimensions/features are too small. Compare only equivalent views and pass a
+short `view_context` to `compare_images`. If one pair is uncertain, compare all
+principal target views that exist—front, matching side, top, then isometric.
+`compare_images` is visual assistance rather than an automatic correctness
+metric; use formal checkpoints only when the task benefits from them.
 
 ---
 

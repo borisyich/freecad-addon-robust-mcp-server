@@ -214,19 +214,102 @@ detail and should be created earlier.
 
 ## 5. Reconstruct from drawings or images
 
+### 5.1 Establish the drawing view-to-axis map before modeling
+
+Do not begin feature planning from a remembered silhouette. First identify the
+principal/front view and every available top, left/right side, section, detail,
+and isometric view. The principal/front view is the anchor view even when the
+sheet does not label it explicitly; other view types may be absent.
+
+Do not classify a view only from its page position. Determine the projection
+convention and confirm view identity from shared centerlines, feature counts,
+dimensions, section arrows, and matching silhouettes. Some evaluation drawings
+may deliberately depart from drafting standards.
+
+Use this FreeCAD coordinate contract unless the task explicitly establishes a
+different global frame:
+
+| Drawing / FreeCAD camera | Projection plane seen without foreshortening | Normal / feature depth axis | Typical sketch plane |
+|---|---|---|---|
+| Front / Rear | XZ | ±Y | `XZ_Plane` |
+| Top / Bottom | XY | ±Z | `XY_Plane` |
+| Left / Right side | YZ (ZOY) | ±X | `YZ_Plane` |
+| Isometric | none; verification only | none | do not choose a sketch plane from isometry alone |
+
+A feature profile belongs to the plane in which its true shape is shown. Its
+Pad/Pocket/Hole direction is normally perpendicular to that plane. Therefore:
+
+- a circular boss shown as a circle in a side view is planned on `YZ_Plane`,
+  with its axis along X;
+- a circular boss shown as a circle in the front view is planned on `XZ_Plane`,
+  with its axis along Y;
+- a circular boss shown as a circle in the top view is planned on `XY_Plane`,
+  with its axis along Z.
+
+Before creating the first feature, write a compact **view map** containing:
+
+- source region/crop and identified view type;
+- FreeCAD camera view and projection plane;
+- viewing/normal axis;
+- dimensions and features that this view proves;
+- dimensions that must come from another view.
+
+For every planned feature, state the active reference view, sketch/datum plane,
+normal/extrusion axis, and which other view supplies depth or offset. Never copy
+a 2D outline from one view and invent its normal depth from visual appearance.
+
+### 5.2 Assign dimensions to axes, not merely to views
+
+Build an axis-aware evidence table: feature, value/count, source view, controlled
+axis or plane, explicit/derived/assumed status, and confidence.
+
+- Dimensions measured in a projection plane control the two axes visible in that
+  plane.
+- Feature depth along the plane normal must come from another orthographic view,
+  a section/detail, or an explicit depth/thickness callout.
+- A centerline location plus an outer radius may define an overall extent, but
+  use the radius of the boundary being dimensioned and cross-check any explicit
+  overall dimension. Do not mix an inner diameter from one boundary with the
+  outer envelope of another.
+- Shared dimensions must reconcile across views before they drive a sketch or
+  feature.
+
+### 5.3 Inspect local evidence and plan the model
+
 - Open the whole sheet first to identify views, sections, details, dimensions,
   notes, and scale relationships.
 - Use `open_image_tiles` or focused crops when dimensions/features are too small
   in the full sheet. Upscaling improves presentation to the VLM but does not
   restore detail absent from the source pixels.
-- Build an evidence table: feature, value/count, source view, explicit/derived/
-  assumed status, and confidence.
-- Compare equivalent views: front-to-front, top-to-top, section-to-section.
+- Build the axis-aware evidence table and a feature plan before modeling.
 - Resolve ambiguity autonomously by choosing the interpretation most consistent
   across all views. Record assumptions and alternatives; revise them when later
   evidence conflicts.
-- Use screenshots and `compare_images` at high-risk transitions or after major
-  features. The comparison tool is visual assistance, not a numerical proof.
+
+### 5.4 Compare the current feature against the correct references
+
+At each ACT → OBSERVE → REACT checkpoint, keep the current feature's view/plane
+contract explicit. Set the candidate camera to the same projection as the
+reference crop before taking the screenshot. Prefer a single explicit call such
+as `get_screenshot(view_angle="Left", settle_time_seconds=2.0, ...)`; do not rely
+only on a preceding `set_view_angle` call or on the default isometric view.
+
+Compare equivalent views only: front-to-front, top-to-top, left/right-to-the
+matching side, section-to-section, and isometric-to-isometric. A good match in
+one projection does not prove correct depth, axis direction, or hidden geometry.
+
+Use screenshots and `compare_images` at high-risk transitions or after major
+features. If one comparison leaves any doubt about silhouette, proportions,
+feature count, placement, orientation, or depth, repeat the comparison for every
+principal view available on the target drawing, normally in this order:
+
+1. principal/front;
+2. left or right side;
+3. top;
+4. isometric as a final spatial sanity check.
+
+Only continue when the set of available views is mutually consistent. The
+comparison tool is visual assistance, not a numerical proof.
 
 Read [references/drawing-reconstruction.md](references/drawing-reconstruction.md).
 

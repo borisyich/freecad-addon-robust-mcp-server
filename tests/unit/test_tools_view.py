@@ -70,6 +70,8 @@ class TestViewTools:
         assert result.isError is False
         assert result.structuredContent["success"] is True
         assert result.structuredContent["format"] == "png"
+        assert result.structuredContent["projection_plane"] is None
+        assert result.structuredContent["normal_axis"] is None
         assert any(isinstance(item, ImageContent) for item in result.content)
         mock_bridge.get_screenshot.assert_called_once()
 
@@ -161,6 +163,7 @@ class TestViewTools:
             background="White",
             show_corner_cross=True,
             corner_cross_size=10,
+            settle_time_seconds=2.0,
             save_to_disk=True,
             output_path="/tmp/bracket.png",
             return_data=False,
@@ -175,6 +178,19 @@ class TestViewTools:
 
         assert result.isError is True
         assert "corner_cross_size must be between 1 and 100" in (
+            result.structuredContent["error"]
+        )
+        mock_bridge.get_screenshot.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_get_screenshot_rejects_invalid_settle_time(
+        self, register_tools, mock_bridge
+    ):
+        """Screenshot settling delay should remain bounded."""
+        result = await register_tools["get_screenshot"](settle_time_seconds=11)
+
+        assert result.isError is True
+        assert "settle_time_seconds must be between 0 and 10" in (
             result.structuredContent["error"]
         )
         mock_bridge.get_screenshot.assert_not_called()
@@ -232,7 +248,37 @@ class TestViewTools:
         result = await set_view_angle(view_angle="Front")
 
         assert result["success"] is True
+        assert result["projection_plane"] == "XZ"
+        assert result["normal_axis"] == "Y"
         mock_bridge.set_view.assert_called_once()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("view_angle", "projection_plane", "normal_axis"),
+        [
+            ("Front", "XZ", "Y"),
+            ("Top", "XY", "Z"),
+            ("Left", "YZ", "X"),
+            ("Right", "YZ", "X"),
+            ("Isometric", None, None),
+        ],
+    )
+    async def test_set_view_angle_reports_projection_contract(
+        self,
+        register_tools,
+        mock_bridge,
+        view_angle,
+        projection_plane,
+        normal_axis,
+    ):
+        """Standard views should expose the drawing-plane coordinate contract."""
+        mock_bridge.set_view = AsyncMock(return_value=None)
+
+        result = await register_tools["set_view_angle"](view_angle=view_angle)
+
+        assert result["success"] is True
+        assert result["projection_plane"] == projection_plane
+        assert result["normal_axis"] == normal_axis
 
     @pytest.mark.asyncio
     async def test_set_view_angle_invalid(self, register_tools, mock_bridge):

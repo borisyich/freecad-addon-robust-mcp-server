@@ -83,10 +83,11 @@ mechanical model, activate `$freecad-engineering`. The canonical policy is
   in duplicate documents or Bodies.
 - Validate FreeCAD geometry and requirement correspondence separately. A valid
   solid can still be the wrong part.
-- After each major feature, complete ACT → OBSERVE → REACT:
-  validate geometry, save/open an equivalent-view screenshot, compare against a
-  reference crop, write a discrepancy ledger, and call
-  `evaluate_model_checkpoint`. Continue only when it returns `continue`.
+- Follow the Skill's ACT → OBSERVE → REACT loop after each major feature.
+  Establish the drawing-view/FreeCAD-plane contract before modeling, capture a
+  settled screenshot in the equivalent view, and rework the causal feature when
+  the available views disagree. A formal discrepancy ledger/checkpoint is
+  optional rather than a universal gate.
 - Preserve native editable design intent: Body, sketches, constraints, and
   semantic PartDesign history unless the user explicitly asks for direct B-rep.
 - `execute_python`, `safe_execute`, and `run_macro` are always available. Using

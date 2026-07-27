@@ -11,6 +11,18 @@ from typing import Any
 from mcp.types import CallToolResult
 
 
+VIEW_PROJECTION_CONTEXT: dict[str, dict[str, str | None]] = {
+    "Front": {"projection_plane": "XZ", "normal_axis": "Y"},
+    "Back": {"projection_plane": "XZ", "normal_axis": "Y"},
+    "Top": {"projection_plane": "XY", "normal_axis": "Z"},
+    "Bottom": {"projection_plane": "XY", "normal_axis": "Z"},
+    "Left": {"projection_plane": "YZ", "normal_axis": "X"},
+    "Right": {"projection_plane": "YZ", "normal_axis": "X"},
+    "Isometric": {"projection_plane": None, "normal_axis": None},
+    "FitAll": {"projection_plane": None, "normal_axis": None},
+}
+
+
 def register_view_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> None:
     """Register view-related tools with the Robust MCP Server.
 
@@ -29,6 +41,7 @@ def register_view_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> N
         background: str = "White",
         show_corner_cross: bool = True,
         corner_cross_size: int = 10,
+        settle_time_seconds: float = 2.0,
         save_to_disk: bool = False,
         output_path: str | None = None,
         return_image: bool = True,
@@ -53,6 +66,10 @@ def register_view_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> N
                 the lower-right corner. Defaults to True for engineering review.
             corner_cross_size: Approximate percentage of the 3D-view canvas used
                 by the corner cross. Must be between 1 and 100.
+            settle_time_seconds: Delay after setting the camera and fitting the
+                model before ``saveImage``. FreeCAD GUI events and redraws are
+                processed during the delay. Defaults to 2 seconds; use 0 only for
+                controlled tests or when camera state is already stable.
             save_to_disk: Persist the PNG on disk.
             output_path: Optional PNG path. When omitted, FreeCAD creates a file
                 under ``./screenshots`` when disk saving is enabled.
@@ -87,6 +104,8 @@ def register_view_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> N
             return image_error("background must be 'White' or 'Current'")
         if not 1 <= corner_cross_size <= 100:
             return image_error("corner_cross_size must be between 1 and 100")
+        if not 0 <= settle_time_seconds <= 10:
+            return image_error("settle_time_seconds must be between 0 and 10")
         if output_path is not None and not save_to_disk:
             return image_error("output_path requires save_to_disk=True")
         if not save_to_disk and not return_image and not return_data:
@@ -103,6 +122,7 @@ def register_view_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> N
             background=background,
             show_corner_cross=show_corner_cross,
             corner_cross_size=corner_cross_size,
+            settle_time_seconds=settle_time_seconds,
             save_to_disk=save_to_disk,
             output_path=output_path,
             return_data=need_base64,
@@ -112,12 +132,15 @@ def register_view_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> N
             "success": result.success,
             "kind": "freecad_screenshot",
             "view_angle": view_angle,
+            "projection_plane": VIEW_PROJECTION_CONTEXT[view_angle]["projection_plane"],
+            "normal_axis": VIEW_PROJECTION_CONTEXT[view_angle]["normal_axis"],
             "format": result.format,
             "width": result.width,
             "height": result.height,
             "path": result.path,
             "saved_to_disk": result.saved_to_disk,
             "file_size": result.file_size,
+            "settle_time_seconds": settle_time_seconds,
             "error": result.error,
         }
         if return_data:
@@ -147,12 +170,12 @@ def register_view_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> N
         Args:
             view_angle: View angle to set. Options:
                 - "Isometric" - 3D isometric view
-                - "Front" - Front view (XZ plane)
-                - "Back" - Back view
-                - "Top" - Top view (XY plane)
-                - "Bottom" - Bottom view
-                - "Left" - Left view (YZ plane)
-                - "Right" - Right view
+                - "Front" - Front projection on XZ; camera normal is Y
+                - "Back" - Rear projection on XZ; camera normal is Y
+                - "Top" - Top projection on XY; camera normal is Z
+                - "Bottom" - Bottom projection on XY; camera normal is Z
+                - "Left" - Left-side projection on YZ (ZOY); camera normal is X
+                - "Right" - Right-side projection on YZ (ZOY); camera normal is X
                 - "FitAll" - Fit all objects in view
             doc_name: Document to set view for. Uses active document if None.
 
@@ -181,7 +204,12 @@ def register_view_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> N
 
         bridge = await get_bridge()
         await bridge.set_view(angle_map[view_angle], doc_name)
-        return {"success": True}
+        return {
+            "success": True,
+            "view_angle": view_angle,
+            "projection_plane": VIEW_PROJECTION_CONTEXT[view_angle]["projection_plane"],
+            "normal_axis": VIEW_PROJECTION_CONTEXT[view_angle]["normal_axis"],
+        }
 
     @mcp.tool()
     async def list_workbenches() -> list[dict[str, Any]]:

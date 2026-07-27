@@ -90,7 +90,9 @@ MODEL_MODIFICATION_WORKFLOW: Final[str] = (
 
 VISUAL_CHECKPOINT_PROTOCOL: Final[str] = (
     _SKILL_ROUTER
-    + "\nUse screenshots, crops, and `compare_images` when visual evidence is "
-    "useful. Compare equivalent views and rework clearly incorrect geometry; "
-    "a formal checkpoint ledger is optional unless the task needs it.\n"
+    + "\nFollow the Skill's ACT → OBSERVE → REACT loop. Before modeling from a "
+    "drawing, establish the front/top/side view map and its FreeCAD XZ/XY/YZ "
+    "plane and normal-axis correspondence. Compare equivalent views. If one "
+    "pair is uncertain, compare every principal target view available before "
+    "continuing; a formal checkpoint ledger remains optional.\n"
 )

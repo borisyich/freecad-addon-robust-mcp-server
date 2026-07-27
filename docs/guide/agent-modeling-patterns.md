@@ -39,7 +39,9 @@ machine after every operation:
 
 - `get_sketch_info` for sketch solver/profile state;
 - `validate_object` and `validate_document` for geometry health;
-- screenshots and equivalent-view comparisons for visual evidence;
+- screenshots after the default GUI-settling delay and equivalent-view comparisons;
+- a drawing view map: Front=XZ/normal Y, Top=XY/normal Z, Side=YZ/normal X;
+- multi-view fallback when one visual comparison is uncertain;
 - `validate_parametric_model` for the mandatory final structural report.
 
 The validator is informative. It reports actual Bodies, Tips, history, sketches,

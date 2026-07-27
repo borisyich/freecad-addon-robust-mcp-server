@@ -95,6 +95,7 @@ async def test_compare_images_returns_labelled_composite(registered_tools, tmp_p
         panel_width=500,
         panel_height=400,
         output_path=str(output),
+        view_context="Left / YZ plane / normal X",
     )
 
     assert result.isError is False
@@ -103,6 +104,7 @@ async def test_compare_images_returns_labelled_composite(registered_tools, tmp_p
     assert metadata["width"] == 1008
     assert metadata["height"] == 400
     assert metadata["saved_path"] == str(output.resolve())
+    assert metadata["view_context"] == "Left / YZ plane / normal X"
     assert output.is_file()
     assert sum(isinstance(item, ImageContent) for item in result.content) == 1
 
@@ -158,10 +160,14 @@ async def test_compare_images_returns_optional_review_guidance(registered_tools,
 
     metadata = result.structuredContent
     assert metadata["assessment_status"] == "not_evaluated"
+    assert metadata["view_context"] == "VIEW NOT SPECIFIED"
+    assert "whole drawing sheet" in metadata["comparison_preconditions"][0]
     review = metadata["recommended_review"]
     assert review["action"] == "describe_concrete_discrepancies_and_rework_if_needed"
     assert "observed" in review["optional_ledger_fields"]
     assert review["optional_decision_values"] == ["continue", "rework"]
+    assert "every principal target view" in review["when_uncertain"]
+    assert "profile_plane_and_axis_direction" in review["inspect"]
 
 
 @pytest.mark.asyncio

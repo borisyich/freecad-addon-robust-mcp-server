@@ -901,6 +901,7 @@ get_screenshot(
     background: str = "White",
     show_corner_cross: bool = True,
     corner_cross_size: int = 10,
+    settle_time_seconds: float = 2.0,
     save_to_disk: bool = False,
     output_path: str | None = None,
     return_image: bool = True,
@@ -922,6 +923,21 @@ the saved PNG with Qt `QImage`/`QPainter`.
 `corner_cross_size` is an approximate percentage of the canvas and accepts
 values from 1 to 100. Set `show_corner_cross=False` only for clean presentation
 images. Any native interactive-view setting is restored after capture.
+
+`settle_time_seconds=2.0` is the default. After setting the camera and running
+`fitAll`, the generated FreeCAD-side code processes GUI events and redraws the
+view during this interval before calling `saveImage`. This prevents a screenshot
+from capturing a stale orientation or incomplete fit. Values from 0 to 10 are
+accepted; use 0 only when the view is already stable or in controlled tests.
+
+**View/plane correspondence:**
+
+| View | Projection plane | Normal/depth axis |
+|---|---|---|
+| Front / Back | XZ | Y |
+| Top / Bottom | XY | Z |
+| Left / Right | YZ (ZOY) | X |
+| Isometric | no true-shape plane | verification only |
 
 **View angles:** `Isometric`, `Front`, `Back`, `Top`, `Bottom`, `Left`, `Right`, `FitAll`
 
@@ -975,10 +991,21 @@ compare_images(
     panel_width: int = 1200,
     panel_height: int = 900,
     output_path: str | None = None,
+    view_context: str | None = None,
 ) -> CallToolResult
 ```
 
-This is a visual comparison aid; it does not perform geometric alignment or calculate a correctness score. The result metadata has `assessment_status="not_evaluated"` and requires a discrepancy ledger followed by `evaluate_model_checkpoint`. Reference and candidate must show equivalent views.
+This is a visual comparison aid; it does not perform geometric alignment or
+calculate a correctness score. Reference and candidate must show equivalent
+views. Crop a complete drawing sheet to the matching target view before
+comparison; a full sheet versus one model screenshot is weak evidence. Use
+`view_context`, for example `"Left / YZ plane / normal X"`, so the panel labels
+carry the active view/plane contract.
+
+A match in one projection does not prove depth or feature-axis orientation. If
+similarity is uncertain, repeat same-view comparisons for every principal target
+view available: front, matching left/right side, top, then isometric. A formal
+discrepancy ledger and `evaluate_model_checkpoint` remain optional.
 
 #### evaluate_model_checkpoint
 

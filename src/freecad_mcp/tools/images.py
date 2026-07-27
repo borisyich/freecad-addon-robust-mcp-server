@@ -533,14 +533,24 @@ def register_image_tools(mcp: Any) -> None:
         panel_width: int = 1200,
         panel_height: int = 900,
         output_path: str | None = None,
+        view_context: str | None = None,
     ) -> CallToolResult:
         """Return a labelled side-by-side comparison as one MCP image.
 
         The left panel is always REFERENCE and the right panel is CANDIDATE.
+        Use this only for equivalent projections. Supply ``view_context`` such as
+        ``"Left / YZ plane / view along X"`` so the model keeps the drawing view,
+        FreeCAD camera, profile plane, and normal axis explicit.
+
         This does not claim pixel-perfect alignment or compute a correctness score;
         it gives the vision model both images in one unambiguous visual context.
-        When the comparison exposes a meaningful mismatch, describe the concrete
-        discrepancy and rework the causal feature. ``evaluate_model_checkpoint``
+        If the reference is a complete drawing sheet, crop the matching target
+        view first; comparing a full sheet with one model screenshot is weak evidence.
+        One apparently good pair does not prove depth or axis orientation. If the
+        similarity is uncertain, or the current projection may hide a mismatch,
+        repeat the comparison for every principal target view available: front,
+        matching left/right side, top, then isometric. Describe concrete
+        discrepancies and rework the causal feature. ``evaluate_model_checkpoint``
         remains available when a formal ledger is useful, but is not mandatory.
 
         Args:
@@ -549,6 +559,8 @@ def register_image_tools(mcp: Any) -> None:
             panel_width: Width of each panel in pixels.
             panel_height: Height of each panel in pixels.
             output_path: Optional PNG path for persisting the comparison.
+            view_context: Optional short description of the equivalent view and
+                coordinate contract, for example ``Front / XZ / normal Y``.
 
         Returns:
             Metadata and one side-by-side MCP ImageContent block.
@@ -569,17 +581,22 @@ def register_image_tools(mcp: Any) -> None:
                 candidate, max(panel_width, panel_height) * 2
             )
 
+            normalized_view_context = (
+                " ".join(view_context.split())[:96]
+                if view_context and view_context.strip()
+                else "VIEW NOT SPECIFIED"
+            )
             left = _fit_on_panel(
                 reference_image,
                 panel_width=panel_width,
                 panel_height=panel_height,
-                label="REFERENCE",
+                label=f"REFERENCE | {normalized_view_context}",
             )
             right = _fit_on_panel(
                 candidate_image,
                 panel_width=panel_width,
                 panel_height=panel_height,
-                label="CANDIDATE",
+                label=f"CANDIDATE | {normalized_view_context}",
             )
             comparison = PILImage.new(
                 "RGB",
@@ -610,14 +627,34 @@ def register_image_tools(mcp: Any) -> None:
                 "width": comparison.width,
                 "height": comparison.height,
                 "saved_path": saved_path,
+                "view_context": normalized_view_context,
                 "assessment_status": "not_evaluated",
+                "comparison_preconditions": [
+                    "Crop a whole drawing sheet to the matching target view first.",
+                    "Orient the candidate to the same orthographic or isometric projection.",
+                    "State the view/plane/normal-axis contract in view_context.",
+                ],
                 "comparison_limitations": [
                     "This tool only arranges images side by side.",
                     "It does not align geometry or compute CAD correctness.",
                     "Reference and candidate must show equivalent views.",
+                    "A match in one projection does not prove depth or feature-axis orientation.",
                 ],
                 "recommended_review": {
                     "action": "describe_concrete_discrepancies_and_rework_if_needed",
+                    "inspect": [
+                        "silhouette_and_aspect_ratio",
+                        "feature_count_and_position",
+                        "profile_plane_and_axis_direction",
+                        "depth_or_thickness_visible_in_this_view",
+                        "dimensions_supported_by_this_view",
+                    ],
+                    "when_uncertain": (
+                        "Do not accept the model from this pair alone. Repeat "
+                        "same-view comparisons for every principal target view "
+                        "available: front, matching left/right side, top, then "
+                        "isometric. Reconcile all views before continuing."
+                    ),
                     "optional_ledger_fields": list(DISCREPANCY_LEDGER_FIELDS),
                     "optional_decision_values": ["continue", "rework"],
                 },

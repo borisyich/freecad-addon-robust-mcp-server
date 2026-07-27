@@ -172,13 +172,17 @@ Tool availability depends on bridge/GUI state. Geometry-changing tools are gener
 
 ## Images
 
-`open_image` and `open_image_tiles` return real MCP image blocks. `compare_images` is qualitative and does not calculate CAD correctness.
+`open_image` and `open_image_tiles` return real MCP image blocks. `compare_images`
+is qualitative and does not calculate CAD correctness. Crop a complete drawing
+sheet to the matching target view first. The tool accepts an optional
+`view_context` and instructs the agent to broaden uncertain comparisons to all
+available principal views.
 
 | Tool | Description |
 |---|---|
 | `open_image` | Open a local PNG/JPEG/WebP and return its pixels as MCP ImageContent. |
 | `open_image_tiles` | Deliver a drawing overview plus enlarged, labelled, overlapping tiles. |
-| `compare_images` | Return a labelled side-by-side comparison as one MCP image. |
+| `compare_images` | Return a labelled same-view comparison; when uncertain, repeat for front/side/top/isometric views. |
 
 ## Checkpoints
 
@@ -192,8 +196,8 @@ Checkpoint assessment is optional; it is not a global workflow state machine.
 
 | Tool | Description |
 |---|---|
-| `get_screenshot` | Capture a FreeCAD view and optionally return real MCP image content. |
-| `set_view_angle` | Set the 3D view angle. |
+| `get_screenshot` | Capture a FreeCAD view after a configurable GUI-settling delay and optionally return real MCP image content. |
+| `set_view_angle` | Set a standard view: Front=XZ, Top=XY, Left/Right=YZ. |
 | `list_workbenches` | List all available FreeCAD workbenches. |
 | `activate_workbench` | Activate a FreeCAD workbench. |
 | `fit_all` | Fit all objects in the current view. |

@@ -14,6 +14,7 @@ def test_screenshot_runtime_activates_fits_updates_and_verifies_file() -> None:
         background="White",
         show_corner_cross=True,
         corner_cross_size=10,
+        settle_time_seconds=2.0,
         save_to_disk=True,
         output_path="screenshots/bracket.png",
         return_data=False,
@@ -28,6 +29,11 @@ def test_screenshot_runtime_activates_fits_updates_and_verifies_file() -> None:
     assert "view.getCornerCrossSize()" in code
     assert "view.setCornerCrossVisible(previous_corner_cross_visible)" in code
     assert code.count("FreeCADGui.updateGui()") >= 2
+    assert "settle_deadline = time.monotonic() + settle_time_seconds" in code
+    assert "time.sleep(min(0.05, remaining))" in code
+    assert code.index("view.fitAll()") < code.index("settle_deadline")
+    assert code.index("settle_deadline") < code.index("view.saveImage")
+    assert '"settle_time_seconds": settle_time_seconds' in code
     assert "view.saveImage" in code
     assert "os.path.getsize(image_path)" in code
     assert '"saved_to_disk": bool(save_to_disk)' in code
@@ -44,6 +50,7 @@ def test_screenshot_runtime_supports_temp_base64_mode() -> None:
         background="Current",
         show_corner_cross=False,
         corner_cross_size=10,
+        settle_time_seconds=0.0,
         save_to_disk=False,
         output_path=None,
         return_data=True,

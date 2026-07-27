@@ -1,43 +1,180 @@
 # Drawing reconstruction guidance
 
-## Evidence extraction
+## 1. Identify the view system before interpreting dimensions
 
-1. Inspect the full sheet to identify projection convention, views, sections,
-   details, notes, units, and repeated feature callouts.
-2. Use enlarged tiles/crops for local dimensions and small geometry.
-3. Create an evidence table with:
-   - feature or requirement;
-   - dimension/value/count;
-   - source view or detail;
-   - status: explicit, derived, or assumed;
-   - confidence;
-   - alternative interpretation when relevant.
+Start from the whole sheet. Identify the principal/front view first, then every
+available top, left/right side, section, detail, and isometric view. A view may
+be unlabeled or placed non-standardly, so do not infer its identity from page
+position alone.
+
+Use geometry and annotation evidence:
+
+- shared centerlines and repeated hole centers;
+- matching outer silhouettes and feature counts;
+- dimensions that must be shared between adjacent projections;
+- section arrows, detail callouts, hidden lines, and symmetry marks;
+- isometric views only as supporting spatial evidence.
+
+Determine whether the sheet follows first-angle, third-angle, or a deliberately
+non-standard arrangement. When the convention is unclear, classify views from
+feature correspondence rather than layout.
+
+## 2. FreeCAD view, plane, and normal-axis contract
+
+Unless the model has an explicitly different global coordinate system, use:
+
+| Drawing / camera view | True-shape projection plane | Normal / feature depth axis | FreeCAD sketch plane |
+|---|---|---|---|
+| Front / Rear | XZ | ±Y | `XZ_Plane` |
+| Top / Bottom | XY | ±Z | `XY_Plane` |
+| Left / Right side | YZ (ZOY) | ±X | `YZ_Plane` |
+| Isometric | no single true-shape plane | none | verification only |
+
+The sketch plane is selected from the view that shows the feature's true
+profile, not from the camera angle that merely looks visually convenient.
+
+### Circle/axis rule
+
+If a boss, bore, or cylindrical ear appears as a true circle:
+
+- circle in Front/Rear → profile lies in XZ, cylinder axis is Y;
+- circle in Top/Bottom → profile lies in XY, cylinder axis is Z;
+- circle in Left/Right → profile lies in YZ, cylinder axis is X.
+
+This rule prevents a common failure: reproducing the correct circular outline on
+the wrong plane, producing a plausible isometric model whose axis is rotated by
+90 degrees.
+
+## 3. Build a view map before the feature plan
+
+Create a compact table such as:
+
+| Source region | Identified view | FreeCAD camera | Projection plane | Normal axis | Proves | Does not prove |
+|---|---|---|---|---|---|---|
+| crop A | principal/front | Front | XZ | Y | height, X position, front profile | Y depth |
+| crop B | side | Left/Right | YZ | X | depth, Z profile, cylindrical true shape | X thickness |
+| crop C | top | Top | XY | Z | width, depth, planform | Z height |
+| iso | isometric | Isometric | — | — | spatial arrangement | exact dimensions |
+
+For every planned feature state:
+
+- source view/crop;
+- sketch or datum plane;
+- normal/extrusion axis and sign;
+- controlling in-plane dimensions;
+- depth/offset source from another view;
+- FreeCAD view used for the checkpoint screenshot.
+
+Do not proceed with a feature whose profile plane and normal axis are still
+implicit.
+
+## 4. Assign dimensions to model axes
+
+Create an axis-aware evidence table:
+
+- feature or requirement;
+- dimension/value/count;
+- source view/detail;
+- controlled axis or plane;
+- explicit, derived, or assumed status;
+- confidence and alternatives.
+
+Rules:
+
+1. A dimension shown in a projection plane usually controls one of the two axes
+   visible in that plane.
+2. Feature depth normal to the plane must come from another orthographic view,
+   section/detail, or explicit depth/thickness callout.
+3. Never turn a remembered 2D silhouette into an extrusion with an arbitrary
+   length.
+4. A centerline-to-datum dimension plus the relevant **outer** radius may define
+   an outer extent. Cross-check any explicit overall dimension and do not use an
+   inner diameter to derive an outer envelope.
+5. Shared coordinates and overall dimensions must reconcile across all views
+   before they become driving constraints.
+
+## 5. Evidence extraction
+
+1. Inspect the full sheet to identify views, sections, details, notes, units, and
+   scale relationships.
+2. Use `open_image_tiles` or focused crops for local dimensions and small
+   geometry.
+3. Record features, counts, radii/diameters, center locations, thicknesses,
+   offsets, hidden boundaries, and section evidence.
 4. Reconcile every feature across all applicable views before committing it to
    the feature plan.
+5. Treat isometric views as a spatial cross-check, not the source of exact
+   orthographic dimensions unless explicitly annotated.
 
-## Planning
+## 6. Planning
 
 Choose the stock/process classification first. Then plan a parametric sequence
 with:
 
 - Body and sketch names;
 - sketch plane or datum;
-- controlling dimensions;
+- controlling dimensions and model axes;
 - additive/subtractive/revolved operation;
 - expected change in silhouette, volume, or bounds;
-- a view suitable for visual verification.
+- reference view and candidate camera for verification.
 
-## Visual checking
+A feature plan that says only “draw this outline and extrude” is incomplete. It
+must also say **which view supplied the outline** and **which view supplied the
+extrusion depth**.
+
+## 7. Visual checking and multi-view fallback
 
 Use same-view comparisons. A whole drawing sheet compared with an isometric
-screenshot is usually weak evidence. Crop the relevant drawing view and orient
-FreeCAD to the same projection.
+screenshot is weak evidence. Crop the relevant drawing view and orient FreeCAD
+to the same projection.
 
 `compare_images` only presents images. It does not align them, read dimensions,
-or compute correctness. Use it to write concrete observations such as missing
-hole, wrong count, wrong profile, wrong bend direction, or inconsistent scale.
+or compute correctness. Explicitly inspect:
 
-## Autonomous ambiguity handling
+- outer silhouette and aspect ratio;
+- feature count and symmetry evidence;
+- center positions and spacing;
+- cylindrical axis direction and profile plane;
+- visible thickness/depth;
+- openings, pockets, bends, and local radii;
+- whether a match in one view hides a mismatch in another.
+
+When one pair is inconclusive or suspicious, compare every principal target view
+that exists:
+
+1. front/principal;
+2. matching left or right side;
+3. top;
+4. isometric.
+
+Do not accept a model because its isometric image merely “looks similar.” The
+orthographic set must agree on width, height, depth, axis orientation, and
+feature placement.
+
+## 8. ACT → OBSERVE → REACT with a view contract
+
+### ACT
+
+Create one reviewable feature or feature group with an explicit profile plane,
+normal axis, and reference view.
+
+### OBSERVE
+
+- recompute and validate geometry;
+- inspect Body Tip, solid count, volume/bounds, and sketch status;
+- capture a settled screenshot in the matching candidate view, passing that
+  view explicitly to `get_screenshot` rather than relying on a previous camera
+  command or the default isometric view;
+- compare against the corresponding target crop;
+- state expected versus observed changes;
+- broaden to the full available view set when similarity is uncertain.
+
+### REACT
+
+- continue only when the current feature is consistent with all relevant views;
+- otherwise correct or undo the causal feature before adding downstream detail.
+
+## 9. Autonomous ambiguity handling
 
 When a value is unreadable or ambiguous:
 
