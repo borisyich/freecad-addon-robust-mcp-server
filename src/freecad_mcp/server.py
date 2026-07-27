@@ -468,7 +468,10 @@ def main() -> None:
     if config.transport == TransportType.HTTP:
         import uvicorn
 
-        from freecad_mcp.http_auth import StaticBearerAuthMiddleware
+        from freecad_mcp.http_auth import (
+            McpMethodAuditMiddleware,
+            StaticBearerAuthMiddleware,
+        )
 
         if not config.access_token:
             msg = (
@@ -482,8 +485,12 @@ def main() -> None:
             config.http_host,
             config.http_port,
         )
+        mcp_app = McpMethodAuditMiddleware(
+            mcp.streamable_http_app()
+        )
+
         app = StaticBearerAuthMiddleware(
-            mcp.streamable_http_app(),
+            mcp_app,
             config.access_token,
         )
         uvicorn.run(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import secrets
 from collections.abc import Awaitable, Callable
 from typing import Any, TypeAlias
@@ -75,3 +76,92 @@ class StaticBearerAuthMiddleware:
             }
         )
         await send({"type": "http.response.body", "body": body})
+
+
+class McpMethodAuditMiddleware:
+    """Log MCP JSON-RPC method names without logging credentials or arguments."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+        self.logger = logging.getLogger("freecad_mcp.protocol")
+
+    async def __call__(
+        self,
+        scope: ASGIScope,
+        receive: ASGIReceive,
+        send: ASGISend,
+    ) -> None:
+        if scope.get("type") != "http" or scope.get("method") != "POST":
+            await self.app(scope, receive, send)
+            return
+
+        buffered_messages: list[ASGIMessage] = []
+        body = bytearray()
+
+        while True:
+            message = await receive()
+            buffered_messages.append(message)
+
+            if message.get("type") == "http.request":
+                body.extend(message.get("body", b""))
+
+            if (
+                message.get("type") != "http.request"
+                or not message.get("more_body", False)
+            ):
+                break
+
+        method = "unknown"
+        target = "-"
+
+        try:
+            payload = json.loads(body)
+
+            if isinstance(payload, dict):
+                method = str(payload.get("method", "unknown"))
+                params = payload.get("params") or {}
+
+                if method == "resources/read":
+                    target = str(params.get("uri", "-"))
+                elif method == "prompts/get":
+                    target = str(params.get("name", "-"))
+                elif method == "tools/call":
+                    target = str(params.get("name", "-"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            method = "invalid-json"
+
+        message_index = 0
+
+        async def replay_receive() -> ASGIMessage:
+            nonlocal message_index
+
+            if message_index < len(buffered_messages):
+                message = buffered_messages[message_index]
+                message_index += 1
+                return message
+
+            return {
+                "type": "http.request",
+                "body": b"",
+                "more_body": False,
+            }
+
+        response_status: int | None = None
+
+        async def audit_send(message: ASGIMessage) -> None:
+            nonlocal response_status
+
+            if message.get("type") == "http.response.start":
+                response_status = int(message.get("status", 0))
+
+            await send(message)
+
+        try:
+            await self.app(scope, replay_receive, audit_send)
+        finally:
+            self.logger.info(
+                "MCP request: method=%s target=%s status=%s",
+                method,
+                target,
+                response_status,
+            )
