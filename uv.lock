@@ -627,7 +627,7 @@ requires-dist = [
     { name = "commitizen", marker = "extra == 'dev'", specifier = ">=4.1.0" },
     { name = "detect-secrets", marker = "extra == 'dev'", specifier = ">=1.5.0" },
     { name = "freecad-stubs", marker = "extra == 'dev'", specifier = ">=1.0.21" },
-    { name = "mcp", specifier = ">=1.25.0" },
+    { name = "mcp", specifier = ">=1.25.0,<2" },
     { name = "md-toc", marker = "extra == 'dev'", specifier = ">=9.0.0" },
     { name = "mike", marker = "extra == 'dev'", specifier = ">=2.1.0" },
     { name = "mkdocs", marker = "extra == 'dev'", specifier = ">=1.6.0" },

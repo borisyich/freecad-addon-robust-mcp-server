@@ -300,21 +300,31 @@ class TestMain:
         mock_config.log_level = "INFO"
         mock_config.mode = FreecadMode.EMBEDDED
         mock_config.transport = TransportType.HTTP
+        mock_config.http_host = "127.0.0.1"
         mock_config.http_port = 8080
+        mock_config.access_token = "x" * 64
 
+        upstream_app = object()
         with (
             patch.object(sys, "argv", DEFAULT_ARGV),
             patch.object(server_module, "get_config", return_value=mock_config),
-            patch.object(server_module.mcp, "run") as mock_run,
+            patch.object(
+                server_module.mcp,
+                "streamable_http_app",
+                return_value=upstream_app,
+            ) as mock_http_app,
+            patch("uvicorn.run") as mock_uvicorn_run,
             patch("builtins.print"),
         ):
             server_module.main()
 
-            # Should call run with HTTP transport settings
-            mock_run.assert_called_once()
-            call_kwargs = mock_run.call_args.kwargs
-            assert call_kwargs.get("transport") == "streamable-http"
-            assert call_kwargs.get("port") == 8080
+            mock_http_app.assert_called_once_with()
+            mock_uvicorn_run.assert_called_once()
+            call_args, call_kwargs = mock_uvicorn_run.call_args
+            assert call_args[0].app is upstream_app
+            assert call_kwargs["host"] == "127.0.0.1"
+            assert call_kwargs["port"] == 8080
+            assert call_kwargs["log_level"] == "info"
 
     def test_main_stdio_transport(self):
         """Main should start stdio transport by default."""

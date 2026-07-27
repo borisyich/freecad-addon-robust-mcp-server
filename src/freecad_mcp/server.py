@@ -41,6 +41,7 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 from freecad_mcp.config import FreecadMode, TransportType, get_config
 
@@ -155,10 +156,40 @@ async def lifespan(_server: FastMCP) -> AsyncIterator[None]:
             _bridge = None
 
 
-# Create the Robust MCP Server instance with lifespan
+def _build_transport_security(config: Any) -> TransportSecuritySettings:
+    """Allow loopback hosts plus one explicitly configured public tunnel host."""
+    allowed_hosts = ["127.0.0.1:*", "localhost:*", "[::1]:*"]
+    allowed_origins = [
+        "http://127.0.0.1:*",
+        "http://localhost:*",
+        "http://[::1]:*",
+    ]
+
+    if config.public_host:
+        public_host = config.public_host.strip().rstrip(".").lower()
+        if not public_host or "://" in public_host or "/" in public_host:
+            msg = "FREECAD_PUBLIC_HOST must be a hostname without scheme or path"
+            raise ValueError(msg)
+        allowed_hosts.extend([public_host, f"{public_host}:*"])
+        allowed_origins.extend(
+            [f"https://{public_host}", f"https://{public_host}:*"]
+        )
+
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=allowed_hosts,
+        allowed_origins=allowed_origins,
+    )
+
+
+# Create the Robust MCP Server instance with explicit DNS-rebinding protection.
+_initial_config = get_config()
 mcp = FastMCP(
     name="freecad-mcp",
     lifespan=lifespan,
+    host=_initial_config.http_host,
+    port=_initial_config.http_port,
+    transport_security=_build_transport_security(_initial_config),
 )
 
 
@@ -277,6 +308,8 @@ def apply_cli_args_to_env(args: argparse.Namespace) -> None:
             os.environ["FREECAD_XMLRPC_PORT"] = str(args.port)
         else:
             os.environ["FREECAD_SOCKET_PORT"] = str(args.port)
+    if args.http_host:
+        os.environ["FREECAD_HTTP_HOST"] = args.http_host
     if args.http_port:
         os.environ["FREECAD_HTTP_PORT"] = str(args.http_port)
     if args.log_level:
@@ -301,7 +334,10 @@ Environment Variables:
   FREECAD_SOCKET_PORT    Port for socket connection (default: 9876)
   FREECAD_XMLRPC_PORT    Port for XML-RPC connection (default: 9875)
   FREECAD_TRANSPORT      Transport type: stdio or http (default: stdio)
+  FREECAD_HTTP_HOST      Bind host for HTTP transport (default: 127.0.0.1)
   FREECAD_HTTP_PORT      Port for HTTP transport (default: 8000)
+  FREECAD_ACCESS_TOKEN   Fixed Bearer token for HTTP transport (minimum 32 chars)
+  FREECAD_PUBLIC_HOST    Public hostname allowed by MCP Host/Origin validation
   FREECAD_LOG_LEVEL      Logging level: DEBUG, INFO, WARNING, ERROR
                          (default: INFO)
 
@@ -360,6 +396,11 @@ Prerequisites:
         "--port",
         type=int,
         help="Port for FreeCAD connection (mode-dependent)",
+    )
+
+    parser.add_argument(
+        "--http-host",
+        help="Bind host for HTTP transport (overrides FREECAD_HTTP_HOST)",
     )
 
     parser.add_argument(
@@ -425,11 +466,31 @@ def main() -> None:
 
     # Run the server
     if config.transport == TransportType.HTTP:
-        logger.info("Starting HTTP transport on port %d", config.http_port)
-        mcp.run(  # type: ignore[call-arg]
-            transport="streamable-http",
-            host="0.0.0.0",  # noqa: S104
+        import uvicorn
+
+        from freecad_mcp.http_auth import StaticBearerAuthMiddleware
+
+        if not config.access_token:
+            msg = (
+                "FREECAD_ACCESS_TOKEN is required for HTTP transport. "
+                "Use a random token containing at least 32 characters."
+            )
+            raise RuntimeError(msg)
+
+        logger.info(
+            "Starting authenticated HTTP transport on %s:%d",
+            config.http_host,
+            config.http_port,
+        )
+        app = StaticBearerAuthMiddleware(
+            mcp.streamable_http_app(),
+            config.access_token,
+        )
+        uvicorn.run(
+            app,
+            host=config.http_host,
             port=config.http_port,
+            log_level=config.log_level.lower(),
         )
     else:
         logger.info("Starting stdio transport")

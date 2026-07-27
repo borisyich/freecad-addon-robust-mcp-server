@@ -22,7 +22,9 @@ class TestServerConfig:
         assert config.timeout_ms == 30000
         assert config.max_output_size == 1_000_000
         assert config.transport == TransportType.STDIO
+        assert config.http_host == "127.0.0.1"
         assert config.http_port == 8000
+        assert config.access_token is None
         assert config.log_level == "INFO"
         assert config.enable_sandbox is True
 
@@ -46,6 +48,20 @@ class TestServerConfig:
             config = ServerConfig()
 
         assert config.transport == TransportType.HTTP
+
+    def test_http_security_settings_from_env(self):
+        """Configuration should read HTTP host and fixed token from environment."""
+        with mock.patch.dict(
+            os.environ,
+            {
+                "FREECAD_HTTP_HOST": "127.0.0.1",
+                "FREECAD_ACCESS_TOKEN": "x" * 64,
+            },
+        ):
+            config = ServerConfig()
+
+        assert config.http_host == "127.0.0.1"
+        assert config.access_token == "x" * 64
 
     def test_invalid_port_raises_error(self):
         """Invalid port should raise validation error."""
