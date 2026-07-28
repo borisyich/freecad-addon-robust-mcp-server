@@ -25,6 +25,8 @@ class TestServerConfig:
         assert config.http_host == "127.0.0.1"
         assert config.http_port == 8000
         assert config.access_token is None
+        assert config.http_json_response is True
+        assert config.http_unstructured_tool_results is True
         assert config.require_bounded_xmlrpc is False
         assert config.log_level == "INFO"
         assert config.enable_sandbox is True
@@ -57,6 +59,8 @@ class TestServerConfig:
             {
                 "FREECAD_HTTP_HOST": "127.0.0.1",
                 "FREECAD_ACCESS_TOKEN": "x" * 64,
+                "FREECAD_HTTP_JSON_RESPONSE": "false",
+                "FREECAD_HTTP_UNSTRUCTURED_TOOL_RESULTS": "false",
                 "FREECAD_REQUIRE_BOUNDED_XMLRPC": "true",
             },
         ):
@@ -64,6 +68,8 @@ class TestServerConfig:
 
         assert config.http_host == "127.0.0.1"
         assert config.access_token == "x" * 64
+        assert config.http_json_response is False
+        assert config.http_unstructured_tool_results is False
         assert config.require_bounded_xmlrpc is True
 
     def test_invalid_port_raises_error(self):

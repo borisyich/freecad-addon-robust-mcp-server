@@ -582,3 +582,30 @@ class TestStdioProtocolCleanliness:
                 proc.wait(timeout=2)
             except subprocess.TimeoutExpired:
                 proc.kill()
+
+
+class TestHttpToolResultCompatibility:
+    """Regression tests for conservative HTTP tool result formatting."""
+
+    @pytest.mark.asyncio
+    async def test_unstructured_default_always_returns_content_blocks(self):
+        from freecad_mcp.server import FreecadFastMCP
+
+        server = FreecadFastMCP(
+            "compatibility-test",
+            default_structured_output=False,
+        )
+
+        @server.tool()
+        async def sample_tool() -> dict[str, object]:
+            return {"name": "Document1", "path": None}
+
+        listed = await server.list_tools()
+        tool = next(item for item in listed if item.name == "sample_tool")
+        assert tool.outputSchema is None
+
+        result = await server.call_tool("sample_tool", {})
+        assert isinstance(result, list)
+        assert result
+        assert getattr(result[0], "type", None) == "text"
+        assert "Document1" in getattr(result[0], "text", "")

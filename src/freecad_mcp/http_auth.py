@@ -141,11 +141,12 @@ class McpMethodAuditMiddleware:
                 message_index += 1
                 return message
 
-            return {
-                "type": "http.request",
-                "body": b"",
-                "more_body": False,
-            }
+            # Do not synthesize an endless sequence of empty http.request
+            # messages. Streamable HTTP/SSE applications may wait for the
+            # real http.disconnect event. Hiding it leaves the ASGI request
+            # alive after the response has been sent and can break clients
+            # that reuse an MCP session for the following tools/call.
+            return await receive()
 
         response_status: int | None = None
         started_at = time.perf_counter()

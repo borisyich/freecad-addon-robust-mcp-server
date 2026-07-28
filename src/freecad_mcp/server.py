@@ -35,6 +35,7 @@ import argparse
 import logging
 import os
 import sys
+import time
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -179,13 +180,87 @@ def _build_transport_security(config: Any) -> TransportSecuritySettings:
     )
 
 
+
+
+class FreecadFastMCP(FastMCP):
+    """FastMCP variant with explicit remote-client compatibility defaults.
+
+    Some SaaS MCP runtimes still mishandle ``outputSchema`` /
+    ``structuredContent`` and expect every tool result to contain classic MCP
+    content blocks. For HTTP transport we can disable automatic structured
+    output while preserving it for local stdio clients.
+
+    The protocol-level tool logs are deliberately emitted here rather than
+    relying only on ASGI-body inspection. They prove whether a parsed
+    ``tools/call`` request actually reached FastMCP.
+    """
+
+    def __init__(
+        self,
+        *args: Any,
+        default_structured_output: bool | None = None,
+        **kwargs: Any,
+    ) -> None:
+        self._default_structured_output = default_structured_output
+        super().__init__(*args, **kwargs)
+
+    def tool(self, *args: Any, **kwargs: Any) -> Any:
+        if kwargs.get("structured_output") is None:
+            kwargs["structured_output"] = self._default_structured_output
+        return super().tool(*args, **kwargs)
+
+    async def list_tools(self) -> list[Any]:
+        tools = await super().list_tools()
+        logger.info("MCP tools/list completed: count=%d", len(tools))
+        return tools
+
+    async def call_tool(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+    ) -> Any:
+        started_at = time.perf_counter()
+        logger.info("MCP tools/call started: tool=%s", name)
+        try:
+            result = await super().call_tool(name, arguments)
+            duration_ms = (time.perf_counter() - started_at) * 1000
+            logger.info(
+                "MCP tools/call completed: tool=%s result_type=%s "
+                "duration_ms=%.1f",
+                name,
+                type(result).__name__,
+                duration_ms,
+            )
+            return result
+        except Exception:
+            duration_ms = (time.perf_counter() - started_at) * 1000
+            logger.exception(
+                "MCP tools/call failed: tool=%s duration_ms=%.1f",
+                name,
+                duration_ms,
+            )
+            raise
+
 # Create the Robust MCP Server instance with explicit DNS-rebinding protection.
 _initial_config = get_config()
-mcp = FastMCP(
+_default_structured_output: bool | None = None
+if (
+    _initial_config.transport == TransportType.HTTP
+    and _initial_config.http_unstructured_tool_results
+):
+    _default_structured_output = False
+
+mcp = FreecadFastMCP(
     name="freecad-mcp",
     lifespan=lifespan,
     host=_initial_config.http_host,
     port=_initial_config.http_port,
+    json_response=(
+        _initial_config.http_json_response
+        if _initial_config.transport == TransportType.HTTP
+        else False
+    ),
+    default_structured_output=_default_structured_output,
     transport_security=_build_transport_security(_initial_config),
 )
 
@@ -362,6 +437,11 @@ Environment Variables:
   FREECAD_HTTP_PORT      Port for HTTP transport (default: 8000)
   FREECAD_ACCESS_TOKEN   Fixed Bearer token for HTTP transport (minimum 32 chars)
   FREECAD_PUBLIC_HOST    Public hostname allowed by MCP Host/Origin validation
+  FREECAD_HTTP_JSON_RESPONSE
+                         Use JSON responses for HTTP POST requests (default: true)
+  FREECAD_HTTP_UNSTRUCTURED_TOOL_RESULTS
+                         Disable structured tool output in HTTP mode for broad
+                         SaaS compatibility (default: true)
   FREECAD_LOG_LEVEL      Logging level: DEBUG, INFO, WARNING, ERROR
                          (default: INFO)
 
@@ -508,6 +588,11 @@ def main() -> None:
             "Starting authenticated HTTP transport on %s:%d",
             config.http_host,
             config.http_port,
+        )
+        logger.info(
+            "HTTP compatibility: json_response=%s, unstructured_tool_results=%s",
+            config.http_json_response,
+            config.http_unstructured_tool_results,
         )
         mcp_app = McpMethodAuditMiddleware(
             mcp.streamable_http_app()

@@ -40,6 +40,16 @@
 - Added mandatory remote-start preflight, duplicate HTTP-listener detection,
   finite XML-RPC socket timeouts, serialized XML-RPC calls, and start/completion
   audit logs with MCP method, target, status, and duration.
+- Fixed remote Streamable HTTP request completion: the audit middleware now
+  forwards the real ASGI `http.disconnect` event instead of synthesizing an
+  endless stream of empty request messages.
+- Remote HTTP mode now defaults to ordinary JSON POST responses and
+  backwards-compatible unstructured tool results. This guarantees a populated
+  MCP `content` field for SaaS clients that mishandle `outputSchema` or
+  `structuredContent`. Local stdio mode retains automatic structured output.
+- Added protocol-level `tools/list` and `tools/call` start/completion logs so it
+  is possible to distinguish a SaaS client-side failure from a call that
+  actually reached FreeCAD.
 - Added `scripts/update_freecad_bridge.ps1` to install the matching updated
   FreeCAD-side workbench on Windows with backup of the previous installation.
 

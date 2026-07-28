@@ -46,6 +46,9 @@ class ServerConfig(BaseSettings):
         http_port: Port for HTTP transport.
         access_token: Fixed Bearer token required by HTTP transport.
         public_host: Public hostname accepted through a reverse proxy/tunnel.
+        http_json_response: Return JSON bodies for Streamable HTTP POST requests.
+        http_unstructured_tool_results: Disable outputSchema/structuredContent for
+            HTTP tool calls to maximize compatibility with SaaS MCP clients.
         require_bounded_xmlrpc: Require the updated timeout-aware bridge API.
         log_level: Logging level.
     """
@@ -109,6 +112,24 @@ class ServerConfig(BaseSettings):
         str | None,
         Field(description="Public hostname accepted through a tunnel/reverse proxy"),
     ] = None
+    http_json_response: Annotated[
+        bool,
+        Field(
+            description=(
+                "Return ordinary JSON responses for Streamable HTTP POST requests "
+                "instead of SSE-framed responses"
+            )
+        ),
+    ] = True
+    http_unstructured_tool_results: Annotated[
+        bool,
+        Field(
+            description=(
+                "Disable automatic outputSchema/structuredContent for HTTP tools "
+                "and always provide backwards-compatible content blocks"
+            )
+        ),
+    ] = True
     require_bounded_xmlrpc: Annotated[
         bool,
         Field(description="Require XML-RPC execute_with_timeout support"),

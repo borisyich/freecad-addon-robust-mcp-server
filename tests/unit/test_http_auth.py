@@ -14,6 +14,7 @@ assert SPEC is not None and SPEC.loader is not None
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 StaticBearerAuthMiddleware = MODULE.StaticBearerAuthMiddleware
+McpMethodAuditMiddleware = MODULE.McpMethodAuditMiddleware
 
 
 @pytest.mark.asyncio
@@ -80,3 +81,44 @@ def test_rejects_short_configured_token():
 
     with pytest.raises(ValueError, match="at least 32"):
         StaticBearerAuthMiddleware(app, "short")
+
+
+@pytest.mark.asyncio
+async def test_audit_middleware_forwards_real_disconnect_after_replayed_body():
+    """The audit layer must not hide ASGI disconnect events from Streamable HTTP."""
+
+    received_by_app: list[dict[str, Any]] = []
+
+    async def app(scope, receive, send):
+        received_by_app.append(await receive())
+        received_by_app.append(await receive())
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"{}"})
+
+    incoming = [
+        {
+            "type": "http.request",
+            "body": b'{"jsonrpc":"2.0","id":1,"method":"initialize"}',
+            "more_body": False,
+        },
+        {"type": "http.disconnect"},
+    ]
+
+    async def receive():
+        return incoming.pop(0)
+
+    sent: list[dict[str, Any]] = []
+
+    async def send(message):
+        sent.append(message)
+
+    middleware = McpMethodAuditMiddleware(app)
+    await middleware(
+        {"type": "http", "method": "POST", "path": "/mcp", "headers": []},
+        receive,
+        send,
+    )
+
+    assert received_by_app[0]["type"] == "http.request"
+    assert received_by_app[1] == {"type": "http.disconnect"}
+    assert sent[0]["status"] == 200
