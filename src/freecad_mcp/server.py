@@ -32,6 +32,7 @@ Example:
 """
 
 import argparse
+import json
 import logging
 import os
 import sys
@@ -154,6 +155,136 @@ async def lifespan(_server: FastMCP) -> AsyncIterator[None]:
             logger.warning("Could not disconnect FreeCAD bridge cleanly: %s", exc)
 
 
+_SENSITIVE_LOG_KEY_PARTS = (
+    "authorization",
+    "token",
+    "password",
+    "secret",
+    "api_key",
+    "apikey",
+    "credential",
+)
+
+_BINARY_LOG_KEY_PARTS = (
+    "base64",
+    "image_data",
+    "binary",
+)
+
+
+def _sanitize_for_log(
+    value: Any,
+    *,
+    key: str | None = None,
+    max_chars: int = 4_000,
+    depth: int = 0,
+) -> Any:
+    """Return a JSON-safe diagnostic representation without secrets or blobs."""
+    normalized_key = (key or "").lower()
+    if any(part in normalized_key for part in _SENSITIVE_LOG_KEY_PARTS):
+        return "<redacted>"
+    if any(part in normalized_key for part in _BINARY_LOG_KEY_PARTS):
+        length = len(value) if hasattr(value, "__len__") else None
+        return f"<binary omitted; length={length}>"
+    if depth > 8:
+        return "<max-depth>"
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, str):
+        if len(value) <= max_chars:
+            return value
+        return f"{value[:max_chars]}…<truncated; chars={len(value)}>"
+    if isinstance(value, bytes):
+        return f"<bytes omitted; length={len(value)}>"
+    if isinstance(value, dict):
+        return {
+            str(item_key): _sanitize_for_log(
+                item_value,
+                key=str(item_key),
+                max_chars=max_chars,
+                depth=depth + 1,
+            )
+            for item_key, item_value in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [
+            _sanitize_for_log(
+                item,
+                max_chars=max_chars,
+                depth=depth + 1,
+            )
+            for item in value
+        ]
+    if hasattr(value, "model_dump"):
+        try:
+            return _sanitize_for_log(
+                value.model_dump(),
+                max_chars=max_chars,
+                depth=depth + 1,
+            )
+        except Exception:
+            pass
+    return repr(value)
+
+
+def _log_json(value: Any, *, max_chars: int = 4_000) -> str:
+    """Serialize a sanitized value for one-line structured logs."""
+    safe_value = _sanitize_for_log(value, max_chars=max_chars)
+    return json.dumps(safe_value, ensure_ascii=False, sort_keys=True)
+
+
+def _summarize_content_block(block: Any, *, max_chars: int) -> dict[str, Any]:
+    block_type = str(getattr(block, "type", type(block).__name__))
+    summary: dict[str, Any] = {"type": block_type}
+    if block_type == "text":
+        text = str(getattr(block, "text", ""))
+        summary.update(
+            {
+                "chars": len(text),
+                "preview": _sanitize_for_log(text, max_chars=min(max_chars, 500)),
+            }
+        )
+    elif block_type == "image":
+        data = getattr(block, "data", "") or ""
+        summary.update(
+            {
+                "mimeType": getattr(block, "mimeType", None),
+                "base64_chars": len(data),
+                "approx_binary_bytes": (len(data) * 3) // 4,
+            }
+        )
+    elif hasattr(block, "model_dump"):
+        dumped = block.model_dump()
+        summary["fields"] = sorted(dumped.keys())
+    return summary
+
+
+def _summarize_tool_result(result: Any, *, max_chars: int) -> dict[str, Any]:
+    """Describe the outbound result shape without logging image/base64 payloads."""
+    summary: dict[str, Any] = {"result_type": type(result).__name__}
+    content = getattr(result, "content", None)
+    if isinstance(content, list):
+        summary["content_count"] = len(content)
+        summary["content"] = [
+            _summarize_content_block(block, max_chars=max_chars) for block in content
+        ]
+    elif isinstance(result, list):
+        summary["content_count"] = len(result)
+        summary["content"] = [
+            _summarize_content_block(block, max_chars=max_chars) for block in result
+        ]
+    else:
+        summary["content_present"] = content is not None
+
+    if hasattr(result, "isError"):
+        summary["isError"] = getattr(result, "isError")
+    structured = getattr(result, "structuredContent", None)
+    summary["structuredContent_present"] = structured is not None
+    if isinstance(structured, dict):
+        summary["structuredContent_keys"] = sorted(str(key) for key in structured)
+    return summary
+
+
 def _build_transport_security(config: Any) -> TransportSecuritySettings:
     """Allow loopback hosts plus one explicitly configured public tunnel host."""
     allowed_hosts = ["127.0.0.1:*", "localhost:*", "[::1]:*"]
@@ -199,9 +330,15 @@ class FreecadFastMCP(FastMCP):
         self,
         *args: Any,
         default_structured_output: bool | None = None,
+        log_tool_arguments: bool = False,
+        log_tool_results: bool = False,
+        log_value_max_chars: int = 4_000,
         **kwargs: Any,
     ) -> None:
         self._default_structured_output = default_structured_output
+        self._log_tool_arguments = log_tool_arguments
+        self._log_tool_results = log_tool_results
+        self._log_value_max_chars = log_value_max_chars
         super().__init__(*args, **kwargs)
 
     def tool(self, *args: Any, **kwargs: Any) -> Any:
@@ -221,9 +358,26 @@ class FreecadFastMCP(FastMCP):
     ) -> Any:
         started_at = time.perf_counter()
         logger.info("MCP tools/call started: tool=%s", name)
+        if self._log_tool_arguments:
+            logger.info(
+                "MCP tools/call arguments: tool=%s arguments=%s",
+                name,
+                _log_json(arguments, max_chars=self._log_value_max_chars),
+            )
         try:
             result = await super().call_tool(name, arguments)
             duration_ms = (time.perf_counter() - started_at) * 1000
+            if self._log_tool_results:
+                logger.info(
+                    "MCP tools/call result: tool=%s summary=%s",
+                    name,
+                    _log_json(
+                        _summarize_tool_result(
+                            result, max_chars=self._log_value_max_chars
+                        ),
+                        max_chars=self._log_value_max_chars,
+                    ),
+                )
             logger.info(
                 "MCP tools/call completed: tool=%s result_type=%s "
                 "duration_ms=%.1f",
@@ -261,6 +415,9 @@ mcp = FreecadFastMCP(
         else False
     ),
     default_structured_output=_default_structured_output,
+    log_tool_arguments=_initial_config.log_tool_arguments,
+    log_tool_results=_initial_config.log_tool_results,
+    log_value_max_chars=_initial_config.log_value_max_chars,
     transport_security=_build_transport_security(_initial_config),
 )
 
@@ -442,6 +599,12 @@ Environment Variables:
   FREECAD_HTTP_UNSTRUCTURED_TOOL_RESULTS
                          Disable structured tool output in HTTP mode for broad
                          SaaS compatibility (default: true)
+  FREECAD_LOG_TOOL_ARGUMENTS
+                         Log sanitized parsed tool arguments (default: false)
+  FREECAD_LOG_TOOL_RESULTS
+                         Log compact result/content summaries (default: false)
+  FREECAD_LOG_VALUE_MAX_CHARS
+                         Maximum retained string length in diagnostics (default: 4000)
   FREECAD_LOG_LEVEL      Logging level: DEBUG, INFO, WARNING, ERROR
                          (default: INFO)
 
@@ -593,6 +756,12 @@ def main() -> None:
             "HTTP compatibility: json_response=%s, unstructured_tool_results=%s",
             config.http_json_response,
             config.http_unstructured_tool_results,
+        )
+        logger.info(
+            "Tool diagnostics: arguments=%s, results=%s, max_chars=%d",
+            config.log_tool_arguments,
+            config.log_tool_results,
+            config.log_value_max_chars,
         )
         mcp_app = McpMethodAuditMiddleware(
             mcp.streamable_http_app()

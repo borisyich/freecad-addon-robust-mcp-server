@@ -28,6 +28,9 @@ class TestServerConfig:
         assert config.http_json_response is True
         assert config.http_unstructured_tool_results is True
         assert config.require_bounded_xmlrpc is False
+        assert config.log_tool_arguments is False
+        assert config.log_tool_results is False
+        assert config.log_value_max_chars == 4_000
         assert config.log_level == "INFO"
         assert config.enable_sandbox is True
 
@@ -62,6 +65,9 @@ class TestServerConfig:
                 "FREECAD_HTTP_JSON_RESPONSE": "false",
                 "FREECAD_HTTP_UNSTRUCTURED_TOOL_RESULTS": "false",
                 "FREECAD_REQUIRE_BOUNDED_XMLRPC": "true",
+                "FREECAD_LOG_TOOL_ARGUMENTS": "true",
+                "FREECAD_LOG_TOOL_RESULTS": "true",
+                "FREECAD_LOG_VALUE_MAX_CHARS": "9000",
             },
         ):
             config = ServerConfig()
@@ -71,6 +77,9 @@ class TestServerConfig:
         assert config.http_json_response is False
         assert config.http_unstructured_tool_results is False
         assert config.require_bounded_xmlrpc is True
+        assert config.log_tool_arguments is True
+        assert config.log_tool_results is True
+        assert config.log_value_max_chars == 9_000
 
     def test_invalid_port_raises_error(self):
         """Invalid port should raise validation error."""

@@ -71,6 +71,9 @@ $env:FREECAD_HTTP_HOST = '127.0.0.1'
 $env:FREECAD_HTTP_PORT = '8000'
 $env:FREECAD_HTTP_JSON_RESPONSE = 'true'
 $env:FREECAD_HTTP_UNSTRUCTURED_TOOL_RESULTS = 'true'
+$env:FREECAD_LOG_TOOL_ARGUMENTS = 'true'
+$env:FREECAD_LOG_TOOL_RESULTS = 'true'
+$env:FREECAD_LOG_VALUE_MAX_CHARS = '4000'
 
 $existingListener = Get-NetTCPConnection `
     -LocalPort ([int]$env:FREECAD_HTTP_PORT) `

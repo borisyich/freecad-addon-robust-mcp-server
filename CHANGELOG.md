@@ -52,6 +52,8 @@
   actually reached FreeCAD.
 - Added `scripts/update_freecad_bridge.ps1` to install the matching updated
   FreeCAD-side workbench on Windows with backup of the previous installation.
+- Added opt-in sanitized logging of parsed MCP tool arguments via
+  `FREECAD_LOG_TOOL_ARGUMENTS`, compact summaries via `FREECAD_LOG_TOOL_RESULTS`.
 
 This project uses **component-specific versioning**. Each component has its own
 release notes and version history.

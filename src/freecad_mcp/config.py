@@ -50,6 +50,9 @@ class ServerConfig(BaseSettings):
         http_unstructured_tool_results: Disable outputSchema/structuredContent for
             HTTP tool calls to maximize compatibility with SaaS MCP clients.
         require_bounded_xmlrpc: Require the updated timeout-aware bridge API.
+        log_tool_arguments: Log sanitized tool arguments for remote debugging.
+        log_tool_results: Log a compact summary of tool results.
+        log_value_max_chars: Maximum string size retained in diagnostic logs.
         log_level: Logging level.
     """
 
@@ -136,6 +139,18 @@ class ServerConfig(BaseSettings):
     ] = False
 
     # Logging
+    log_tool_arguments: Annotated[
+        bool,
+        Field(description="Log sanitized MCP tool arguments"),
+    ] = False
+    log_tool_results: Annotated[
+        bool,
+        Field(description="Log compact MCP tool-result summaries"),
+    ] = False
+    log_value_max_chars: Annotated[
+        int,
+        Field(ge=128, le=100_000, description="Maximum logged string length"),
+    ] = 4_000
     log_level: str = "INFO"
 
     # Security settings
