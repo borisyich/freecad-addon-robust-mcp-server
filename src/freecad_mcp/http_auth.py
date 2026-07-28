@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import secrets
+import time
 from collections.abc import Awaitable, Callable
 from typing import Any, TypeAlias
 
@@ -147,6 +148,13 @@ class McpMethodAuditMiddleware:
             }
 
         response_status: int | None = None
+        started_at = time.perf_counter()
+
+        self.logger.info(
+            "MCP request started: method=%s target=%s",
+            method,
+            target,
+        )
 
         async def audit_send(message: ASGIMessage) -> None:
             nonlocal response_status
@@ -159,9 +167,12 @@ class McpMethodAuditMiddleware:
         try:
             await self.app(scope, replay_receive, audit_send)
         finally:
+            duration_ms = (time.perf_counter() - started_at) * 1000
             self.logger.info(
-                "MCP request: method=%s target=%s status=%s",
+                "MCP request completed: method=%s target=%s status=%s "
+                "duration_ms=%.1f",
                 method,
                 target,
                 response_status,
+                duration_ms,
             )

@@ -168,6 +168,7 @@ class ExecutionRequest:
         self.request_id = request_id
         self.result: dict[str, Any] | None = None
         self.completed = threading.Event()
+        self.cancelled = threading.Event()
 
 
 class FreecadMCPPlugin:
@@ -714,6 +715,14 @@ class FreecadMCPPlugin:
         while not self._request_queue.empty():
             try:
                 request = self._request_queue.get_nowait()
+                if request.cancelled.is_set():
+                    request.result = {
+                        "success": False,
+                        "error_type": "CancelledError",
+                        "error_message": "Request expired before execution",
+                    }
+                    request.completed.set()
+                    continue
                 result = self._execute_code_sync(request.code)
                 request.result = result
                 request.completed.set()
@@ -750,6 +759,11 @@ class FreecadMCPPlugin:
                 "error_message": "No result returned",
             }
         else:
+            # Prevent a request that timed out while waiting in the queue from
+            # executing later if the GUI timer recovers. A request that has
+            # already started cannot be interrupted safely, but stalled queued
+            # work is now discarded instead of becoming a delayed side effect.
+            request.cancelled.set()
             return {
                 "success": False,
                 "error_type": "TimeoutError",
@@ -1045,7 +1059,15 @@ class FreecadMCPPlugin:
 
         # Register methods (type: ignore needed - xmlrpc types are overly restrictive)
         self._xmlrpc_server.register_function(self._xmlrpc_execute, "execute")  # type: ignore[arg-type]
+        self._xmlrpc_server.register_function(
+            self._xmlrpc_execute_with_timeout,
+            "execute_with_timeout",
+        )  # type: ignore[arg-type]
         self._xmlrpc_server.register_function(self._xmlrpc_ping, "ping")  # type: ignore[arg-type]
+        self._xmlrpc_server.register_function(
+            self._xmlrpc_get_health,
+            "get_health",
+        )  # type: ignore[arg-type]
         self._xmlrpc_server.register_function(
             self._xmlrpc_get_instance_id, "get_instance_id"
         )  # type: ignore[arg-type]
@@ -1085,6 +1107,50 @@ class FreecadMCPPlugin:
             Execution result dictionary.
         """
         return self._execute_via_queue(code, 30000)
+
+    def _xmlrpc_execute_with_timeout(
+        self,
+        code: str,
+        timeout_ms: int = 30000,
+    ) -> dict[str, Any]:
+        """Execute code with a caller-specified bounded queue timeout.
+
+        This extends the original ``execute(code)`` protocol while preserving
+        compatibility with older clients. The value is clamped to avoid zero,
+        negative, or unreasonably long waits from remote callers.
+        """
+        try:
+            bounded_timeout_ms = max(100, min(int(timeout_ms), 600000))
+        except (TypeError, ValueError):
+            return {
+                "success": False,
+                "error_type": "ValueError",
+                "error_message": "timeout_ms must be an integer",
+            }
+        return self._execute_via_queue(code, bounded_timeout_ms)
+
+    def _xmlrpc_get_health(self) -> dict[str, Any]:
+        """Return lightweight bridge and queue diagnostics without execution."""
+        timer_active: bool | None = None
+        if self._timer is not None:
+            try:
+                timer_active = bool(self._timer.isActive())
+            except Exception:
+                timer_active = None
+
+        return {
+            "running": self._running,
+            "instance_id": self._instance_id,
+            "headless": self._headless,
+            "queue_size": self._request_queue.qsize(),
+            "timer_exists": self._timer is not None,
+            "timer_active": timer_active,
+            "queue_thread_alive": bool(
+                self._queue_thread and self._queue_thread.is_alive()
+            ),
+            "request_count": self._request_count,
+            "last_request_time": self._last_request_time,
+        }
 
     # Valid view types for screenshot capture
     _VALID_VIEW_TYPES = frozenset(

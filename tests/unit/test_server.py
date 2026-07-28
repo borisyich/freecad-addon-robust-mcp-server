@@ -1,7 +1,11 @@
 """Tests for the main server module."""
 
 import os
+import queue
 import sys
+import threading
+import time
+from typing import BinaryIO
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -10,6 +14,63 @@ from freecad_mcp.config import FreecadMode
 
 # Default argv for main() tests to avoid argparse errors
 DEFAULT_ARGV: list[str] = ["freecad-mcp"]
+
+
+def _read_until_with_timeout(
+    pipe: BinaryIO,
+    marker: bytes,
+    timeout: float,
+) -> bytes:
+    """Read subprocess output until ``marker`` appears or the timeout expires.
+
+    ``os.set_blocking`` is not available for Windows anonymous pipes. A daemon
+    reader thread sends complete lines through a queue, while the test thread
+    retains a strict timeout.
+    """
+
+    line_queue: queue.Queue[bytes | BaseException | None] = queue.Queue()
+
+    def _reader() -> None:
+        try:
+            while True:
+                line = pipe.readline()
+                if not line:
+                    line_queue.put(None)
+                    return
+                line_queue.put(line)
+        except BaseException as exc:  # pragma: no cover - defensive subprocess IO
+            line_queue.put(exc)
+
+    thread = threading.Thread(target=_reader, daemon=True)
+    thread.start()
+
+    deadline = time.monotonic() + timeout
+    output = bytearray()
+
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return bytes(output)
+
+        try:
+            item = line_queue.get(timeout=remaining)
+        except queue.Empty:
+            return bytes(output)
+
+        if item is None:
+            return bytes(output)
+        if isinstance(item, BaseException):
+            raise item
+
+        output.extend(item)
+        if marker in output:
+            return bytes(output)
+
+
+def _readline_with_timeout(pipe: BinaryIO, timeout: float) -> bytes:
+    """Read at most one complete binary line with a cross-platform timeout."""
+
+    return _read_until_with_timeout(pipe, marker=b"\n", timeout=timeout)
 
 
 class TestGetInstanceId:
@@ -129,6 +190,7 @@ class TestLifespan:
         mock_config.mode = FreecadMode.XMLRPC
         mock_config.socket_host = "localhost"
         mock_config.xmlrpc_port = 9875
+        mock_config.require_bounded_xmlrpc = False
 
         mock_xmlrpc_bridge = AsyncMock()
         mock_xmlrpc_bridge.get_freecad_version = AsyncMock(
@@ -145,7 +207,11 @@ class TestLifespan:
             mock_server = MagicMock()
 
             async with server_module.lifespan(mock_server):
-                mock_xmlrpc_class.assert_called_once_with(host="localhost", port=9875)
+                mock_xmlrpc_class.assert_called_once_with(
+                    host="localhost",
+                    port=9875,
+                    require_bounded_execute=False,
+                )
                 mock_xmlrpc_bridge.connect.assert_called_once()
 
             mock_xmlrpc_bridge.disconnect.assert_called_once()
@@ -181,8 +247,8 @@ class TestLifespan:
             mock_socket_bridge.disconnect.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_version_fetch_failure_logs_warning(self):
-        """Should log warning if version fetch fails."""
+    async def test_version_lookup_is_deferred_during_startup(self):
+        """Startup should not block on an additional version queue request."""
         import freecad_mcp.server as server_module
 
         mock_config = MagicMock()
@@ -190,9 +256,7 @@ class TestLifespan:
         mock_config.freecad_path = None
 
         mock_bridge = AsyncMock()
-        mock_bridge.get_freecad_version = AsyncMock(
-            side_effect=Exception("Connection failed")
-        )
+        mock_bridge.get_freecad_version = AsyncMock()
 
         with (
             patch.object(server_module, "get_config", return_value=mock_config),
@@ -200,14 +264,13 @@ class TestLifespan:
                 "freecad_mcp.bridge.embedded.EmbeddedBridge",
                 return_value=mock_bridge,
             ),
-            patch.object(server_module.logger, "warning") as mock_warning,
         ):
             mock_server = MagicMock()
 
             async with server_module.lifespan(mock_server):
-                # Warning should be logged
-                mock_warning.assert_called_once()
-                assert "Could not get FreeCAD version" in str(mock_warning.call_args)
+                mock_bridge.connect.assert_awaited_once()
+
+            mock_bridge.get_freecad_version.assert_not_called()
 
 
 class TestRegisterAllComponents:
@@ -321,7 +384,16 @@ class TestMain:
             mock_http_app.assert_called_once_with()
             mock_uvicorn_run.assert_called_once()
             call_args, call_kwargs = mock_uvicorn_run.call_args
-            assert call_args[0].app is upstream_app
+
+            from freecad_mcp.http_auth import (
+                McpMethodAuditMiddleware,
+                StaticBearerAuthMiddleware,
+            )
+
+            auth_app = call_args[0]
+            assert isinstance(auth_app, StaticBearerAuthMiddleware)
+            assert isinstance(auth_app.app, McpMethodAuditMiddleware)
+            assert auth_app.app.app is upstream_app
             assert call_kwargs["host"] == "127.0.0.1"
             assert call_kwargs["port"] == 8080
             assert call_kwargs["log_level"] == "info"
@@ -371,7 +443,6 @@ class TestStdioProtocolCleanliness:
         import json
         import os
         import subprocess
-        import time
 
         # Start the MCP server process
         # Use a non-existent FreeCAD host so it won't actually connect
@@ -412,22 +483,11 @@ class TestStdioProtocolCleanliness:
             proc.stdin.write(request_bytes)
             proc.stdin.flush()
 
-            # Give the server a moment to respond
-            time.sleep(0.5)
-
-            # Set stdout to non-blocking mode
-            os.set_blocking(proc.stdout.fileno(), False)
-
-            # Read any available stdout
-            stdout_data = b""
-            try:
-                while True:
-                    chunk = proc.stdout.read(4096)
-                    if not chunk:
-                        break
-                    stdout_data += chunk
-            except (BlockingIOError, TypeError):
-                pass  # No more data available
+            # Read one protocol line with a bounded, cross-platform wait.
+            # Zero bytes are acceptable here: this regression test verifies that
+            # any output that does appear is valid JSON-RPC, not that startup must
+            # complete against the intentionally unavailable FreeCAD endpoint.
+            stdout_data = _readline_with_timeout(proc.stdout, timeout=1.0)
 
             # Validate that ALL stdout is valid JSON-RPC
             # Each line should be a valid JSON object
@@ -465,7 +525,6 @@ class TestStdioProtocolCleanliness:
         """
         import os
         import subprocess
-        import time
 
         proc = subprocess.Popen(  # noqa: S603
             [
@@ -490,30 +549,15 @@ class TestStdioProtocolCleanliness:
             assert proc.stdout is not None
             assert proc.stderr is not None
 
-            # Set pipes to non-blocking mode
-            os.set_blocking(proc.stdout.fileno(), False)
-            os.set_blocking(proc.stderr.fileno(), False)
-
-            # Poll for stderr content with timeout (CI systems can be slower)
-            stderr_data = b""
-            max_wait = 5.0  # 5 second timeout
-            poll_interval = 0.1
-            elapsed = 0.0
-
-            while elapsed < max_wait:
-                try:
-                    chunk = proc.stderr.read(4096)
-                    if chunk:
-                        stderr_data += chunk
-                        # Check if we got the instance ID
-                        if b"FREECAD_MCP_INSTANCE_ID=" in stderr_data:
-                            break
-                except (BlockingIOError, TypeError):
-                    pass  # No data available yet
-
-                time.sleep(poll_interval)
-                elapsed += poll_interval
-
+            # The instance ID is written as one flushed stderr line. Reading it
+            # in a bounded helper thread works for both POSIX descriptors and
+            # Windows anonymous subprocess pipes.
+            max_wait = 5.0
+            stderr_data = _read_until_with_timeout(
+                proc.stderr,
+                marker=b"FREECAD_MCP_INSTANCE_ID=",
+                timeout=max_wait,
+            )
             stderr_text = stderr_data.decode("utf-8", errors="replace")
 
             # Instance ID should be in stderr
@@ -522,17 +566,8 @@ class TestStdioProtocolCleanliness:
                 f"stderr: {stderr_text[:500]}"
             )
 
-            # Read stdout (should NOT contain instance ID)
-            stdout_data = b""
-            try:
-                while True:
-                    chunk = proc.stdout.read(4096)
-                    if not chunk:
-                        break
-                    stdout_data += chunk
-            except (BlockingIOError, TypeError):
-                pass  # No more data available
-
+            # No initialize request was sent, so stdout should remain empty.
+            stdout_data = _readline_with_timeout(proc.stdout, timeout=0.25)
             stdout_text = stdout_data.decode("utf-8", errors="replace")
 
             # Instance ID should NOT be in stdout

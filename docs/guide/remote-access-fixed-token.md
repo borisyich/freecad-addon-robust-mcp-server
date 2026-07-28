@@ -17,6 +17,15 @@ Open a new PowerShell window, start FreeCAD and its Robust MCP Bridge, then run:
 powershell -ExecutionPolicy Bypass -File .\scripts\start_remote_mcp.ps1
 ```
 
+The startup script performs a mandatory bridge preflight before opening port
+`8000`. It verifies both the XML-RPC endpoint and the FreeCAD GUI execution
+queue. If the queue probe fails, restart MCP Bridge inside FreeCAD and rerun the
+script.
+
+The FreeCAD-side addon must come from the same updated archive. Remote startup
+requires the `execute_with_timeout` XML-RPC method and intentionally refuses an
+older bridge implementation.
+
 The local endpoint is:
 
 ```text

@@ -25,6 +25,7 @@ class TestServerConfig:
         assert config.http_host == "127.0.0.1"
         assert config.http_port == 8000
         assert config.access_token is None
+        assert config.require_bounded_xmlrpc is False
         assert config.log_level == "INFO"
         assert config.enable_sandbox is True
 
@@ -56,12 +57,14 @@ class TestServerConfig:
             {
                 "FREECAD_HTTP_HOST": "127.0.0.1",
                 "FREECAD_ACCESS_TOKEN": "x" * 64,
+                "FREECAD_REQUIRE_BOUNDED_XMLRPC": "true",
             },
         ):
             config = ServerConfig()
 
         assert config.http_host == "127.0.0.1"
         assert config.access_token == "x" * 64
+        assert config.require_bounded_xmlrpc is True
 
     def test_invalid_port_raises_error(self):
         """Invalid port should raise validation error."""

@@ -38,7 +38,7 @@ import sys
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
@@ -101,11 +101,12 @@ async def lifespan(_server: FastMCP) -> AsyncIterator[None]:
     config = get_config()
 
     logger.info("Initializing FreeCAD bridge...")
+    bridge: FreecadBridge
 
     if config.mode == FreecadMode.EMBEDDED:
         from freecad_mcp.bridge.embedded import EmbeddedBridge
 
-        _bridge = EmbeddedBridge(
+        bridge = EmbeddedBridge(
             freecad_path=str(config.freecad_path) if config.freecad_path else None,
         )
         logger.info("Using embedded bridge (headless mode)")
@@ -113,9 +114,10 @@ async def lifespan(_server: FastMCP) -> AsyncIterator[None]:
     elif config.mode == FreecadMode.XMLRPC:
         from freecad_mcp.bridge.xmlrpc import XmlRpcBridge
 
-        _bridge = XmlRpcBridge(
+        bridge = XmlRpcBridge(
             host=config.socket_host,
             port=config.xmlrpc_port,
+            require_bounded_execute=config.require_bounded_xmlrpc,
         )
         logger.info(
             "Using XML-RPC bridge: %s:%d", config.socket_host, config.xmlrpc_port
@@ -124,7 +126,7 @@ async def lifespan(_server: FastMCP) -> AsyncIterator[None]:
     else:  # SOCKET mode
         from freecad_mcp.bridge.socket import SocketBridge
 
-        _bridge = SocketBridge(
+        bridge = SocketBridge(
             host=config.socket_host,
             port=config.socket_port,
         )
@@ -132,28 +134,23 @@ async def lifespan(_server: FastMCP) -> AsyncIterator[None]:
             "Using socket bridge: %s:%d", config.socket_host, config.socket_port
         )
 
-    await _bridge.connect()
-    logger.info("FreeCAD bridge connected")
-
-    # Log FreeCAD version
     try:
-        version = await _bridge.get_freecad_version()
+        await bridge.connect()
+        _bridge = bridge
+        logger.info("FreeCAD bridge connected and execution queue verified")
         logger.info(
-            "FreeCAD %s (GUI: %s)",
-            version.get("version", "unknown"),
-            "available" if version.get("gui_available") else "headless",
+            "FreeCAD version lookup is deferred until requested; MCP startup "
+            "will not wait on a second GUI-queue operation"
         )
-    except Exception as e:
-        logger.warning("Could not get FreeCAD version: %s", e)
-
-    try:
         yield
     finally:
-        # Shutdown
-        if _bridge:
-            logger.info("Disconnecting FreeCAD bridge...")
-            await _bridge.disconnect()
+        if _bridge is bridge:
             _bridge = None
+        try:
+            logger.info("Disconnecting FreeCAD bridge...")
+            await bridge.disconnect()
+        except Exception as exc:
+            logger.warning("Could not disconnect FreeCAD bridge cleanly: %s", exc)
 
 
 def _build_transport_security(config: Any) -> TransportSecuritySettings:
@@ -261,6 +258,7 @@ async def check_freecad_connection(
             bridge = XmlRpcBridge(
                 host=config.socket_host,
                 port=config.xmlrpc_port,
+                require_bounded_execute=config.require_bounded_xmlrpc,
             )
             print(f"  Host: {config.socket_host}:{config.xmlrpc_port}")
         else:
@@ -273,7 +271,33 @@ async def check_freecad_connection(
             print(f"  Host: {config.socket_host}:{config.socket_port}")
 
         await bridge.connect()
-        version_info = await bridge.get_freecad_version()
+        if config.mode == FreecadMode.XMLRPC:
+            from freecad_mcp.bridge.xmlrpc import XmlRpcBridge
+
+            xmlrpc_bridge = cast(XmlRpcBridge, bridge)
+            queue_latency_ms = await xmlrpc_bridge.check_execution_queue(
+                timeout_ms=5000
+            )
+            print(f"  Queue latency: {queue_latency_ms:.1f} ms")
+            try:
+                version_info = await xmlrpc_bridge.get_freecad_version(
+                    timeout_ms=3000
+                )
+            except Exception as exc:
+                print(f"  Warning: version lookup failed: {exc}")
+                version_info = {
+                    "version": "unknown",
+                    "gui_available": "unknown",
+                }
+        else:
+            try:
+                version_info = await bridge.get_freecad_version()
+            except Exception as exc:
+                print(f"  Warning: version lookup failed: {exc}")
+                version_info = {
+                    "version": "unknown",
+                    "gui_available": "unknown",
+                }
         await bridge.disconnect()
 
         print("✓ Connection successful!")

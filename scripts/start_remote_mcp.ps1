@@ -65,8 +65,56 @@ Write-Host "Allowed public MCP host: $publicHost"
 $env:FREECAD_MODE = 'xmlrpc'
 $env:FREECAD_SOCKET_HOST = '127.0.0.1'
 $env:FREECAD_XMLRPC_PORT = '9875'
+$env:FREECAD_REQUIRE_BOUNDED_XMLRPC = 'true'
 $env:FREECAD_TRANSPORT = 'http'
 $env:FREECAD_HTTP_HOST = '127.0.0.1'
 $env:FREECAD_HTTP_PORT = '8000'
 
-uv run freecad-mcp
+$existingListener = Get-NetTCPConnection `
+    -LocalPort ([int]$env:FREECAD_HTTP_PORT) `
+    -State Listen `
+    -ErrorAction SilentlyContinue
+
+if ($null -ne $existingListener) {
+    $listenerDetails = $existingListener |
+        Select-Object -First 1 |
+        ForEach-Object {
+            $processName = 'unknown'
+            try {
+                $processName = (
+                    Get-Process -Id $_.OwningProcess -ErrorAction Stop
+                ).ProcessName
+            }
+            catch {
+                $processName = 'unknown'
+            }
+            "PID=$($_.OwningProcess), process=$processName"
+        }
+    throw "Port $env:FREECAD_HTTP_PORT is already in use ($listenerDetails). Stop the old MCP server before starting a new one."
+}
+
+Write-Host 'Running FreeCAD bridge preflight...'
+Write-Host '  1. XML-RPC transport ping'
+Write-Host '  2. FreeCAD GUI execution-queue probe'
+Write-Host '  3. Optional bounded version lookup'
+
+& uv run freecad-mcp `
+    --check `
+    --mode xmlrpc `
+    --host $env:FREECAD_SOCKET_HOST `
+    --port ([int]$env:FREECAD_XMLRPC_PORT)
+
+if ($LASTEXITCODE -ne 0) {
+    throw @'
+FreeCAD bridge preflight failed. The public HTTP MCP server was not started.
+
+Check the following:
+1. FreeCAD GUI is running.
+2. Robust MCP Bridge is started inside FreeCAD.
+3. Port 9875 belongs to the current FreeCAD process.
+4. If XML-RPC ping succeeds but the queue probe fails, restart MCP Bridge inside FreeCAD.
+'@
+}
+
+Write-Host 'Preflight passed. Starting authenticated HTTP MCP server...'
+& uv run freecad-mcp

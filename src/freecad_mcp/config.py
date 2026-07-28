@@ -46,6 +46,7 @@ class ServerConfig(BaseSettings):
         http_port: Port for HTTP transport.
         access_token: Fixed Bearer token required by HTTP transport.
         public_host: Public hostname accepted through a reverse proxy/tunnel.
+        require_bounded_xmlrpc: Require the updated timeout-aware bridge API.
         log_level: Logging level.
     """
 
@@ -108,6 +109,10 @@ class ServerConfig(BaseSettings):
         str | None,
         Field(description="Public hostname accepted through a tunnel/reverse proxy"),
     ] = None
+    require_bounded_xmlrpc: Annotated[
+        bool,
+        Field(description="Require XML-RPC execute_with_timeout support"),
+    ] = False
 
     # Logging
     log_level: str = "INFO"

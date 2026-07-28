@@ -29,6 +29,19 @@
 - Expanded process-oriented guidance for plate/block milling, turning from
   round/tube/hex stock, sheet-metal bending/forming, hybrid parts, datum strategy,
   feature ordering, and autonomous drawing interpretation.
+- Hardened remote XML-RPC startup: transport `ping()` no longer depends on the
+  FreeCAD GUI queue, startup now verifies that the Qt/main-thread execution
+  queue is responsive, and version lookup is removed from the MCP session's
+  critical initialization path.
+- Added `execute_with_timeout` and lightweight `get_health` XML-RPC methods while
+  retaining compatibility with legacy `execute(code)` clients.
+- Cancelled queue requests are now skipped after timeout so stalled operations
+  cannot execute unexpectedly after the FreeCAD GUI timer recovers.
+- Added mandatory remote-start preflight, duplicate HTTP-listener detection,
+  finite XML-RPC socket timeouts, serialized XML-RPC calls, and start/completion
+  audit logs with MCP method, target, status, and duration.
+- Added `scripts/update_freecad_bridge.ps1` to install the matching updated
+  FreeCAD-side workbench on Windows with backup of the previous installation.
 
 This project uses **component-specific versioning**. Each component has its own
 release notes and version history.
