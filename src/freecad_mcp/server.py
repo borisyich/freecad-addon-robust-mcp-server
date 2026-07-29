@@ -58,6 +58,22 @@ logger = logging.getLogger(__name__)
 # This ID is stable for the lifetime of this server process
 INSTANCE_ID: str = str(uuid.uuid4())
 
+MCP_INSTRUCTIONS = """Use the FreeCAD engineering workflow for mechanical modeling.
+Before modifying geometry:
+- inspect the intended document and existing feature history;
+- reuse one explicit document and one PartDesign Body;
+- establish drawing-view to FreeCAD-plane correspondence.
+Prefer standard MCP tools. Use execute_python or safe_execute only when
+a required operation is unavailable or broken.
+After every major feature:
+- recompute;
+- inspect the result;
+- capture and visually review the equivalent view;
+- correct the causal feature if geometry differs from the target.
+Before completing a geometry-changing task, call
+validate_parametric_model and report significant findings.
+"""
+
 # Global bridge instance (initialized on startup via lifespan)
 _bridge: Any = None
 
@@ -311,8 +327,6 @@ def _build_transport_security(config: Any) -> TransportSecuritySettings:
     )
 
 
-
-
 class FreecadFastMCP(FastMCP):
     """FastMCP variant with explicit remote-client compatibility defaults.
 
@@ -406,6 +420,7 @@ if (
 
 mcp = FreecadFastMCP(
     name="freecad-mcp",
+    instructions=MCP_INSTRUCTIONS,
     lifespan=lifespan,
     host=_initial_config.http_host,
     port=_initial_config.http_port,

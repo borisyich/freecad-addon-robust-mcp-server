@@ -484,70 +484,105 @@ class TestObjectTools:
         mock_bridge.execute_python.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_get_selection(self, register_tools, mock_bridge):
-        """get_selection should return selected objects via execute_python."""
+    async def test_selection_get_returns_structured_selection(
+        self, register_tools, mock_bridge
+    ):
+        """selection(action='get') should return objects and sub-elements."""
         mock_bridge.execute_python = AsyncMock(
             return_value=ExecutionResult(
                 success=True,
-                result=[
-                    {
-                        "name": "Box",
-                        "label": "Box",
-                        "type_id": "Part::Box",
-                        "sub_elements": ["Face1"],
-                    }
-                ],
+                result={
+                    "success": True,
+                    "action": "get",
+                    "selected": [
+                        {
+                            "name": "Pad",
+                            "label": "Pad",
+                            "type_id": "PartDesign::Feature",
+                            "sub_elements": ["Face1"],
+                        }
+                    ],
+                },
                 stdout="",
                 stderr="",
-                execution_time_ms=5.0,
+                execution_time_ms=10.0,
             )
         )
 
-        get_selection = register_tools["get_selection"]
-        result = await get_selection()
+        result = await register_tools["selection"]("get", doc_name="Part")
 
-        assert len(result) == 1
-        assert result[0]["name"] == "Box"
-        mock_bridge.execute_python.assert_called_once()
+        assert result["selected"][0]["sub_elements"] == ["Face1"]
+        generated_code = mock_bridge.execute_python.await_args.args[0]
+        assert "getSelectionEx('Part')" in generated_code
 
     @pytest.mark.asyncio
-    async def test_set_selection(self, register_tools, mock_bridge):
-        """set_selection should select objects via execute_python."""
+    async def test_selection_set_reports_selected_and_missing_objects(
+        self, register_tools, mock_bridge
+    ):
+        """selection(action='set') should preserve evidence about missing names."""
         mock_bridge.execute_python = AsyncMock(
             return_value=ExecutionResult(
                 success=True,
-                result={"success": True, "selected_count": 2},
+                result={
+                    "success": False,
+                    "action": "set",
+                    "selected_count": 1,
+                    "selected_names": ["Pad"],
+                    "missing_names": ["Missing"],
+                },
                 stdout="",
                 stderr="",
-                execution_time_ms=5.0,
+                execution_time_ms=10.0,
             )
         )
 
-        set_selection = register_tools["set_selection"]
-        result = await set_selection(object_names=["Box", "Cylinder"])
+        result = await register_tools["selection"](
+            "set", object_names=["Pad", "Missing"], clear_existing=False
+        )
 
-        assert result["success"] is True
-        assert result["selected_count"] == 2
-        mock_bridge.execute_python.assert_called_once()
+        assert result["selected_names"] == ["Pad"]
+        assert result["missing_names"] == ["Missing"]
+        generated_code = mock_bridge.execute_python.await_args.args[0]
+        assert "clearSelection()" in generated_code
+        assert "if False:" in generated_code
 
     @pytest.mark.asyncio
-    async def test_clear_selection(self, register_tools, mock_bridge):
-        """clear_selection should clear selections via execute_python."""
+    async def test_selection_clear_uses_same_entry_point(
+        self, register_tools, mock_bridge
+    ):
+        """selection(action='clear') should clear GUI selection."""
         mock_bridge.execute_python = AsyncMock(
             return_value=ExecutionResult(
                 success=True,
-                result={"success": True},
+                result={"success": True, "action": "clear", "selected_count": 0},
                 stdout="",
                 stderr="",
-                execution_time_ms=5.0,
+                execution_time_ms=10.0,
             )
         )
 
-        clear_selection = register_tools["clear_selection"]
-        result = await clear_selection()
+        result = await register_tools["selection"]("clear")
 
-        assert result["success"] is True
-        mock_bridge.execute_python.assert_called_once()
+        assert result["selected_count"] == 0
+        assert "FreeCADGui.Selection.clearSelection()" in (
+            mock_bridge.execute_python.await_args.args[0]
+        )
+
+    @pytest.mark.asyncio
+    async def test_selection_set_requires_object_names(
+        self, register_tools, mock_bridge
+    ):
+        """An empty set operation should fail before executing FreeCAD code."""
+        with pytest.raises(ValueError, match="object_names is required"):
+            await register_tools["selection"]("set")
+        mock_bridge.execute_python.assert_not_awaited()
+
+    def test_legacy_selection_tools_are_not_registered(self, register_tools):
+        """Only the consolidated selection tool should remain public."""
+        assert "selection" in register_tools
+        assert {"get_selection", "set_selection", "clear_selection"}.isdisjoint(
+            register_tools
+        )
 
     # Tests for new Part primitives
 

@@ -6,7 +6,7 @@ has excellent screenshot handling with view type detection.
 """
 
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Any, Literal
 
 from mcp.types import CallToolResult
 
@@ -212,47 +212,170 @@ def register_view_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> N
         }
 
     @mcp.tool()
-    async def list_workbenches() -> list[dict[str, Any]]:
-        """List all available FreeCAD workbenches.
-
-        Returns:
-            List of dictionaries, each containing:
-                - name: Workbench internal name
-                - label: Display label
-                - is_active: Whether workbench is currently active
-        """
-        bridge = await get_bridge()
-        workbenches = await bridge.get_workbenches()
-        return [
-            {
-                "name": wb.name,
-                "label": wb.label,
-                "is_active": wb.is_active,
-            }
-            for wb in workbenches
-        ]
-
-    @mcp.tool()
-    async def activate_workbench(workbench_name: str) -> dict[str, Any]:
-        """Activate a FreeCAD workbench.
+    async def workbench(
+        action: Literal["list", "activate"],
+        workbench_name: str | None = None,
+    ) -> dict[str, Any]:
+        """List FreeCAD workbenches or activate one workbench.
 
         Args:
-            workbench_name: Internal name of the workbench to activate.
-                Common workbenches:
-                - "PartWorkbench" - Part modeling
-                - "PartDesignWorkbench" - Parametric part design
-                - "SketcherWorkbench" - 2D sketching
-                - "DraftWorkbench" - 2D drafting
-                - "MeshWorkbench" - Mesh operations
-                - "SpreadsheetWorkbench" - Spreadsheet
+            action: ``list`` to inspect available workbenches or ``activate`` to
+                switch the active workbench.
+            workbench_name: Internal workbench name required for ``activate``.
 
         Returns:
-            Dictionary with result:
-                - success: Whether activation was successful
+            The available workbenches or activation result.
         """
         bridge = await get_bridge()
+        if action == "list":
+            workbenches = await bridge.get_workbenches()
+            return {
+                "action": action,
+                "workbenches": [
+                    {
+                        "name": item.name,
+                        "label": item.label,
+                        "is_active": item.is_active,
+                    }
+                    for item in workbenches
+                ],
+            }
+        if not workbench_name:
+            raise ValueError("workbench_name is required for action='activate'")
         await bridge.activate_workbench(workbench_name)
-        return {"success": True}
+        return {
+            "success": True,
+            "action": action,
+            "workbench_name": workbench_name,
+        }
+
+    @mcp.tool()
+    async def set_visual_properties(
+        object_name: str,
+        visible: bool | None = None,
+        color: list[float] | None = None,
+        display_mode: str | None = None,
+        doc_name: str | None = None,
+    ) -> dict[str, Any]:
+        """Set one or more GUI display properties for a FreeCAD object.
+
+        Args:
+            object_name: Name of the object.
+            visible: Optional visibility state.
+            color: Optional RGB values in the inclusive range 0.0 to 1.0.
+            display_mode: Optional FreeCAD display mode such as ``Flat Lines``.
+            doc_name: Document containing the object. Uses active document if None.
+
+        Returns:
+            Applied visual properties.
+        """
+        if visible is None and color is None and display_mode is None:
+            raise ValueError("Provide visible, color, or display_mode")
+        if color is not None:
+            if len(color) != 3 or any(component < 0 or component > 1 for component in color):
+                raise ValueError("color must contain three values between 0.0 and 1.0")
+
+        bridge = await get_bridge()
+        code = f"""
+if not FreeCAD.GuiUp:
+    _result_ = {{"success": False, "error": "GUI not available - visual properties require GUI mode"}}
+else:
+    doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
+    if doc is None:
+        _result_ = {{"success": False, "error": "No document found"}}
+    else:
+        obj = doc.getObject({object_name!r})
+        if obj is None:
+            _result_ = {{"success": False, "error": f"Object not found: {object_name!r}"}}
+        elif not hasattr(obj, "ViewObject") or not obj.ViewObject:
+            _result_ = {{"success": False, "error": "Object has no ViewObject"}}
+        else:
+            applied = {{}}
+            if {visible!r} is not None:
+                obj.ViewObject.Visibility = {visible!r}
+                applied["visible"] = bool(obj.ViewObject.Visibility)
+            if {color!r} is not None:
+                obj.ViewObject.ShapeColor = tuple({color!r})
+                applied["color"] = list(obj.ViewObject.ShapeColor)
+            if {display_mode!r} is not None:
+                obj.ViewObject.DisplayMode = {display_mode!r}
+                applied["display_mode"] = obj.ViewObject.DisplayMode
+            _result_ = {{"success": True, "object_name": obj.Name, "applied": applied}}
+"""
+        result = await bridge.execute_python(code)
+        if result.success and result.result:
+            return result.result
+        return {
+            "success": False,
+            "error": result.error_traceback or "Set visual properties failed",
+        }
+
+    @mcp.tool()
+    async def history(
+        action: Literal["undo", "redo", "status"],
+        doc_name: str | None = None,
+    ) -> dict[str, Any]:
+        """Undo, redo, or inspect document history.
+
+        Args:
+            action: History operation to perform.
+            doc_name: Document to operate on. Uses active document if None.
+
+        Returns:
+            Action result plus current undo and redo counts.
+        """
+        bridge = await get_bridge()
+        code = f"""
+doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
+if doc is None:
+    _result_ = {{
+        "success": False,
+        "action": {action!r},
+        "error": "No document found",
+        "undo_count": 0,
+        "redo_count": 0,
+        "undo_names": [],
+        "redo_names": [],
+    }}
+else:
+    action = {action!r}
+    success = True
+    error = None
+    if action == "undo":
+        if doc.UndoCount > 0:
+            doc.undo()
+        else:
+            success = False
+            error = "Nothing to undo"
+    elif action == "redo":
+        if doc.RedoCount > 0:
+            doc.redo()
+        else:
+            success = False
+            error = "Nothing to redo"
+    _result_ = {{
+        "success": success,
+        "action": action,
+        "error": error,
+        "undo_count": doc.UndoCount,
+        "redo_count": doc.RedoCount,
+        "undo_names": list(doc.UndoNames) if hasattr(doc, "UndoNames") else [],
+        "redo_names": list(doc.RedoNames) if hasattr(doc, "RedoNames") else [],
+    }}
+"""
+        result = await bridge.execute_python(code)
+        if result.success and result.result:
+            return result.result
+        return {
+            "success": False,
+            "action": action,
+            "error": result.error_traceback or "History operation failed",
+            "undo_count": 0,
+            "redo_count": 0,
+            "undo_names": [],
+            "redo_names": [],
+        }
+
 
     @mcp.tool()
     async def fit_all(doc_name: str | None = None) -> dict[str, Any]:
@@ -273,243 +396,6 @@ def register_view_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> N
         await bridge.set_view(ViewAngle.FIT_ALL, doc_name)
         return {"success": True}
 
-    @mcp.tool()
-    async def set_object_visibility(
-        object_name: str,
-        visible: bool,
-        doc_name: str | None = None,
-    ) -> dict[str, Any]:
-        """Set the visibility of a FreeCAD object.
-
-        Args:
-            object_name: Name of the object.
-            visible: Whether object should be visible.
-            doc_name: Document containing the object. Uses active document if None.
-
-        Returns:
-            Dictionary with result:
-                - success: Whether operation was successful
-                - visible: New visibility state
-        """
-        bridge = await get_bridge()
-
-        code = f"""
-if not FreeCAD.GuiUp:
-    _result_ = {{"success": False, "error": "GUI not available - visibility cannot be set in headless mode"}}
-else:
-    doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
-    if doc is None:
-        _result_ = {{"success": False, "error": "No document found"}}
-    else:
-        obj = doc.getObject({object_name!r})
-        if obj is None:
-            _result_ = {{"success": False, "error": f"Object not found: {object_name!r}"}}
-        elif hasattr(obj, "ViewObject") and obj.ViewObject:
-            obj.ViewObject.Visibility = {visible}
-            _result_ = {{"success": True, "visible": {visible}}}
-        else:
-            _result_ = {{"success": False, "error": "Object has no ViewObject"}}
-"""
-        result = await bridge.execute_python(code)
-        if result.success and result.result:
-            return result.result
-        return {
-            "success": False,
-            "error": result.error_traceback or "Set visibility failed",
-        }
-
-    @mcp.tool()
-    async def set_display_mode(
-        object_name: str,
-        mode: str,
-        doc_name: str | None = None,
-    ) -> dict[str, Any]:
-        """Set the display mode of a FreeCAD object.
-
-        Args:
-            object_name: Name of the object.
-            mode: Display mode. Common options:
-                - "Flat Lines" - Solid with edges
-                - "Shaded" - Solid without edges
-                - "Wireframe" - Wire frame only
-                - "Points" - Points only
-            doc_name: Document containing the object. Uses active document if None.
-
-        Returns:
-            Dictionary with result:
-                - success: Whether operation was successful
-                - mode: New display mode
-        """
-        bridge = await get_bridge()
-
-        code = f"""
-if not FreeCAD.GuiUp:
-    _result_ = {{"success": False, "error": "GUI not available - display mode cannot be set in headless mode"}}
-else:
-    doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
-    if doc is None:
-        _result_ = {{"success": False, "error": "No document found"}}
-    else:
-        obj = doc.getObject({object_name!r})
-        if obj is None:
-            _result_ = {{"success": False, "error": f"Object not found: {object_name!r}"}}
-        elif hasattr(obj, "ViewObject") and obj.ViewObject:
-            obj.ViewObject.DisplayMode = {mode!r}
-            _result_ = {{"success": True, "mode": {mode!r}}}
-        else:
-            _result_ = {{"success": False, "error": "Object has no ViewObject"}}
-"""
-        result = await bridge.execute_python(code)
-        if result.success and result.result:
-            return result.result
-        return {
-            "success": False,
-            "error": result.error_traceback or "Set display mode failed",
-        }
-
-    @mcp.tool()
-    async def set_object_color(
-        object_name: str,
-        color: list[float],
-        doc_name: str | None = None,
-    ) -> dict[str, Any]:
-        """Set the color of a FreeCAD object.
-
-        Args:
-            object_name: Name of the object.
-            color: RGB color as [r, g, b] where each value is 0.0-1.0.
-                   Example: [1.0, 0.0, 0.0] for red.
-            doc_name: Document containing the object. Uses active document if None.
-
-        Returns:
-            Dictionary with result:
-                - success: Whether operation was successful
-                - color: New color values
-        """
-        bridge = await get_bridge()
-
-        if len(color) != 3:
-            return {
-                "success": False,
-                "error": "Color must be [r, g, b] with values 0.0-1.0",
-            }
-
-        code = f"""
-if not FreeCAD.GuiUp:
-    _result_ = {{"success": False, "error": "GUI not available - color cannot be set in headless mode"}}
-else:
-    doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
-    if doc is None:
-        _result_ = {{"success": False, "error": "No document found"}}
-    else:
-        obj = doc.getObject({object_name!r})
-        if obj is None:
-            _result_ = {{"success": False, "error": f"Object not found: {object_name!r}"}}
-        elif hasattr(obj, "ViewObject") and obj.ViewObject:
-            obj.ViewObject.ShapeColor = ({color[0]}, {color[1]}, {color[2]})
-            _result_ = {{"success": True, "color": {color}}}
-        else:
-            _result_ = {{"success": False, "error": "Object has no ViewObject"}}
-"""
-        result = await bridge.execute_python(code)
-        if result.success and result.result:
-            return result.result
-        return {
-            "success": False,
-            "error": result.error_traceback or "Set color failed",
-        }
-
-    @mcp.tool()
-    async def zoom_in(
-        factor: float = 1.5, doc_name: str | None = None
-    ) -> dict[str, Any]:
-        """Zoom in the 3D view.
-
-        Requires GUI mode.
-
-        Args:
-            factor: Zoom factor (>1 zooms in). Defaults to 1.5.
-            doc_name: Document to zoom in. Uses active document if None.
-
-        Returns:
-            Dictionary with result:
-                - success: Whether operation was successful
-        """
-        bridge = await get_bridge()
-
-        code = f"""
-if not FreeCAD.GuiUp:
-    _result_ = {{"success": False, "error": "GUI not available - zoom requires GUI mode"}}
-else:
-    doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
-    if doc is None:
-        _result_ = {{"success": False, "error": "No document found"}}
-    elif FreeCADGui.ActiveDocument is None or FreeCADGui.ActiveDocument.ActiveView is None:
-        _result_ = {{"success": False, "error": "No active view"}}
-    else:
-        view = FreeCADGui.ActiveDocument.ActiveView
-        cam = view.getCameraNode()
-        if hasattr(cam, "scaleHeight"):
-            # For orthographic views
-            cam.scaleHeight(1.0 / {factor})
-        else:
-            # For perspective views - move camera closer
-            view.zoomIn()
-        _result_ = {{"success": True}}
-"""
-        result = await bridge.execute_python(code)
-        if result.success and result.result:
-            return result.result
-        return {
-            "success": False,
-            "error": result.error_traceback or "Zoom in failed",
-        }
-
-    @mcp.tool()
-    async def zoom_out(
-        factor: float = 1.5, doc_name: str | None = None
-    ) -> dict[str, Any]:
-        """Zoom out the 3D view.
-
-        Requires GUI mode.
-
-        Args:
-            factor: Zoom factor (>1 zooms out). Defaults to 1.5.
-            doc_name: Document to zoom out. Uses active document if None.
-
-        Returns:
-            Dictionary with result:
-                - success: Whether operation was successful
-        """
-        bridge = await get_bridge()
-
-        code = f"""
-if not FreeCAD.GuiUp:
-    _result_ = {{"success": False, "error": "GUI not available - zoom requires GUI mode"}}
-else:
-    doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
-    if doc is None:
-        _result_ = {{"success": False, "error": "No document found"}}
-    elif FreeCADGui.ActiveDocument is None or FreeCADGui.ActiveDocument.ActiveView is None:
-        _result_ = {{"success": False, "error": "No active view"}}
-    else:
-        view = FreeCADGui.ActiveDocument.ActiveView
-        cam = view.getCameraNode()
-        if hasattr(cam, "scaleHeight"):
-            # For orthographic views
-            cam.scaleHeight({factor})
-        else:
-            # For perspective views - move camera farther
-            view.zoomOut()
-        _result_ = {{"success": True}}
-"""
-        result = await bridge.execute_python(code)
-        if result.success and result.result:
-            return result.result
-        return {
-            "success": False,
-            "error": result.error_traceback or "Zoom out failed",
-        }
 
     @mcp.tool()
     async def set_camera_position(
@@ -571,107 +457,6 @@ else:
             "error": result.error_traceback or "Set camera position failed",
         }
 
-    @mcp.tool()
-    async def undo(doc_name: str | None = None) -> dict[str, Any]:
-        """Undo the last operation.
-
-        Args:
-            doc_name: Document to undo in. Uses active document if None.
-
-        Returns:
-            Dictionary with result:
-                - success: Whether undo was performed
-                - can_undo: Whether more undos are available
-        """
-        bridge = await get_bridge()
-
-        code = f"""
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
-if doc is None:
-    _result_ = {{"success": False, "can_undo": False, "error": "No document found"}}
-elif doc.UndoCount > 0:
-    doc.undo()
-    _result_ = {{"success": True, "can_undo": doc.UndoCount > 0}}
-else:
-    _result_ = {{"success": False, "can_undo": False, "error": "Nothing to undo"}}
-"""
-        result = await bridge.execute_python(code)
-        if result.success and result.result:
-            return result.result
-        return {
-            "success": False,
-            "can_undo": False,
-            "error": result.error_traceback or "Undo failed",
-        }
-
-    @mcp.tool()
-    async def redo(doc_name: str | None = None) -> dict[str, Any]:
-        """Redo the last undone operation.
-
-        Args:
-            doc_name: Document to redo in. Uses active document if None.
-
-        Returns:
-            Dictionary with result:
-                - success: Whether redo was performed
-                - can_redo: Whether more redos are available
-        """
-        bridge = await get_bridge()
-
-        code = f"""
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
-if doc is None:
-    _result_ = {{"success": False, "can_redo": False, "error": "No document found"}}
-elif doc.RedoCount > 0:
-    doc.redo()
-    _result_ = {{"success": True, "can_redo": doc.RedoCount > 0}}
-else:
-    _result_ = {{"success": False, "can_redo": False, "error": "Nothing to redo"}}
-"""
-        result = await bridge.execute_python(code)
-        if result.success and result.result:
-            return result.result
-        return {
-            "success": False,
-            "can_redo": False,
-            "error": result.error_traceback or "Redo failed",
-        }
-
-    @mcp.tool()
-    async def get_undo_redo_status(doc_name: str | None = None) -> dict[str, Any]:
-        """Get the current undo/redo status.
-
-        Args:
-            doc_name: Document to check. Uses active document if None.
-
-        Returns:
-            Dictionary with status:
-                - undo_count: Number of undoable operations
-                - redo_count: Number of redoable operations
-                - undo_names: List of undo operation names (if available)
-        """
-        bridge = await get_bridge()
-
-        code = f"""
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
-if doc is None:
-    _result_ = {{"error": "No document found", "undo_count": 0, "redo_count": 0, "undo_names": []}}
-else:
-    _result_ = {{
-        "undo_count": doc.UndoCount,
-        "redo_count": doc.RedoCount,
-        "undo_names": list(doc.UndoNames) if hasattr(doc, "UndoNames") else [],
-    }}
-"""
-        result = await bridge.execute_python(code)
-        if result.success and result.result:
-            return result.result
-        return {
-            "error": result.error_traceback or "Get undo/redo status failed",
-            "undo_count": 0,
-            "redo_count": 0,
-            "undo_names": [],
-        }
 
     @mcp.tool()
     async def list_parts_library() -> list[dict[str, Any]]:
@@ -809,63 +594,4 @@ except Exception:
             "error": result.error_traceback or "Insert part from library failed",
         }
 
-    @mcp.tool()
-    async def get_console_log(lines: int = 50) -> dict[str, Any]:
-        """Get recent console output from FreeCAD.
 
-        Args:
-            lines: Maximum number of lines to return. Defaults to 50.
-
-        Returns:
-            Dictionary with:
-                - messages: List of console messages
-                - warnings: List of warning messages
-                - errors: List of error messages
-        """
-        bridge = await get_bridge()
-        console_lines = await bridge.get_console_output(lines)
-
-        return {
-            "messages": console_lines,
-            "warnings": [line for line in console_lines if "warning" in line.lower()],
-            "errors": [line for line in console_lines if "error" in line.lower()],
-        }
-
-    @mcp.tool()
-    async def recompute(doc_name: str | None = None) -> dict[str, Any]:
-        """Force recompute of all objects in a document.
-
-        Args:
-            doc_name: Document to recompute. Uses active document if None.
-
-        Returns:
-            Dictionary with result:
-                - success: Whether recompute completed
-                - touch_count: Number of objects that were recomputed
-        """
-        bridge = await get_bridge()
-
-        code = f"""
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
-if doc is None:
-    _result_ = {{"success": False, "error": "No document found", "touch_count": 0}}
-else:
-    # Touch all objects to force recompute
-    touch_count = 0
-    for obj in doc.Objects:
-        if hasattr(obj, "touch"):
-            obj.touch()
-            touch_count += 1
-
-    doc.recompute()
-
-    _result_ = {{"success": True, "touch_count": touch_count}}
-"""
-        result = await bridge.execute_python(code)
-        if result.success and result.result:
-            return result.result
-        return {
-            "success": False,
-            "error": result.error_traceback or "Recompute failed",
-            "touch_count": 0,
-        }

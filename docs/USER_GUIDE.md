@@ -213,7 +213,7 @@ Create a parametric mounting plate:
 
 1. `create_partdesign_body()` - Creates the Body container
 1. `create_sketch(body_name="Body", plane="XY_Plane")` - Creates attached sketch
-1. `add_sketch_rectangle(...)` - Adds the profile geometry
+1. `edit_sketch_geometry(...)` - Adds the profile geometry as a batch
 1. `pad_sketch(sketch_name="Sketch", length=8)` - Extrudes to solid
 1. Identifies the planar top face geometrically
 1. Creates a new face-attached sketch with circles at the hole locations
@@ -298,7 +298,7 @@ create_partdesign_body(name="Body")
 
 # 2. Create base plate sketch and pad
 create_sketch(body_name="Body", plane="XY_Plane", name="BaseSketch")
-add_sketch_rectangle(sketch_name="BaseSketch", x=0, y=0, width=80, height=60)
+edit_sketch_geometry(sketch_name="BaseSketch", operations=[{"op": "add_rectangle", "x": 0, "y": 0, "width": 80, "height": 60}])
 pad_sketch(sketch_name="BaseSketch", length=5)
 
 # 3. Add vertical support
@@ -309,8 +309,13 @@ pad_sketch(sketch_name="SupportSketch", length=60)
 # 4. Add mounting holes after all additive features.
 # Determine the actual planar top face first; do not guess FaceN.
 create_sketch(body_name="Body", plane="Pad.Face6", name="HoleSketch")
-add_sketch_circle(sketch_name="HoleSketch", center_x=15, center_y=30, radius=3)
-add_sketch_circle(sketch_name="HoleSketch", center_x=65, center_y=30, radius=3)
+edit_sketch_geometry(
+    sketch_name="HoleSketch",
+    operations=[
+        {"op": "add_circle", "center_x": 15, "center_y": 30, "radius": 3},
+        {"op": "add_circle", "center_x": 65, "center_y": 30, "radius": 3},
+    ],
+)
 hole = create_hole(sketch_name="HoleSketch", diameter=6, hole_type="ThroughAll")
 # Continue only when hole["validated"] is true and hole["removed_volume"] > 0.
 
@@ -326,7 +331,7 @@ oil_hole = create_cylindrical_cut(
 
 # 5. Add slot (as pocket)
 create_sketch(body_name="Body", plane="Face...", name="SlotSketch")
-add_sketch_rectangle(...)
+edit_sketch_geometry(sketch_name="SlotSketch", operations=[{"op": "add_rectangle", "x": 0, "y": 0, "width": 10, "height": 20}])
 pocket_sketch(sketch_name="SlotSketch", length=5, type="ThroughAll")
 
 # 6. Add fillets

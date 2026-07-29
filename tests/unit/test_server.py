@@ -625,3 +625,28 @@ class TestHttpToolResultCompatibility:
         assert result
         assert getattr(result[0], "type", None) == "text"
         assert "Document1" in getattr(result[0], "text", "")
+
+class TestMcpInstructions:
+    """Tests for protocol-level server instructions."""
+
+    def test_server_exposes_engineering_instructions(self):
+        """FastMCP initialization should include the required agent workflow."""
+        from freecad_mcp import server as server_module
+
+        expected = """Use the FreeCAD engineering workflow for mechanical modeling.
+Before modifying geometry:
+- inspect the intended document and existing feature history;
+- reuse one explicit document and one PartDesign Body;
+- establish drawing-view to FreeCAD-plane correspondence.
+Prefer standard MCP tools. Use execute_python or safe_execute only when
+a required operation is unavailable or broken.
+After every major feature:
+- recompute;
+- inspect the result;
+- capture and visually review the equivalent view;
+- correct the causal feature if geometry differs from the target.
+Before completing a geometry-changing task, call
+validate_parametric_model and report significant findings.
+"""
+        assert server_module.MCP_INSTRUCTIONS == expected
+        assert server_module.mcp.instructions == expected

@@ -1,6 +1,6 @@
 # FreeCAD Robust MCP Server Tools Reference
 
-This document provides detailed signatures and examples for core MCP tools. It is not the exact inventory of all registered tools. Use [Tools Overview](guide/tools.md) or the MCP client's discovered tool list for the authoritative 158-tool inventory.
+This document provides detailed signatures and examples for core MCP tools. It is not the exact inventory of all registered tools. Use [Tools Overview](guide/tools.md) or the MCP client's discovered tool list for the authoritative 122-tool inventory.
 
 ---
 
@@ -14,17 +14,17 @@ The exact generated inventory is grouped as follows:
 | --- | ---: |
 | Execution | 5 |
 | Documents | 7 |
-| Objects / Part | 40 |
-| PartDesign / Sketcher | 50 |
+| Objects / Part | 38 |
+| PartDesign / Sketcher | 25 |
 | Spreadsheet | 10 |
 | Draft | 6 |
 | Images | 3 |
 | Checkpoints | 1 |
-| View | 18 |
+| View / GUI / History | 9 |
 | Validation | 5 |
 | Export / Import | 7 |
 | Macros | 6 |
-| **Total** | **158** |
+| **Total** | **122** |
 
 The sections below retain deeper examples for commonly used tools; they do not repeat every generated entry.
 
@@ -441,33 +441,21 @@ mirror_object(
 
 ### Selection (GUI Mode)
 
-#### get_selection
+#### selection
 
-Get currently selected objects.
-
-```python
-get_selection(doc_name: str | None = None) -> list[dict]
-```
-
-#### set_selection
-
-Select objects programmatically.
+Get, set, or clear the FreeCAD GUI selection through one entry point.
 
 ```python
-set_selection(
-    object_names: list[str],
+selection(
+    action: Literal["get", "set", "clear"],
+    object_names: list[str] | None = None,
     clear_existing: bool = True,
-    doc_name: str | None = None
+    doc_name: str | None = None,
 ) -> dict
 ```
 
-#### clear_selection
-
-Clear the current selection.
-
-```python
-clear_selection() -> dict
-```
+For `action="set"`, provide at least one object name. The result reports selected
+and missing object names rather than silently ignoring unresolved references.
 
 ---
 
@@ -501,73 +489,70 @@ create_sketch(
 ) -> dict
 ```
 
-### Sketch Geometry
+### Sketch Geometry and Constraints
 
-#### add_sketch_rectangle
+#### edit_sketch_geometry
 
-Add a rectangle to a sketch.
+Apply an ordered batch of sketch geometry edits in one FreeCAD transaction and
+one recompute. Supported `op` values are:
+
+- `add_rectangle`, `add_circle`, `add_line`, `add_arc`, `add_point`;
+- `add_ellipse`, `add_polygon`, `add_slot`, `add_bspline`;
+- `add_external_geometry`, `delete_geometry`, `toggle_construction`.
 
 ```python
-add_sketch_rectangle(
+edit_sketch_geometry(
     sketch_name: str,
-    x: float, y: float,       # Bottom-left corner
-    width: float, height: float,
-    doc_name: str | None = None
+    operations: list[SketchGeometryOperation],
+    doc_name: str | None = None,
 ) -> dict
 ```
 
-#### add_sketch_circle
-
-Add a circle to a sketch.
+Example:
 
 ```python
-add_sketch_circle(
+edit_sketch_geometry(
+    sketch_name="BaseSketch",
+    operations=[
+        {"op": "add_rectangle", "x": 0, "y": 0, "width": 80, "height": 60},
+        {"op": "add_circle", "center_x": 15, "center_y": 30, "radius": 3},
+        {"op": "add_circle", "center_x": 65, "center_y": 30, "radius": 3},
+    ],
+)
+```
+
+The result contains one entry per operation and the final sketch solver/profile
+status. Invalid operation payloads are rejected before FreeCAD is modified.
+
+#### edit_sketch_constraints
+
+Apply an ordered batch of constraint additions or deletions in one transaction
+and one recompute. Supported `op` values are:
+
+- `horizontal`, `vertical`, `coincident`, `parallel`, `perpendicular`;
+- `tangent`, `equal`, `distance`, `distance_x`, `distance_y`;
+- `radius`, `angle`, `fix`, `delete_constraint`;
+- `add_constraint` for a Sketcher constraint type not covered above.
+
+```python
+edit_sketch_constraints(
     sketch_name: str,
-    center_x: float, center_y: float,
-    radius: float,
-    doc_name: str | None = None
+    operations: list[SketchConstraintOperation],
+    doc_name: str | None = None,
 ) -> dict
 ```
 
-#### add_sketch_line
-
-Add a line to a sketch.
+Example:
 
 ```python
-add_sketch_line(
-    sketch_name: str,
-    x1: float, y1: float,  # Start point
-    x2: float, y2: float,  # End point
-    construction: bool = False,
-    doc_name: str | None = None
-) -> dict
-```
-
-#### add_sketch_arc
-
-Add an arc to a sketch.
-
-```python
-add_sketch_arc(
-    sketch_name: str,
-    center_x: float, center_y: float,
-    radius: float,
-    start_angle: float,  # Degrees
-    end_angle: float,    # Degrees
-    doc_name: str | None = None
-) -> dict
-```
-
-#### add_sketch_point
-
-Add a reference point to a sketch. For `create_hole`, use circles instead.
-
-```python
-add_sketch_point(
-    sketch_name: str,
-    x: float, y: float,
-    doc_name: str | None = None
-) -> dict
+edit_sketch_constraints(
+    sketch_name="BaseSketch",
+    operations=[
+        {"op": "horizontal", "geometry1": 0},
+        {"op": "vertical", "geometry1": 1},
+        {"op": "distance", "geometry1": 0, "value": 80},
+    ],
+)
 ```
 
 ### Additive Features
@@ -1031,136 +1016,81 @@ The decision is `continue`, `rework`. The tool does not inspect pixels; it enfor
 
 #### set_view_angle
 
-Set the 3D view angle.
+Set a standard camera view.
 
 ```python
-set_view_angle(
-    view_angle: str,  # Same options as get_screenshot
-    doc_name: str | None = None
-) -> dict
+set_view_angle(view_angle: str, doc_name: str | None = None) -> dict
 ```
 
 #### fit_all
 
-Fit all objects in the view.
+Fit all visible objects in the active view.
 
 ```python
 fit_all(doc_name: str | None = None) -> dict
 ```
 
-#### zoom_in / zoom_out
-
-Zoom the view.
-
-**Requires GUI mode.**
-
-```python
-zoom_in(factor: float = 1.5, doc_name: str | None = None) -> dict
-zoom_out(factor: float = 1.5, doc_name: str | None = None) -> dict
-```
-
 #### set_camera_position
 
-Set custom camera position.
-
-**Requires GUI mode.**
+Set an explicit camera position and look-at point.
 
 ```python
 set_camera_position(
-    position: list[float],     # [x, y, z]
-    look_at: list[float] | None = None,  # Default: origin
-    doc_name: str | None = None
+    position: list[float],
+    look_at: list[float] | None = None,
+    doc_name: str | None = None,
 ) -> dict
 ```
 
 ### Object Appearance
 
-#### set_object_visibility
+#### set_visual_properties
 
-Show or hide an object.
-
-**Requires GUI mode.**
+Set any combination of visibility, RGB color, and display mode in one call.
 
 ```python
-set_object_visibility(
+set_visual_properties(
     object_name: str,
-    visible: bool,
-    doc_name: str | None = None
+    visible: bool | None = None,
+    color: list[float] | None = None,
+    display_mode: str | None = None,
+    doc_name: str | None = None,
 ) -> dict
 ```
 
-#### set_display_mode
-
-Set object display mode.
-
-**Requires GUI mode.**
-
-```python
-set_display_mode(
-    object_name: str,
-    mode: str,  # "Flat Lines", "Shaded", "Wireframe", "Points"
-    doc_name: str | None = None
-) -> dict
-```
-
-#### set_object_color
-
-Set object color.
-
-**Requires GUI mode.**
-
-```python
-set_object_color(
-    object_name: str,
-    color: list[float],  # [r, g, b] where values are 0.0-1.0
-    doc_name: str | None = None
-) -> dict
-```
+At least one visual property must be provided. RGB components must be between
+`0.0` and `1.0`.
 
 ### Workbenches
 
-#### list_workbenches
+#### workbench
 
-List available workbenches.
-
-```python
-list_workbenches() -> list[dict]
-```
-
-#### activate_workbench
-
-Activate a workbench.
+List available workbenches or activate one.
 
 ```python
-activate_workbench(workbench_name: str) -> dict
+workbench(
+    action: Literal["list", "activate"],
+    workbench_name: str | None = None,
+) -> dict
 ```
 
-**Common workbenches:**
+`workbench_name` is required for `action="activate"`.
 
-- `PartWorkbench` - Part modeling
-- `PartDesignWorkbench` - Parametric design
-- `SketcherWorkbench` - 2D sketching
-- `DraftWorkbench` - 2D drafting
-- `MeshWorkbench` - Mesh operations
+### History
 
-### Undo/Redo
+#### history
 
-#### undo / redo
-
-Undo or redo operations.
+Undo, redo, or inspect current document history.
 
 ```python
-undo(doc_name: str | None = None) -> dict
-redo(doc_name: str | None = None) -> dict
+history(
+    action: Literal["undo", "redo", "status"],
+    doc_name: str | None = None,
+) -> dict
 ```
 
-#### get_undo_redo_status
-
-Get undo/redo availability.
-
-```python
-get_undo_redo_status(doc_name: str | None = None) -> dict
-```
+The result always includes current undo/redo counts and available transaction
+names.
 
 ### Parts Library
 
@@ -1187,25 +1117,11 @@ insert_part_from_library(
 
 ### Utility
 
-#### get_console_log
+Console diagnostics and document recomputation use the canonical tools documented
+under Execution and Document Tools:
 
-Get FreeCAD console output.
-
-```python
-get_console_log(lines: int = 50) -> dict
-```
-
-#### recompute
-
-Force recompute of all objects.
-
-```python
-recompute(doc_name: str | None = None) -> dict
-```
-
----
-
-## Validation Tools
+- `get_console_output(lines=100)`;
+- `recompute_document(doc_name=None)`.
 
 ### validate_parametric_model
 
@@ -1325,12 +1241,9 @@ Some tools require FreeCAD to be running in GUI mode. When running in headless m
 **GUI-only tools:**
 
 - `get_screenshot`
-- `set_object_visibility`
-- `set_display_mode`
-- `set_object_color`
-- `zoom_in` / `zoom_out`
+- `set_visual_properties`
 - `set_camera_position`
-- `get_selection` / `set_selection` / `clear_selection`
+- `selection`
 
 **To check mode programmatically:**
 

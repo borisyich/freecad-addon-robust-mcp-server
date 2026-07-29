@@ -66,6 +66,9 @@
   2025-11-25.
 - Added outputSchema/structuredContent, image, audio, version-header, JSON-RPC
   correlation, and missing-content regression tests.
+- Added protocol-level FastMCP `instructions` with the required FreeCAD engineering workflow.
+- Consolidated sketch geometry and constraint editing into atomic batch tools: `edit_sketch_geometry` and `edit_sketch_constraints`.
+- Consolidated GUI/view utility entry points into `set_visual_properties`, `workbench`, `history`, and `selection`; removed zoom and duplicate console/recompute tools.
 
 This project uses **component-specific versioning**. Each component has its own
 release notes and version history.

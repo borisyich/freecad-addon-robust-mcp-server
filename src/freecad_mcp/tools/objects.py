@@ -5,7 +5,7 @@ creating, editing, deleting, and inspecting objects.
 """
 
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Any, Literal
 
 
 def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> None:
@@ -947,112 +947,81 @@ _result_ = {{
         raise ValueError(result.error_traceback or "Mirror operation failed")
 
     @mcp.tool()
-    async def get_selection(doc_name: str | None = None) -> list[dict[str, Any]]:
-        """Get the current selection in FreeCAD.
-
-        Requires GUI mode.
-
-        Args:
-            doc_name: Document to check selection in. Uses active document if None.
-
-        Returns:
-            List of selected objects with:
-                - name: Object name
-                - label: Object label
-                - type_id: Object type
-                - sub_elements: List of selected sub-elements (e.g., ["Face1", "Edge2"])
-        """
-        bridge = await get_bridge()
-
-        code = f"""
-if not FreeCAD.GuiUp:
-    _result_ = []
-else:
-    sel = FreeCADGui.Selection.getSelectionEx({doc_name!r})
-    _result_ = []
-    for s in sel:
-        _result_.append({{
-            "name": s.Object.Name,
-            "label": s.Object.Label,
-            "type_id": s.Object.TypeId,
-            "sub_elements": list(s.SubElementNames) if s.SubElementNames else [],
-        }})
-"""
-        result = await bridge.execute_python(code)
-        if result.success:
-            return result.result
-        return []
-
-    @mcp.tool()
-    async def set_selection(
-        object_names: list[str],
+    async def selection(
+        action: Literal["get", "set", "clear"],
+        object_names: list[str] | None = None,
         clear_existing: bool = True,
         doc_name: str | None = None,
     ) -> dict[str, Any]:
-        """Set the selection in FreeCAD.
-
-        Requires GUI mode.
+        """Get, set, or clear the FreeCAD GUI selection.
 
         Args:
-            object_names: List of object names to select.
-            clear_existing: Whether to clear existing selection first. Defaults to True.
-            doc_name: Document containing the objects. Uses active document if None.
+            action: Selection operation.
+            object_names: Object names required for ``set``.
+            clear_existing: Clear the previous selection before ``set``.
+            doc_name: Document used for ``get`` or ``set``. Uses active document if None.
 
         Returns:
-            Dictionary with result:
-                - success: Whether operation was successful
-                - selected_count: Number of objects selected
+            Selected objects for ``get`` or the mutation result for ``set``/``clear``.
         """
-        bridge = await get_bridge()
+        if action == "set" and not object_names:
+            raise ValueError("object_names is required for action='set'")
 
+        bridge = await get_bridge()
         code = f"""
 if not FreeCAD.GuiUp:
-    _result_ = {{"success": False, "error": "GUI not available"}}
+    _result_ = {{"success": False, "action": {action!r}, "error": "GUI not available"}}
 else:
-    doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
-    if doc is None:
-        raise ValueError("No document found")
-
-    if {clear_existing}:
+    action = {action!r}
+    if action == "get":
+        selected = (
+            FreeCADGui.Selection.getSelectionEx()
+            if {doc_name!r} is None
+            else FreeCADGui.Selection.getSelectionEx({doc_name!r})
+        )
+        items = []
+        for selection_item in selected:
+            items.append({{
+                "name": selection_item.Object.Name,
+                "label": selection_item.Object.Label,
+                "type_id": selection_item.Object.TypeId,
+                "sub_elements": list(selection_item.SubElementNames) if selection_item.SubElementNames else [],
+            }})
+        _result_ = {{"success": True, "action": action, "selected": items}}
+    elif action == "clear":
         FreeCADGui.Selection.clearSelection()
-
-    count = 0
-    for name in {object_names!r}:
-        obj = doc.getObject(name)
-        if obj:
-            FreeCADGui.Selection.addSelection(obj)
-            count += 1
-
-    _result_ = {{"success": True, "selected_count": count}}
+        _result_ = {{"success": True, "action": action, "selected_count": 0}}
+    else:
+        doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
+        if doc is None:
+            raise ValueError("No document found")
+        if {clear_existing!r}:
+            FreeCADGui.Selection.clearSelection()
+        selected_names = []
+        missing_names = []
+        for object_name in {object_names!r}:
+            obj = doc.getObject(object_name)
+            if obj is None:
+                missing_names.append(object_name)
+            else:
+                FreeCADGui.Selection.addSelection(obj)
+                selected_names.append(obj.Name)
+        _result_ = {{
+            "success": not missing_names,
+            "action": action,
+            "selected_count": len(selected_names),
+            "selected_names": selected_names,
+            "missing_names": missing_names,
+        }}
 """
         result = await bridge.execute_python(code)
-        if result.success:
+        if result.success and result.result:
             return result.result
-        raise ValueError(result.error_traceback or "Set selection failed")
-
-    @mcp.tool()
-    async def clear_selection() -> dict[str, Any]:
-        """Clear the current selection in FreeCAD.
-
-        Requires GUI mode.
-
-        Returns:
-            Dictionary with result:
-                - success: Whether operation was successful
-        """
-        bridge = await get_bridge()
-
-        code = """
-if not FreeCAD.GuiUp:
-    _result_ = {"success": False, "error": "GUI not available"}
-else:
-    FreeCADGui.Selection.clearSelection()
-    _result_ = {"success": True}
-"""
-        result = await bridge.execute_python(code)
-        if result.success:
-            return result.result
-        raise ValueError(result.error_traceback or "Clear selection failed")
+        return {
+            "success": False,
+            "action": action,
+            "error": result.error_traceback or "Selection operation failed",
+        }
 
     # =========================================================================
     # Part Primitives - Additional shapes

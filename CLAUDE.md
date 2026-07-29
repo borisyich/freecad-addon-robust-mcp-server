@@ -1273,7 +1273,6 @@ These features **only work in GUI mode** and will fail or crash in headless mode
 | Camera/view control | Yes          | Not available           |
 | Display mode/color  | Yes          | Not available           |
 | Object visibility   | Yes          | Not available           |
-| Zoom in/out         | Yes          | Not available           |
 
 ### Implementing GUI-Safe Tools
 
@@ -1283,28 +1282,33 @@ These features **only work in GUI mode** and will fail or crash in headless mode
 
 ```python
 @mcp.tool()
-async def set_object_visibility(object_name: str, visible: bool) -> dict[str, Any]:
-    """Set object visibility. Requires GUI mode."""
-    bridge = await get_bridge()
+async def set_visual_properties(
+    object_name: str,
+    visible: bool | None = None,
+    color: list[float] | None = None,
+    display_mode: str | None = None,
+) -> dict[str, Any]:
+    """Set GUI display properties. Requires GUI mode."""
+    if visible is None and color is None and display_mode is None:
+        raise ValueError("Provide visible, color, or display_mode")
 
+    bridge = await get_bridge()
     code = f"""
 if not FreeCAD.GuiUp:
-    _result_ = {{"success": False, "error": "GUI not available - visibility cannot be set in headless mode"}}
+    _result_ = {{"success": False, "error": "GUI not available"}}
 else:
-    doc = FreeCAD.ActiveDocument
-    obj = doc.getObject({object_name!r})
-    if obj is None:
-        _result_ = {{"success": False, "error": f"Object not found: {object_name!r}"}}
-    elif hasattr(obj, "ViewObject") and obj.ViewObject:
-        obj.ViewObject.Visibility = {visible}
-        _result_ = {{"success": True, "visible": {visible}}}
+    obj = FreeCAD.ActiveDocument.getObject({object_name!r})
+    if obj is None or not getattr(obj, "ViewObject", None):
+        _result_ = {{"success": False, "error": "Object or ViewObject not found"}}
     else:
-        _result_ = {{"success": False, "error": "Object has no ViewObject"}}
+        # Apply only the requested visual properties.
+        _result_ = {{"success": True}}
 """
     result = await bridge.execute_python(code)
-    if result.success and result.result:
-        return result.result
-    return {{"success": False, "error": result.error_traceback or "Operation failed"}}
+    return result.result if result.success else {
+        "success": False,
+        "error": result.error_traceback or "Operation failed",
+    }
 ```
 
 #### Key Requirements
@@ -1316,14 +1320,17 @@ else:
 
 ### Tools Updated for GUI Safety
 
-The following tools in `src/freecad_mcp/tools/view.py` check `FreeCAD.GuiUp`:
+The following public tools check `FreeCAD.GuiUp` where required:
 
-- `set_object_visibility`
-- `set_display_mode`
-- `set_object_color`
-- `zoom_in` / `zoom_out`
+- `set_visual_properties`
 - `set_camera_position`
+- `set_view_angle`
+- `fit_all`
+- `selection`
 - `get_screenshot`
+
+Image inspection and enlargement use `open_image` and `open_image_tiles`; the
+public `zoom_in` and `zoom_out` tools were removed.
 
 ### Implementing Transaction Support for Undo/Redo
 
@@ -1379,15 +1386,15 @@ The following categories of tools MUST use transaction wrapping:
 - **Object deletion**: `delete_object`
 - **Boolean operations**: `boolean_operation`, `copy_object`, `mirror_object`
 - **PartDesign operations**: `pad_sketch`, `pocket_sketch`, `fillet_edges`, etc.
-- **Sketch operations**: `add_sketch_rectangle`, `add_sketch_circle`, etc.
+- **Sketch operations**: `edit_sketch_geometry`, `edit_sketch_constraints`
 - **Import operations**: `insert_part_from_library`
 
 #### Tools NOT Requiring Transactions
 
 - **Read-only operations**: `list_objects`, `inspect_object`, `get_screenshot`
 - **Export operations**: `export_step`, `export_stl` (writes to external files, not the document)
-- **View operations**: `set_view_angle`, `zoom_in`, `fit_all` (don't modify document model)
-- **Undo/redo tools**: `undo`, `redo` (manage transactions themselves)
+- **View operations**: `set_view_angle`, `fit_all`, `set_visual_properties` (do not modify document geometry)
+- **History tool**: `history(action="undo|redo|status")` (manages transactions itself)
 
 ### Running FreeCAD in Each Mode
 
@@ -1824,7 +1831,6 @@ The MCP server provides a `freecad://capabilities` resource with a curated JSON 
 | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `execute_python`             | Execute arbitrary Python code in FreeCAD's context. Use `_result_ = value` to return data. Has access to FreeCAD, App, Part, and all FreeCAD modules. |
 | `get_console_output`         | **Get recent FreeCAD console output** - useful for debugging macros and seeing error messages. Returns up to N lines of console history.              |
-| `get_console_log`            | Alternative console log access with different formatting.                                                                                             |
 | `get_freecad_version`        | Get FreeCAD version, build date, Python version, and GUI availability.                                                                                |
 | `get_connection_status`      | Check MCP bridge connection status, mode, and latency.                                                                                                |
 | `get_mcp_server_environment` | Get MCP server environment info (OS, hostname, Docker detection). Useful for verifying container vs host.                                             |
@@ -1910,11 +1916,9 @@ The MCP server provides a `freecad://capabilities` resource with a curated JSON 
 
 ### Selection Tools
 
-| Tool              | Description                     |
-| ----------------- | ------------------------------- |
-| `get_selection`   | Get currently selected objects. |
-| `set_selection`   | Select specific objects.        |
-| `clear_selection` | Clear the current selection.    |
+| Tool        | Description                                  |
+| ----------- | -------------------------------------------- |
+| `selection` | Get, set, or clear the current GUI selection. |
 
 ### PartDesign Tools (Parametric Modeling)
 
@@ -1953,48 +1957,22 @@ The MCP server provides a `freecad://capabilities` resource with a curated JSON 
 | `polar_pattern`    | Create polar/circular pattern of features. |
 | `mirrored_feature` | Mirror a feature across a plane.           |
 
-### Sketcher Geometry Tools
+### Sketcher Batch Tools
 
-| Tool                   | Description                                       |
-| ---------------------- | ------------------------------------------------- |
-| `add_sketch_line`      | Add a line to a sketch.                           |
-| `add_sketch_rectangle` | Add a rectangle to a sketch.                      |
-| `add_sketch_circle`    | Add a circle to a sketch.                         |
-| `add_sketch_arc`       | Add an arc to a sketch.                           |
-| `add_sketch_point`     | Add a point to a sketch (for hole placement).     |
-| `add_sketch_ellipse`   | Add an ellipse to a sketch.                       |
-| `add_sketch_polygon`   | Add a regular polygon to a sketch.                |
-| `add_sketch_slot`      | Add a slot (rounded rectangle) to a sketch.       |
-| `add_sketch_bspline`   | Add a B-spline curve through control points.      |
+| Tool                      | Description |
+| ------------------------- | ----------- |
+| `edit_sketch_geometry`    | Apply ordered geometry additions, deletions, external references, and construction toggles in one transaction and one recompute. |
+| `edit_sketch_constraints` | Apply ordered constraint additions or deletions in one transaction and one recompute. |
+| `get_sketch_info`         | Inspect geometry, constraints, closure, and solver status. |
 
-### Sketcher Constraint Tools
+`edit_sketch_geometry` supports `add_rectangle`, `add_circle`, `add_line`,
+`add_arc`, `add_point`, `add_ellipse`, `add_polygon`, `add_slot`, `add_bspline`,
+`add_external_geometry`, `delete_geometry`, and `toggle_construction`.
 
-| Tool                       | Description                                         |
-| -------------------------- | --------------------------------------------------- |
-| `add_sketch_constraint`    | Add any constraint type (general interface).        |
-| `constrain_horizontal`     | Constrain a line to be horizontal.                  |
-| `constrain_vertical`       | Constrain a line to be vertical.                    |
-| `constrain_coincident`     | Make two points coincident (same location).         |
-| `constrain_parallel`       | Constrain two lines to be parallel.                 |
-| `constrain_perpendicular`  | Constrain two lines to be perpendicular.            |
-| `constrain_tangent`        | Constrain two curves to be tangent.                 |
-| `constrain_equal`          | Constrain two elements to have equal length/radius. |
-| `constrain_distance`       | Set distance between two elements.                  |
-| `constrain_distance_x`     | Set horizontal distance from a point.               |
-| `constrain_distance_y`     | Set vertical distance from a point.                 |
-| `constrain_radius`         | Set the radius of a circle or arc.                  |
-| `constrain_angle`          | Set the angle of a line or between two lines.       |
-| `constrain_fix`            | Fix a point or geometry at its current position.    |
-
-### Sketcher Operations
-
-| Tool                       | Description                                              |
-| -------------------------- | -------------------------------------------------------- |
-| `add_external_geometry`    | Reference external geometry (edges/faces) in sketch.     |
-| `delete_sketch_geometry`   | Delete a geometry element from a sketch.                 |
-| `delete_sketch_constraint` | Delete a constraint from a sketch.                       |
-| `get_sketch_info`          | Get detailed info about sketch geometry and constraints. |
-| `toggle_construction`      | Toggle geometry between normal and construction mode.    |
+`edit_sketch_constraints` supports `horizontal`, `vertical`, `coincident`,
+`parallel`, `perpendicular`, `tangent`, `equal`, `distance`, `distance_x`,
+`distance_y`, `radius`, `angle`, `fix`, `delete_constraint`, and the generic
+`add_constraint` operation.
 
 ### Spreadsheet Tools (Parametric Design)
 
@@ -2022,32 +2000,26 @@ The MCP server provides a `freecad://capabilities` resource with a curated JSON 
 | `draft_text_on_surface`       | Emboss or engrave text directly on a surface.         |
 | `draft_extrude_shapestring`   | Extrude ShapeString to create 3D solid text.          |
 
-### View & GUI Tools (Require GUI Mode)
+### View & GUI Tools
 
-| Tool                    | Description                                                 |
-| ----------------------- | ----------------------------------------------------------- |
-| `get_screenshot`        | Capture a view as MCP image content with a camera-aware X/Y/Z triad composited into the PNG by default. **Requires GUI mode.** |
-| `open_image`            | Open a local image and return MCP image content. |
-| `open_image_tiles`      | Return a numbered overview and enlarged overlapping fragments. |
-| `compare_images`        | Return a labelled side-by-side visual comparison; it does not approve the checkpoint. |
-| `evaluate_model_checkpoint` | Optionally derive `continue` or `rework` from supplied checkpoint evidence. |
-| `set_view_angle`        | Set camera to standard views (front, top, isometric, etc.). |
-| `fit_all`               | Zoom to fit all objects in view.                            |
-| `zoom_in` / `zoom_out`  | Adjust zoom level.                                          |
-| `set_camera_position`   | Set exact camera position and orientation.                  |
-| `set_object_visibility` | Show/hide objects. **Requires GUI mode.**                   |
-| `set_display_mode`      | Set display mode (wireframe, shaded, etc.).                 |
-| `set_object_color`      | Change object colors. **Requires GUI mode.**                |
-| `list_workbenches`      | List available FreeCAD workbenches.                         |
-| `activate_workbench`    | Switch to a different workbench.                            |
+| Tool                        | Description |
+| --------------------------- | ----------- |
+| `get_screenshot`            | Capture a view as MCP image content with the X/Y/Z corner triad. |
+| `open_image`                | Open a local image and return MCP image content. |
+| `open_image_tiles`          | Return a numbered overview and enlarged overlapping fragments. |
+| `compare_images`            | Return a labelled side-by-side visual comparison. |
+| `evaluate_model_checkpoint` | Derive continue/rework from supplied checkpoint evidence. |
+| `set_view_angle`            | Set a standard camera view. |
+| `fit_all`                   | Fit all visible objects in view. |
+| `set_camera_position`       | Set exact camera position and orientation. |
+| `set_visual_properties`     | Set visibility, color, and/or display mode. |
+| `workbench`                 | List or activate FreeCAD workbenches. |
 
-### Undo/Redo Tools
+### History Tool
 
-| Tool                   | Description                         |
-| ---------------------- | ----------------------------------- |
-| `undo`                 | Undo the last operation.            |
-| `redo`                 | Redo an undone operation.           |
-| `get_undo_redo_status` | Get available undo/redo operations. |
+| Tool      | Description |
+| --------- | ----------- |
+| `history` | Undo, redo, or inspect available history using `action="undo|redo|status"`. |
 
 ### Validation Tools
 
@@ -2124,7 +2096,7 @@ await create_partdesign_body(name="Body")
 await create_sketch(body_name="Body", plane="XY_Plane", sketch_name="Sketch")
 
 # Add a rectangle to the sketch
-await add_sketch_rectangle(sketch_name="Sketch", x=-10, y=-10, width=20, height=20)
+await edit_sketch_geometry(sketch_name="Sketch", operations=[{"op": "add_rectangle", "x": -10, "y": -10, "width": 20, "height": 20}])
 
 # Extrude the sketch
 await pad_sketch(body_name="Body", sketch_name="Sketch", length=15)

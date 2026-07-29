@@ -106,7 +106,7 @@ mechanical model, activate `$freecad-engineering`. The canonical policy is
 | Geometry health | `validate_object`, `validate_document` |
 | Final structure report | `{FINAL_PARAMETRIC_VALIDATION_TOOL}` |
 | Visual evidence | `set_view_angle`, `get_screenshot`, `open_image`, `compare_images` |
-| Recovery | `undo`, `safe_execute`, `execute_python`, `run_macro` |
+| Recovery | `history(action="undo")`, `safe_execute`, `execute_python`, `run_macro` |
 
 GUI screenshot tools require `gui_available=true`.
 """
@@ -200,122 +200,95 @@ GUI screenshot tools require `gui_available=true`.
 - **Validate Early**: After any geometry creation, use `validate_object()` to check validity
 - **Prefer standard tools**: Use `safe_execute()` only when a standard tool is missing or demonstrably invalid
 - **Check Version Compatibility**: FreeCAD 1.x changed some APIs (see best-practices resource)
+- **Act-Observe-React**: visually inspect every major feature and do reaction therefore.
 
-## Undo/Redo Support
-All tool operations support undo:
-- `undo()` - Reverts the last operation
-- `redo()` - Redoes after undo
-- `get_undo_redo_status()` - Shows available undo/redo steps
-- `undo_if_invalid()` - Checks and reverts if geometry is invalid
-
-## Error Recovery
-- If something breaks: `undo()` reverts the last operation
-- For batch issues: `undo_if_invalid()` checks and reverts if needed
-- Always check `get_console_output()` for error messages
+## History and Recovery
+- `history(action="status")` reports available undo and redo steps.
+- `history(action="undo")` reverts the last transaction.
+- `history(action="redo")` reapplies an undone transaction.
+- `undo_if_invalid()` remains available for legacy guarded workflows.
 
 ## GUI vs Headless
-These tools require GUI mode (fail gracefully in headless):
-- `get_screenshot()`, `set_object_visibility()`, `set_object_color()`
-- Camera controls: `zoom_in()`, `zoom_out()`, `set_camera_position()`
-All other tools work in both modes.""",
+GUI-dependent tools include `get_screenshot()`, `set_visual_properties()`,
+`selection()`, and `set_camera_position()`. Use `open_image_tiles()` to inspect
+local drawings or screenshots without changing the FreeCAD camera.""",
             "partdesign": """# PartDesign Workflow Guidance
 
-## Undo Support
-All PartDesign operations are wrapped in transactions - use `undo()` to revert any operation.
-
 ## Critical Rules
-1. **Always create a Body first** - PartDesign features MUST be inside a Body
-2. **Use body.newObject()** - Don't use doc.addObject() for PartDesign objects
-3. **Attach sketches to planes** - XY_Plane, XZ_Plane, YZ_Plane, or existing faces
+1. Create or select one explicit document.
+2. Create or reuse one PartDesign Body.
+3. Establish drawing-view to FreeCAD-plane correspondence before sketching.
+4. Use one profile sketch per feature.
 
 ## Correct Workflow
 ```
-1. create_document(name="MyPart")
-2. create_partdesign_body(name="Body")
-3. create_sketch(body_name="Body", plane="XY_Plane", name="BaseSketch")
-4. add_sketch_rectangle(sketch_name="BaseSketch", x=-10, y=-10, width=20, height=20)
-5. pad_sketch(sketch_name="BaseSketch", length=15)
-6. validate_object(object_name="Pad")  # Check the result
+create_document(name="MyPart")
+create_partdesign_body(name="Body")
+create_sketch(body_name="Body", plane="XY_Plane", name="BaseSketch")
+edit_sketch_geometry(
+    sketch_name="BaseSketch",
+    operations=[{"op": "add_rectangle", "x": -10, "y": -10, "width": 20, "height": 20}],
+)
+pad_sketch(sketch_name="BaseSketch", length=15)
+validate_object(object_name="Pad")
 ```
 
-## Version Compatibility
-FreeCAD 1.x changed sketch attachment:
-- Old: `sketch.Support = (plane, [''])`
-- New: `sketch.AttachmentSupport = [(plane, '')]`
-The MCP tools handle this automatically.
+## Features
+- Additive: `pad_sketch`, `revolution_sketch`, `loft_sketches`, `sweep_sketch`.
+- Subtractive: `pocket_sketch`, `groove_sketch`, `create_hole`,
+  `create_cylindrical_cut`, `subtractive_loft`, `subtractive_pipe`.
+- Modifiers: `fillet_edges`, `chamfer_edges`, `draft_feature`, `thickness_feature`.
+- Patterns: `linear_pattern`, `polar_pattern`, `mirrored_feature`.
+- Datums: `create_datum_plane`, `create_datum_line`, `create_datum_point`.
 
-## Adding Features
-- **Additive**: pad_sketch, revolution_sketch, loft_sketches, sweep_sketch
-- **Subtractive**: pocket_sketch, groove_sketch, create_hole,
-  create_cylindrical_cut, subtractive_loft, subtractive_pipe
-- **Modifiers**: fillet_edges, chamfer_edges, draft_feature, thickness_feature
-- **Patterns**: linear_pattern, polar_pattern, mirrored_feature
-- **Datums**: create_datum_plane, create_datum_line, create_datum_point
-
-## Sketch Constraints
-Use constraints to fully define sketches:
-- Geometric: constrain_horizontal, constrain_vertical, constrain_parallel, constrain_perpendicular
-- Dimensional: constrain_distance, constrain_radius, constrain_angle
-- Special: constrain_coincident, constrain_tangent, constrain_equal, constrain_fix
+## Sketch Editing
+Use `edit_sketch_geometry` for ordered geometry edits and
+`edit_sketch_constraints` for ordered constraint edits. Each batch is one
+transaction and one recompute. Use `get_sketch_info` after editing.
 
 ## Common Mistakes
-- Creating sketch without a body (will fail on pad)
-- Using wrong plane name (must be exact: "XY_Plane" not "XY")
-- Not closing sketch contour (pad requires closed profile)
-- Not constraining sketches (use get_sketch_info to check degrees of freedom)""",
+- Creating sketch without a body (will fail on pad).
+- Using wrong plane name (must be exact: "XY_Plane" not "XY").
+- Not closing sketch contour (pad requires closed profile).
+- Not constraining sketches (use get_sketch_info to check degrees of freedom).
+
+## Completion
+Before reporting completion, call `validate_parametric_model` and summarize
+significant findings.""",
             "sketching": """# Sketch Creation Guidance
 
-## Undo Support
-All sketch operations are wrapped in transactions - use `undo()` to revert any operation.
-
 ## Basic Workflow
-1. Create sketch attached to plane or face
-2. Add geometry (rectangle, circle, line, arc, point, ellipse, polygon, slot, bspline)
-3. Add constraints to fully define the geometry
-4. Ensure sketch is closed for Pad/Pocket operations
+1. Create the sketch on the intended origin plane, datum plane, or planar face.
+2. Add ordered geometry with `edit_sketch_geometry`.
+3. Add ordered constraints with `edit_sketch_constraints`.
+4. Inspect solver and profile state with `get_sketch_info`.
 
-## Available Sketch Geometry Tools
-- `add_sketch_rectangle(sketch_name, x, y, width, height)`
-- `add_sketch_circle(sketch_name, center_x, center_y, radius)`
-- `add_sketch_line(sketch_name, x1, y1, x2, y2)`
-- `add_sketch_arc(sketch_name, center_x, center_y, radius, start_angle, end_angle)`
-- `add_sketch_point(sketch_name, x, y)`
-- `add_sketch_ellipse(sketch_name, center_x, center_y, major_radius, minor_radius)`
-- `add_sketch_polygon(sketch_name, center_x, center_y, sides, radius)`
-- `add_sketch_slot(sketch_name, x1, y1, x2, y2, width)` - rounded rectangle
-- `add_sketch_bspline(sketch_name, points)` - smooth curve through points
+## Geometry Operations
+`edit_sketch_geometry(sketch_name, operations)` supports: 
+  `add_rectangle`, `add_circle`, `add_line`, `add_arc`, `add_point`,
+  `add_ellipse`, `add_polygon`, `add_slot`, `add_bspline`;
+  `add_external_geometry`, `delete_geometry`, `toggle_construction`.
 
-## Constraint Tools
-- `constrain_horizontal(sketch_name, geometry_index)` - make line horizontal
-- `constrain_vertical(sketch_name, geometry_index)` - make line vertical
-- `constrain_distance(sketch_name, value, geo1, point1, ...)` - set distance
-- `constrain_radius(sketch_name, geometry_index, value)` - set radius
-- `constrain_coincident(sketch_name, geo1, point1, geo2, point2)` - join points
-- `constrain_parallel(sketch_name, geo1, geo2)` - make lines parallel
-- `constrain_perpendicular(sketch_name, geo1, geo2)` - make lines perpendicular
-- `get_sketch_info(sketch_name)` - check degrees of freedom
+Example:
+```
+edit_sketch_geometry(
+    sketch_name="Sketch",
+    operations=[
+        {"op": "add_circle", "center_x": 0, "center_y": 0, "radius": 5},
+        {"op": "toggle_construction", "geometry_index": 0},
+    ],
+)
+```
 
-## Coordinate System
-- X, Y coordinates are in the sketch plane
-- Origin (0, 0) is at plane center
-- Use negative values for left/down from center
+## Constraint Operations
+`edit_sketch_constraints(sketch_name, operations)` supports named operations
+such as `horizontal`, `vertical`, `coincident`, `parallel`, `perpendicular`,
+`tangent`, `equal`, `distance`, `distance_x`, `distance_y`, `radius`, `angle`,
+`fix`, plus generic `add_constraint` and `delete_constraint`.
 
-## Closed Profiles
-For Pad/Pocket operations, sketches must be closed:
-- Rectangle, Circle, Ellipse, Polygon: automatically closed
-- Lines/Arcs: must connect to form closed loop
-
-## Tips
-- Start simple: rectangle or circle first
-- Build complex shapes with multiple sketch elements
-- For `create_hole`, use one or more non-construction circles via `add_sketch_circle`; do not use sketch points
-- Prefer attaching a Hole sketch to an actual planar solid face (`Object.FaceN`)
-- Do not use `create_hole` from a PartDesign datum plane; use
-  `create_cylindrical_cut` for radial or off-face cylindrical cuts
-- Treat a PartDesign profile sketch as single-use: create a new sketch for each separate feature
-- A hole is successful only when `create_hole` returns `validated: true` and positive `removed_volume`
-- Use `get_sketch_info` to check if fully constrained (0 DOF)
-- Use `toggle_construction` for reference geometry""",
+For `create_hole`, use non-construction circles in a dedicated sketch attached
+to an actual planar solid face. Use `create_cylindrical_cut` for radial or
+off-face cuts.""",
             "boolean": """# Boolean Operations Guidance
 
 ## Available Operations
@@ -358,7 +331,7 @@ validate_object(object_name="Fused")  # Check result is valid
 
 ## Recovery
 If boolean fails:
-1. `undo()` to revert
+1. `history(action="undo")` to revert
 2. Check source shapes with `validate_object()`
 3. Ensure shapes actually intersect
 4. Try simplifying geometry""",
@@ -417,7 +390,7 @@ Check these fields:
 ### Invalid Shape
 - Geometry computation failed
 - Check parent objects (sketch, body)
-- `undo()` and try simpler approach
+- `history(action="undo")` and try simpler approach
 
 ### Recompute Errors
 - Circular dependencies
@@ -425,7 +398,7 @@ Check these fields:
 - `recompute_document()` after fixing
 
 ## Recovery Steps
-1. `undo()` - Revert last operation
+1. `history(action="undo")` - Revert last operation
 2. `validate_document()` - Check what's broken
 3. Fix or delete problem objects
 4. `recompute_document()` - Refresh everything
@@ -444,8 +417,8 @@ Automatically reverts if validation fails.""",
 
 ## Transaction Support
 **All MCP tool operations are wrapped in transactions** - this means:
-- Every operation can be undone with `undo()`
-- Use `get_undo_redo_status()` to see available undo steps
+- Every operation can be undone with `history(action="undo")`
+- Use `history(action="status")` to see available undo steps
 - Transaction names appear in FreeCAD's Edit > Undo menu
 
 ## Validation Tools
@@ -467,7 +440,7 @@ Checks all objects in document:
 ### undo_if_invalid(doc_name)
 Checks document and auto-undoes if problems:
 - Runs validation
-- If invalid objects found, calls undo()
+- If invalid objects found, calls `history(action="undo")`
 - Returns both validation and undo results
 
 ### safe_execute(code, validate_after, auto_undo_on_failure)
@@ -482,12 +455,12 @@ After any operation:
 # Option 1: Simple undo if something goes wrong
 create_box(length=10, width=10, height=10)
 # Oops, wrong size
-undo()  # Reverts the box creation
+history(action="undo")  # Reverts the box creation
 
 # Option 2: Manual validation
 result = validate_object(object_name="NewFeature")
 if not result["is_valid"]:
-    undo()
+    history(action="undo")
     # Try different approach
 
 # Option 3: Automatic protection
@@ -559,7 +532,7 @@ Create a PartDesign body to contain the parametric features:
 ### 3. Create Base Sketch
 Design the base profile:
 - Use `create_sketch` on the XY plane (or appropriate plane)
-- Add geometry with `add_sketch_rectangle`, `add_sketch_circle`, etc.
+- Add geometry with `edit_sketch_geometry`.
 - Close the sketch when complete
 
 ### 4. Extrude the Base
@@ -608,12 +581,12 @@ Use `create_sketch` with plane="{plane}" to start a new sketch.
 ### Step 2: Add Geometry
 
 {"#### Rectangle" if shape_type == "rectangle" else ""}
-{"Use `add_sketch_rectangle` with:" if shape_type == "rectangle" else ""}
+{"Use `edit_sketch_geometry` with one `add_rectangle` operation:" if shape_type == "rectangle" else ""}
 {"- x, y: Starting corner position" if shape_type == "rectangle" else ""}
 {"- width, height: Rectangle dimensions" if shape_type == "rectangle" else ""}
 
 {"#### Circle" if shape_type == "circle" else ""}
-{"Use `add_sketch_circle` with:" if shape_type == "circle" else ""}
+{"Use `edit_sketch_geometry` with one `add_circle` operation:" if shape_type == "circle" else ""}
 {"- x, y: Center position" if shape_type == "circle" else ""}
 {"- radius: Circle radius" if shape_type == "circle" else ""}
 
@@ -681,7 +654,7 @@ boolean_operation(
 ## Tips
 - Shapes must overlap for meaningful results
 - The original objects remain in the document
-- Use `set_object_visibility` to hide originals after operation
+- Use `set_visual_properties(object_name, visible=False)` to hide originals after operation
 - Recompute the document after boolean operations
 """
 

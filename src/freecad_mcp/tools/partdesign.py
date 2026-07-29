@@ -8,7 +8,9 @@ comprehensive PartDesign coverage.
 """
 
 from collections.abc import Awaitable, Callable, Mapping
-from typing import Any
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from freecad_mcp.tools._freecad_runtime_helpers import (
     BODY_RUNTIME_HELPERS,
@@ -16,6 +18,176 @@ from freecad_mcp.tools._freecad_runtime_helpers import (
     REVOLUTION_AXIS_RUNTIME_HELPERS,
     SKETCH_ANALYSIS_RUNTIME_HELPERS,
 )
+
+
+class SketchGeometryOperation(BaseModel):
+    """One atomic geometry edit for :func:`edit_sketch_geometry`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    op: Literal[
+        "add_rectangle",
+        "add_circle",
+        "add_line",
+        "add_arc",
+        "add_point",
+        "add_ellipse",
+        "add_polygon",
+        "add_slot",
+        "add_bspline",
+        "add_external_geometry",
+        "delete_geometry",
+        "toggle_construction",
+    ]
+    x: float | None = None
+    y: float | None = None
+    width: float | None = None
+    height: float | None = None
+    center_x: float | None = None
+    center_y: float | None = None
+    radius: float | None = None
+    x1: float | None = None
+    y1: float | None = None
+    x2: float | None = None
+    y2: float | None = None
+    start_angle: float | None = None
+    end_angle: float | None = None
+    major_radius: float | None = None
+    minor_radius: float | None = None
+    sides: int = 6
+    center1_x: float | None = None
+    center1_y: float | None = None
+    center2_x: float | None = None
+    center2_y: float | None = None
+    points: list[list[float]] | None = None
+    closed: bool = False
+    construction: bool = False
+    object_name: str | None = None
+    element: str | None = None
+    geometry_index: int | None = None
+
+    @model_validator(mode="after")
+    def validate_operation(self) -> "SketchGeometryOperation":
+        """Reject incomplete or nonsensical operation payloads."""
+        required_by_op = {
+            "add_rectangle": ("x", "y", "width", "height"),
+            "add_circle": ("center_x", "center_y", "radius"),
+            "add_line": ("x1", "y1", "x2", "y2"),
+            "add_arc": (
+                "center_x",
+                "center_y",
+                "radius",
+                "start_angle",
+                "end_angle",
+            ),
+            "add_point": ("x", "y"),
+            "add_ellipse": (
+                "center_x",
+                "center_y",
+                "major_radius",
+                "minor_radius",
+            ),
+            "add_polygon": ("center_x", "center_y", "radius"),
+            "add_slot": (
+                "center1_x",
+                "center1_y",
+                "center2_x",
+                "center2_y",
+                "radius",
+            ),
+            "add_bspline": ("points",),
+            "add_external_geometry": ("object_name", "element"),
+            "delete_geometry": ("geometry_index",),
+            "toggle_construction": ("geometry_index",),
+        }
+        missing = [
+            field
+            for field in required_by_op[self.op]
+            if getattr(self, field) is None
+        ]
+        if missing:
+            raise ValueError(f"{self.op} requires: {', '.join(missing)}")
+
+        positive_fields = {
+            "add_rectangle": ("width", "height"),
+            "add_circle": ("radius",),
+            "add_arc": ("radius",),
+            "add_ellipse": ("major_radius", "minor_radius"),
+            "add_polygon": ("radius",),
+            "add_slot": ("radius",),
+        }
+        for field in positive_fields.get(self.op, ()):
+            value = getattr(self, field)
+            if value is not None and value <= 0:
+                raise ValueError(f"{field} must be positive")
+
+        if self.op == "add_polygon" and self.sides < 3:
+            raise ValueError("add_polygon requires sides >= 3")
+        if self.op == "add_bspline":
+            points = self.points or []
+            if len(points) < 2 or any(len(point) != 2 for point in points):
+                raise ValueError("add_bspline requires at least two [x, y] points")
+        if self.geometry_index is not None and self.geometry_index < 0:
+            raise ValueError("geometry_index must be non-negative")
+        return self
+
+
+class SketchConstraintOperation(BaseModel):
+    """One atomic constraint edit for :func:`edit_sketch_constraints`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    op: Literal[
+        "add_constraint",
+        "horizontal",
+        "vertical",
+        "coincident",
+        "parallel",
+        "perpendicular",
+        "tangent",
+        "equal",
+        "distance",
+        "distance_x",
+        "distance_y",
+        "radius",
+        "angle",
+        "fix",
+        "delete_constraint",
+    ]
+    constraint_type: str | None = None
+    geometry1: int | None = None
+    point1: int = -1
+    geometry2: int = -2
+    point2: int = -1
+    value: float | None = None
+    constraint_index: int | None = None
+
+    @model_validator(mode="after")
+    def validate_operation(self) -> "SketchConstraintOperation":
+        """Reject incomplete constraint operations before touching FreeCAD."""
+        if self.op == "delete_constraint":
+            if self.constraint_index is None or self.constraint_index < 0:
+                raise ValueError(
+                    "delete_constraint requires a non-negative constraint_index"
+                )
+            return self
+
+        if self.geometry1 is None:
+            raise ValueError(f"{self.op} requires geometry1")
+        if self.op == "add_constraint" and not self.constraint_type:
+            raise ValueError("add_constraint requires constraint_type")
+        if self.op in {
+            "coincident",
+            "parallel",
+            "perpendicular",
+            "tangent",
+            "equal",
+        } and self.geometry2 < 0:
+            raise ValueError(f"{self.op} requires geometry2")
+        if self.op in {"distance", "distance_x", "distance_y", "radius", "angle"}:
+            if self.value is None:
+                raise ValueError(f"{self.op} requires value")
+        return self
 
 
 def register_partdesign_tools(
@@ -348,136 +520,427 @@ _result_ = {{
         raise ValueError(result.error_traceback or "Create sketch failed")
 
     @mcp.tool()
-    async def add_sketch_rectangle(
+    async def edit_sketch_geometry(
         sketch_name: str,
-        x: float,
-        y: float,
-        width: float,
-        height: float,
+        operations: list[SketchGeometryOperation],
         doc_name: str | None = None,
     ) -> dict[str, Any]:
-        """Add a rectangle to a sketch.
+        """Apply geometry edits to one sketch in a single transaction.
+
+        Supported operations are ``add_rectangle``, ``add_circle``, ``add_line``,
+        ``add_arc``, ``add_point``, ``add_ellipse``, ``add_polygon``, ``add_slot``,
+        ``add_bspline``, ``add_external_geometry``, ``delete_geometry``, and
+        ``toggle_construction``. Operations are applied sequentially, so later
+        operations may reference geometry created earlier in the same request.
 
         Args:
-            sketch_name: Name of the sketch to add rectangle to.
-            x: X coordinate of bottom-left corner.
-            y: Y coordinate of bottom-left corner.
-            width: Rectangle width.
-            height: Rectangle height.
+            sketch_name: Name of the sketch to edit.
+            operations: Ordered geometry operations.
             doc_name: Document containing the sketch. Uses active document if None.
 
         Returns:
-            Compact edit result:
-                - geometry_indices: Indices of the four added lines
-                - sketch_status: Solver, constraint, and profile diagnostics
+            Batch result with one entry per operation and final sketch diagnostics.
         """
+        if not operations:
+            raise ValueError("operations must contain at least one geometry edit")
+        normalized_operations = [
+            (
+                operation
+                if isinstance(operation, SketchGeometryOperation)
+                else SketchGeometryOperation.model_validate(operation)
+            ).model_dump()
+            for operation in operations
+        ]
         bridge = await get_bridge()
 
         code = f"""
 {SKETCH_ANALYSIS_RUNTIME_HELPERS}
 
+import math
+import Part
+import Sketcher
+
+operations = {normalized_operations!r}
 doc = (
-    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
+    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None
     else FreeCAD.ActiveDocument
 ) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
 sketch = doc.getObject({sketch_name!r})
 if sketch is None:
     raise ValueError(f"Sketch not found: {sketch_name!r}")
 
-# Wrap in transaction for undo support
-doc.openTransaction("Add Sketch Rectangle")
+operation_results = []
+doc.openTransaction("Edit Sketch Geometry")
 try:
-    # Add rectangle
-    import Part
-    import Sketcher
+    for operation in operations:
+        op = operation["op"]
 
-    x, y, w, h = {x}, {y}, {width}, {height}
+        if op == "add_rectangle":
+            x = operation["x"]
+            y = operation["y"]
+            width = operation["width"]
+            height = operation["height"]
+            first_idx = sketch.GeometryCount
+            sketch.addGeometry(Part.LineSegment(FreeCAD.Vector(x, y, 0), FreeCAD.Vector(x + width, y, 0)), False)
+            sketch.addGeometry(Part.LineSegment(FreeCAD.Vector(x + width, y, 0), FreeCAD.Vector(x + width, y + height, 0)), False)
+            sketch.addGeometry(Part.LineSegment(FreeCAD.Vector(x + width, y + height, 0), FreeCAD.Vector(x, y + height, 0)), False)
+            sketch.addGeometry(Part.LineSegment(FreeCAD.Vector(x, y + height, 0), FreeCAD.Vector(x, y, 0)), False)
+            for offset in range(4):
+                next_offset = (offset + 1) % 4
+                sketch.addConstraint(Sketcher.Constraint("Coincident", first_idx + offset, 2, first_idx + next_offset, 1))
+            operation_results.append({{"op": op, "geometry_indices": list(range(first_idx, first_idx + 4))}})
 
-    # Add lines
-    sketch.addGeometry(Part.LineSegment(FreeCAD.Vector(x, y, 0), FreeCAD.Vector(x+w, y, 0)), False)
-    sketch.addGeometry(Part.LineSegment(FreeCAD.Vector(x+w, y, 0), FreeCAD.Vector(x+w, y+h, 0)), False)
-    sketch.addGeometry(Part.LineSegment(FreeCAD.Vector(x+w, y+h, 0), FreeCAD.Vector(x, y+h, 0)), False)
-    sketch.addGeometry(Part.LineSegment(FreeCAD.Vector(x, y+h, 0), FreeCAD.Vector(x, y, 0)), False)
+        elif op == "add_circle":
+            idx = sketch.addGeometry(
+                Part.Circle(
+                    FreeCAD.Vector(operation["center_x"], operation["center_y"], 0),
+                    FreeCAD.Vector(0, 0, 1),
+                    operation["radius"],
+                ),
+                False,
+            )
+            operation_results.append({{"op": op, "geometry_index": idx}})
 
-    # Add coincident constraints to close the rectangle
-    n = sketch.GeometryCount - 4
-    sketch.addConstraint(Sketcher.Constraint("Coincident", n, 2, n+1, 1))
-    sketch.addConstraint(Sketcher.Constraint("Coincident", n+1, 2, n+2, 1))
-    sketch.addConstraint(Sketcher.Constraint("Coincident", n+2, 2, n+3, 1))
-    sketch.addConstraint(Sketcher.Constraint("Coincident", n+3, 2, n, 1))
+        elif op == "add_line":
+            idx = sketch.addGeometry(
+                Part.LineSegment(
+                    FreeCAD.Vector(operation["x1"], operation["y1"], 0),
+                    FreeCAD.Vector(operation["x2"], operation["y2"], 0),
+                ),
+                bool(operation["construction"]),
+            )
+            operation_results.append({{"op": op, "geometry_index": idx}})
+
+        elif op == "add_arc":
+            circle = Part.Circle(
+                FreeCAD.Vector(operation["center_x"], operation["center_y"], 0),
+                FreeCAD.Vector(0, 0, 1),
+                operation["radius"],
+            )
+            arc = Part.ArcOfCircle(
+                circle,
+                math.radians(operation["start_angle"]),
+                math.radians(operation["end_angle"]),
+            )
+            idx = sketch.addGeometry(arc, False)
+            operation_results.append({{"op": op, "geometry_index": idx}})
+
+        elif op == "add_point":
+            idx = sketch.addGeometry(
+                Part.Point(FreeCAD.Vector(operation["x"], operation["y"], 0)),
+                False,
+            )
+            operation_results.append({{"op": op, "geometry_index": idx}})
+
+        elif op == "add_ellipse":
+            ellipse = Part.Ellipse(
+                FreeCAD.Vector(operation["center_x"], operation["center_y"], 0),
+                operation["major_radius"],
+                operation["minor_radius"],
+            )
+            idx = sketch.addGeometry(ellipse, False)
+            operation_results.append({{"op": op, "geometry_index": idx}})
+
+        elif op == "add_polygon":
+            first_idx = sketch.GeometryCount
+            center = FreeCAD.Vector(operation["center_x"], operation["center_y"], 0)
+            sides = operation["sides"]
+            vertices = []
+            for index in range(sides):
+                angle = 2 * math.pi * index / sides - math.pi / 2
+                vertices.append(
+                    FreeCAD.Vector(
+                        center.x + operation["radius"] * math.cos(angle),
+                        center.y + operation["radius"] * math.sin(angle),
+                        0,
+                    )
+                )
+            for index in range(sides):
+                sketch.addGeometry(
+                    Part.LineSegment(vertices[index], vertices[(index + 1) % sides]),
+                    False,
+                )
+            for index in range(sides):
+                sketch.addConstraint(
+                    Sketcher.Constraint(
+                        "Coincident",
+                        first_idx + index,
+                        2,
+                        first_idx + ((index + 1) % sides),
+                        1,
+                    )
+                )
+            operation_results.append({{"op": op, "geometry_indices": list(range(first_idx, first_idx + sides))}})
+
+        elif op == "add_slot":
+            center1 = FreeCAD.Vector(operation["center1_x"], operation["center1_y"], 0)
+            center2 = FreeCAD.Vector(operation["center2_x"], operation["center2_y"], 0)
+            radius = operation["radius"]
+            direction = center2 - center1
+            if direction.Length < 1e-6:
+                raise ValueError("add_slot centers must be different")
+            direction.normalize()
+            perpendicular = FreeCAD.Vector(-direction.y, direction.x, 0)
+            point1 = center1 + perpendicular * radius
+            point2 = center1 - perpendicular * radius
+            point3 = center2 - perpendicular * radius
+            point4 = center2 + perpendicular * radius
+            angle = math.atan2(perpendicular.y, perpendicular.x)
+            first_idx = sketch.GeometryCount
+            sketch.addGeometry(
+                Part.ArcOfCircle(
+                    Part.Circle(center1, FreeCAD.Vector(0, 0, 1), radius),
+                    angle,
+                    angle + math.pi,
+                ),
+                False,
+            )
+            sketch.addGeometry(Part.LineSegment(point2, point3), False)
+            sketch.addGeometry(
+                Part.ArcOfCircle(
+                    Part.Circle(center2, FreeCAD.Vector(0, 0, 1), radius),
+                    angle + math.pi,
+                    angle + 2 * math.pi,
+                ),
+                False,
+            )
+            sketch.addGeometry(Part.LineSegment(point4, point1), False)
+            for offset in range(4):
+                sketch.addConstraint(
+                    Sketcher.Constraint(
+                        "Coincident",
+                        first_idx + offset,
+                        2,
+                        first_idx + ((offset + 1) % 4),
+                        1,
+                    )
+                )
+            operation_results.append({{"op": op, "geometry_indices": list(range(first_idx, first_idx + 4))}})
+
+        elif op == "add_bspline":
+            vectors = [FreeCAD.Vector(point[0], point[1], 0) for point in operation["points"]]
+            bspline = Part.BSplineCurve()
+            if operation["closed"]:
+                bspline.interpolate(vectors, PeriodicFlag=True)
+            else:
+                bspline.interpolate(vectors)
+            idx = sketch.addGeometry(bspline, False)
+            operation_results.append({{"op": op, "geometry_index": idx}})
+
+        elif op == "add_external_geometry":
+            referenced_object = doc.getObject(operation["object_name"])
+            if referenced_object is None:
+                raise ValueError(f"Object not found: {{operation['object_name']}}")
+            idx = sketch.addExternal(operation["object_name"], operation["element"])
+            operation_results.append({{
+                "op": op,
+                "external_geometry_index": idx,
+                "external_geometry_count": len(sketch.ExternalGeometry),
+            }})
+
+        elif op == "delete_geometry":
+            sketch.delGeometry(operation["geometry_index"])
+            operation_results.append({{
+                "op": op,
+                "deleted_geometry_index": operation["geometry_index"],
+            }})
+
+        elif op == "toggle_construction":
+            geometry_index = operation["geometry_index"]
+            sketch.toggleConstruction(geometry_index)
+            operation_results.append({{
+                "op": op,
+                "geometry_index": geometry_index,
+                "is_construction": bool(sketch.getConstruction(geometry_index)),
+            }})
+
+        else:
+            raise ValueError(f"Unsupported sketch geometry operation: {{op}}")
 
     doc.recompute()
+    sketch_status = _analyze_sketch(sketch)
     doc.commitTransaction()
 except Exception:
     doc.abortTransaction()
     raise
 
 _result_ = {{
-    "geometry_indices": list(range(n, n + 4)),
-    "sketch_status": _analyze_sketch(sketch),
+    "name": sketch.Name,
+    "operations_applied": len(operation_results),
+    "operation_results": operation_results,
+    "sketch_status": sketch_status,
 }}
 """
         result = await bridge.execute_python(code)
         if result.success:
             return result.result
-        raise ValueError(result.error_traceback or "Add rectangle failed")
+        raise ValueError(result.error_traceback or "Edit sketch geometry failed")
 
     @mcp.tool()
-    async def add_sketch_circle(
+    async def edit_sketch_constraints(
         sketch_name: str,
-        center_x: float,
-        center_y: float,
-        radius: float,
+        operations: list[SketchConstraintOperation],
         doc_name: str | None = None,
     ) -> dict[str, Any]:
-        """Add a circle to a sketch.
+        """Apply constraint edits to one sketch in a single transaction.
+
+        Named operations cover the former constraint tools. ``add_constraint``
+        retains the generic interface for less common Sketcher constraint types,
+        while ``delete_constraint`` removes an existing constraint by index.
 
         Args:
-            sketch_name: Name of the sketch to add circle to.
-            center_x: X coordinate of center.
-            center_y: Y coordinate of center.
-            radius: Circle radius.
+            sketch_name: Name of the sketch to edit.
+            operations: Ordered constraint operations.
             doc_name: Document containing the sketch. Uses active document if None.
 
         Returns:
-            Compact edit result:
-                - geometry_index: Index of the added circle
-                - sketch_status: Solver, constraint, and profile diagnostics
+            Batch result with one entry per operation and final sketch diagnostics.
         """
+        if not operations:
+            raise ValueError("operations must contain at least one constraint edit")
+        normalized_operations = [
+            (
+                operation
+                if isinstance(operation, SketchConstraintOperation)
+                else SketchConstraintOperation.model_validate(operation)
+            ).model_dump()
+            for operation in operations
+        ]
         bridge = await get_bridge()
 
         code = f"""
 {SKETCH_ANALYSIS_RUNTIME_HELPERS}
 
+import Sketcher
+
+operations = {normalized_operations!r}
 doc = (
-    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
+    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None
     else FreeCAD.ActiveDocument
 ) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
 sketch = doc.getObject({sketch_name!r})
 if sketch is None:
     raise ValueError(f"Sketch not found: {sketch_name!r}")
 
-# Wrap in transaction for undo support
-doc.openTransaction("Add Sketch Circle")
+operation_results = []
+doc.openTransaction("Edit Sketch Constraints")
 try:
-    import Part
+    for operation in operations:
+        op = operation["op"]
+        if op == "delete_constraint":
+            sketch.delConstraint(operation["constraint_index"])
+            operation_results.append({{
+                "op": op,
+                "deleted_constraint_index": operation["constraint_index"],
+            }})
+            continue
 
-    idx = sketch.addGeometry(Part.Circle(FreeCAD.Vector({center_x}, {center_y}, 0), FreeCAD.Vector(0,0,1), {radius}), False)
+        constraint_types = {{
+            "horizontal": "Horizontal",
+            "vertical": "Vertical",
+            "coincident": "Coincident",
+            "parallel": "Parallel",
+            "perpendicular": "Perpendicular",
+            "tangent": "Tangent",
+            "equal": "Equal",
+            "distance": "Distance",
+            "distance_x": "DistanceX",
+            "distance_y": "DistanceY",
+            "radius": "Radius",
+            "angle": "Angle",
+            "fix": "Block",
+        }}
+        constraint_type = (
+            operation["constraint_type"]
+            if op == "add_constraint"
+            else constraint_types[op]
+        )
+        geometry1 = operation["geometry1"]
+        point1 = operation["point1"]
+        geometry2 = operation["geometry2"]
+        point2 = operation["point2"]
+        value = operation["value"]
+
+        if constraint_type in ["Horizontal", "Vertical", "Block"]:
+            constraint = (
+                Sketcher.Constraint(constraint_type, geometry1, point1)
+                if point1 >= 0
+                else Sketcher.Constraint(constraint_type, geometry1)
+            )
+        elif constraint_type in ["Coincident", "Perpendicular", "Parallel", "Tangent", "Equal"]:
+            constraint = (
+                Sketcher.Constraint(constraint_type, geometry1, point1, geometry2, point2)
+                if point1 >= 0 and point2 >= 0
+                else Sketcher.Constraint(constraint_type, geometry1, geometry2)
+            )
+        elif constraint_type == "Symmetric":
+            if geometry2 < 0:
+                raise ValueError("Symmetric constraint requires geometry2")
+            constraint = Sketcher.Constraint(
+                constraint_type,
+                geometry1,
+                point1,
+                geometry2,
+                point2,
+                geometry2,
+            )
+        elif constraint_type in ["Distance", "DistanceX", "DistanceY"]:
+            if value is None:
+                raise ValueError(f"{{constraint_type}} constraint requires a value")
+            if geometry2 >= 0:
+                constraint = Sketcher.Constraint(
+                    constraint_type,
+                    geometry1,
+                    point1,
+                    geometry2,
+                    point2,
+                    value,
+                )
+            elif point1 >= 0:
+                constraint = Sketcher.Constraint(constraint_type, geometry1, point1, value)
+            else:
+                constraint = Sketcher.Constraint(constraint_type, geometry1, value)
+        elif constraint_type in ["Radius", "Diameter"]:
+            if value is None:
+                raise ValueError(f"{{constraint_type}} constraint requires a value")
+            constraint = Sketcher.Constraint(constraint_type, geometry1, value)
+        elif constraint_type == "Angle":
+            if value is None:
+                raise ValueError("Angle constraint requires a value")
+            constraint = (
+                Sketcher.Constraint(constraint_type, geometry1, geometry2, value)
+                if geometry2 >= 0
+                else Sketcher.Constraint(constraint_type, geometry1, value)
+            )
+        else:
+            raise ValueError(f"Unknown constraint type: {{constraint_type}}")
+
+        constraint_index = sketch.addConstraint(constraint)
+        operation_results.append({{
+            "op": op,
+            "constraint_type": constraint_type,
+            "constraint_index": constraint_index,
+        }})
+
     doc.recompute()
+    sketch_status = _analyze_sketch(sketch)
     doc.commitTransaction()
 except Exception:
     doc.abortTransaction()
     raise
 
 _result_ = {{
-    "geometry_index": idx,
-    "sketch_status": _analyze_sketch(sketch),
+    "name": sketch.Name,
+    "operations_applied": len(operation_results),
+    "operation_results": operation_results,
+    "sketch_status": sketch_status,
 }}
 """
         result = await bridge.execute_python(code)
         if result.success:
             return result.result
-        raise ValueError(result.error_traceback or "Add circle failed")
+        raise ValueError(result.error_traceback or "Edit sketch constraints failed")
+
 
     @mcp.tool()
     async def pad_sketch(
@@ -1265,8 +1728,8 @@ for index, geometry in enumerate(sketch.Geometry):
 if profile_circle_count == 0:
     raise ValueError(
         "Hole sketch contains no non-construction circles. "
-        "Use add_sketch_circle for each hole location; sketch points are not "
-        "a reliable PartDesign::Hole profile in FreeCAD 1.0.x."
+        "Use edit_sketch_geometry with add_circle for each hole location; "
+        "sketch points are not a reliable PartDesign::Hole profile in FreeCAD 1.0.x."
     )
 if unsupported_geometry:
     raise ValueError(
@@ -1972,206 +2435,6 @@ _result_ = {{
             return result.result
         raise ValueError(result.error_traceback or "Mirrored feature failed")
 
-    @mcp.tool()
-    async def add_sketch_line(
-        sketch_name: str,
-        x1: float,
-        y1: float,
-        x2: float,
-        y2: float,
-        construction: bool = False,
-        doc_name: str | None = None,
-    ) -> dict[str, Any]:
-        """Add a line to a sketch.
-
-        Args:
-            sketch_name: Name of the sketch to add line to.
-            x1: X coordinate of start point.
-            y1: Y coordinate of start point.
-            x2: X coordinate of end point.
-            y2: Y coordinate of end point.
-            construction: Whether this is a construction line. Defaults to False.
-            doc_name: Document containing the sketch. Uses active document if None.
-
-        Returns:
-            Compact edit result:
-                - name: Sketch name
-                - geometry_index: Index of the added line
-                - sketch_status: Solver, constraint, and profile diagnostics
-        """
-        bridge = await get_bridge()
-
-        code = f"""
-{SKETCH_ANALYSIS_RUNTIME_HELPERS}
-
-doc = (
-    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
-    else FreeCAD.ActiveDocument
-) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
-sketch = doc.getObject({sketch_name!r})
-if sketch is None:
-    raise ValueError(f"Sketch not found: {sketch_name!r}")
-
-# Wrap in transaction for undo support
-doc.openTransaction("Add Sketch Line")
-try:
-    import Part
-
-    idx = sketch.addGeometry(
-        Part.LineSegment(
-            FreeCAD.Vector({x1}, {y1}, 0),
-            FreeCAD.Vector({x2}, {y2}, 0)
-        ),
-        {construction}
-    )
-    doc.recompute()
-    doc.commitTransaction()
-except Exception:
-    doc.abortTransaction()
-    raise
-
-_result_ = {{
-    "sketch_name": sketch.Name,
-    "geometry_index": idx,
-    "sketch_status": _analyze_sketch(sketch),
-}}
-"""
-        result = await bridge.execute_python(code)
-        if result.success:
-            return result.result
-        raise ValueError(result.error_traceback or "Add line failed")
-
-    @mcp.tool()
-    async def add_sketch_arc(
-        sketch_name: str,
-        center_x: float,
-        center_y: float,
-        radius: float,
-        start_angle: float,
-        end_angle: float,
-        doc_name: str | None = None,
-    ) -> dict[str, Any]:
-        """Add an arc to a sketch.
-
-        Args:
-            sketch_name: Name of the sketch to add arc to.
-            center_x: X coordinate of center.
-            center_y: Y coordinate of center.
-            radius: Arc radius.
-            start_angle: Start angle in degrees.
-            end_angle: End angle in degrees.
-            doc_name: Document containing the sketch. Uses active document if None.
-
-        Returns:
-            Compact edit result:
-                - name: Sketch name
-                - geometry_index: Index of the added arc
-                - sketch_status: Solver, constraint, and profile diagnostics
-        """
-        bridge = await get_bridge()
-
-        code = f"""
-{SKETCH_ANALYSIS_RUNTIME_HELPERS}
-
-doc = (
-    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
-    else FreeCAD.ActiveDocument
-) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
-sketch = doc.getObject({sketch_name!r})
-if sketch is None:
-    raise ValueError(f"Sketch not found: {sketch_name!r}")
-
-# Wrap in transaction for undo support
-doc.openTransaction("Add Sketch Arc")
-try:
-    import Part
-    import math
-
-    center = FreeCAD.Vector({center_x}, {center_y}, 0)
-    start_rad = math.radians({start_angle})
-    end_rad = math.radians({end_angle})
-
-    arc = Part.ArcOfCircle(
-        Part.Circle(center, FreeCAD.Vector(0, 0, 1), {radius}),
-        start_rad,
-        end_rad
-    )
-    idx = sketch.addGeometry(arc, False)
-    doc.recompute()
-    doc.commitTransaction()
-except Exception:
-    doc.abortTransaction()
-    raise
-
-_result_ = {{
-    "name": sketch.Name,
-    "geometry_index": idx,
-    "sketch_status": _analyze_sketch(sketch),
-}}
-"""
-        result = await bridge.execute_python(code)
-        if result.success:
-            return result.result
-        raise ValueError(result.error_traceback or "Add arc failed")
-
-    @mcp.tool()
-    async def add_sketch_point(
-        sketch_name: str,
-        x: float,
-        y: float,
-        doc_name: str | None = None,
-    ) -> dict[str, Any]:
-        """Add a point to a sketch.
-
-        Points are useful as reference locations. For create_hole on FreeCAD 1.0.x, use non-construction circles instead.
-
-        Args:
-            sketch_name: Name of the sketch to add point to.
-            x: X coordinate.
-            y: Y coordinate.
-            doc_name: Document containing the sketch. Uses active document if None.
-
-        Returns:
-            Compact edit result:
-                - name: Sketch name
-                - geometry_index: Index of the added point
-                - sketch_status: Solver, constraint, and profile diagnostics
-        """
-        bridge = await get_bridge()
-
-        code = f"""
-{SKETCH_ANALYSIS_RUNTIME_HELPERS}
-
-doc = (
-    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
-    else FreeCAD.ActiveDocument
-) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
-sketch = doc.getObject({sketch_name!r})
-if sketch is None:
-    raise ValueError(f"Sketch not found: {sketch_name!r}")
-
-# Wrap in transaction for undo support
-doc.openTransaction("Add Sketch Point")
-try:
-    import Part
-
-    idx = sketch.addGeometry(Part.Point(FreeCAD.Vector({x}, {y}, 0)), False)
-    doc.recompute()
-    doc.commitTransaction()
-except Exception:
-    doc.abortTransaction()
-    raise
-
-_result_ = {{
-    "name": sketch.Name,
-    "geometry_index": idx,
-    "sketch_status": _analyze_sketch(sketch),
-}}
-"""
-        result = await bridge.execute_python(code)
-        if result.success:
-            return result.result
-        raise ValueError(result.error_traceback or "Add point failed")
 
     @mcp.tool()
     async def loft_sketches(
@@ -2942,1000 +3205,8 @@ except Exception:
         raise ValueError(result.error_traceback or "Subtractive pipe failed")
 
     # =========================================================================
-    # Sketcher Geometry - Additional shapes
+    # Sketcher inspection
     # =========================================================================
-
-    @mcp.tool()
-    async def add_sketch_ellipse(
-        sketch_name: str,
-        center_x: float,
-        center_y: float,
-        major_radius: float,
-        minor_radius: float,
-        doc_name: str | None = None,
-    ) -> dict[str, Any]:
-        """Add an ellipse to a sketch.
-
-        Args:
-            sketch_name: Name of the sketch to add ellipse to.
-            center_x: X coordinate of center.
-            center_y: Y coordinate of center.
-            major_radius: Semi-major axis radius.
-            minor_radius: Semi-minor axis radius.
-            doc_name: Document containing the sketch. Uses active document if None.
-
-        Returns:
-            Compact edit result:
-                - name: Sketch name
-                - geometry_index: Index of the added ellipse
-                - sketch_status: Solver, constraint, and profile diagnostics
-        """
-        bridge = await get_bridge()
-
-        code = f"""
-{SKETCH_ANALYSIS_RUNTIME_HELPERS}
-
-doc = (
-    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
-    else FreeCAD.ActiveDocument
-) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
-sketch = doc.getObject({sketch_name!r})
-if sketch is None:
-    raise ValueError(f"Sketch not found: {sketch_name!r}")
-
-# Wrap in transaction for undo support
-doc.openTransaction("Add Sketch Ellipse")
-try:
-    import Part
-
-    center = FreeCAD.Vector({center_x}, {center_y}, 0)
-    ellipse = Part.Ellipse(center, {major_radius}, {minor_radius})
-    idx = sketch.addGeometry(ellipse, False)
-    doc.recompute()
-    doc.commitTransaction()
-
-    _result_ = {{
-        "name": sketch.Name,
-        "geometry_index": idx,
-        "sketch_status": _analyze_sketch(sketch),
-    }}
-except Exception:
-    doc.abortTransaction()
-    raise
-"""
-        result = await bridge.execute_python(code)
-        if result.success:
-            return result.result
-        raise ValueError(result.error_traceback or "Add sketch ellipse failed")
-
-    @mcp.tool()
-    async def add_sketch_polygon(
-        sketch_name: str,
-        center_x: float,
-        center_y: float,
-        radius: float,
-        sides: int = 6,
-        doc_name: str | None = None,
-    ) -> dict[str, Any]:
-        """Add a regular polygon to a sketch.
-
-        Args:
-            sketch_name: Name of the sketch to add polygon to.
-            center_x: X coordinate of center.
-            center_y: Y coordinate of center.
-            radius: Circumscribed circle radius.
-            sides: Number of sides (3 for triangle, 6 for hexagon, etc.).
-            doc_name: Document containing the sketch. Uses active document if None.
-
-        Returns:
-            Compact edit result:
-                - name: Sketch name
-                - geometry_indices: Indices of the added polygon edges
-                - sketch_status: Solver, constraint, and profile diagnostics
-        """
-        bridge = await get_bridge()
-
-        code = f"""
-{SKETCH_ANALYSIS_RUNTIME_HELPERS}
-
-import math
-import Part
-import Sketcher
-
-doc = (
-    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
-    else FreeCAD.ActiveDocument
-) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
-sketch = doc.getObject({sketch_name!r})
-if sketch is None:
-    raise ValueError(f"Sketch not found: {sketch_name!r}")
-
-# Wrap in transaction for undo support
-doc.openTransaction("Add Sketch Polygon")
-try:
-    center = FreeCAD.Vector({center_x}, {center_y}, 0)
-    radius = {radius}
-    sides = {sides}
-
-    # Calculate vertices
-    vertices = []
-    for i in range(sides):
-        angle = 2 * math.pi * i / sides - math.pi / 2  # Start from top
-        x = center.x + radius * math.cos(angle)
-        y = center.y + radius * math.sin(angle)
-        vertices.append(FreeCAD.Vector(x, y, 0))
-
-    # Add edges
-    first_idx = sketch.GeometryCount
-    for i in range(sides):
-        p1 = vertices[i]
-        p2 = vertices[(i + 1) % sides]
-        sketch.addGeometry(Part.LineSegment(p1, p2), False)
-
-    # Add coincident constraints to close the polygon
-    for i in range(sides):
-        idx1 = first_idx + i
-        idx2 = first_idx + ((i + 1) % sides)
-        sketch.addConstraint(Sketcher.Constraint("Coincident", idx1, 2, idx2, 1))
-
-    doc.recompute()
-    doc.commitTransaction()
-
-    _result_ = {{
-        "name": sketch.Name,
-        "geometry_indices": list(range(first_idx, sketch.GeometryCount)),
-        "sketch_status": _analyze_sketch(sketch),
-    }}
-except Exception:
-    doc.abortTransaction()
-    raise
-"""
-        result = await bridge.execute_python(code)
-        if result.success:
-            return result.result
-        raise ValueError(result.error_traceback or "Add sketch polygon failed")
-
-    @mcp.tool()
-    async def add_sketch_slot(
-        sketch_name: str,
-        center1_x: float,
-        center1_y: float,
-        center2_x: float,
-        center2_y: float,
-        radius: float,
-        doc_name: str | None = None,
-    ) -> dict[str, Any]:
-        """Add a slot (obround/stadium shape) to a sketch.
-
-        A slot is two semicircles connected by parallel lines.
-
-        Args:
-            sketch_name: Name of the sketch to add slot to.
-            center1_x: X coordinate of first arc center.
-            center1_y: Y coordinate of first arc center.
-            center2_x: X coordinate of second arc center.
-            center2_y: Y coordinate of second arc center.
-            radius: Radius of the semicircular ends.
-            doc_name: Document containing the sketch. Uses active document if None.
-
-        Returns:
-            Compact edit result:
-                - name: Sketch name
-                - geometry_indices: Indices of the added slot geometry
-                - sketch_status: Solver, constraint, and profile diagnostics
-        """
-        bridge = await get_bridge()
-
-        code = f"""
-{SKETCH_ANALYSIS_RUNTIME_HELPERS}
-
-import math
-import Part
-import Sketcher
-
-doc = (
-    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
-    else FreeCAD.ActiveDocument
-) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
-sketch = doc.getObject({sketch_name!r})
-if sketch is None:
-    raise ValueError(f"Sketch not found: {sketch_name!r}")
-
-# Wrap in transaction for undo support
-doc.openTransaction("Add Sketch Slot")
-try:
-    c1 = FreeCAD.Vector({center1_x}, {center1_y}, 0)
-    c2 = FreeCAD.Vector({center2_x}, {center2_y}, 0)
-    radius = {radius}
-
-    # Calculate direction and perpendicular
-    direction = c2 - c1
-    length = direction.Length
-    if length < 1e-6:
-        raise ValueError("Centers must be different")
-
-    direction.normalize()
-    perp = FreeCAD.Vector(-direction.y, direction.x, 0)
-
-    # Calculate the four corner points
-    p1 = c1 + perp * radius
-    p2 = c1 - perp * radius
-    p3 = c2 - perp * radius
-    p4 = c2 + perp * radius
-
-    first_idx = sketch.GeometryCount
-
-    # Add first arc (at c1)
-    angle1 = math.atan2(perp.y, perp.x)
-    arc1 = Part.ArcOfCircle(
-        Part.Circle(c1, FreeCAD.Vector(0, 0, 1), radius),
-        angle1,
-        angle1 + math.pi
-    )
-    sketch.addGeometry(arc1, False)
-
-    # Add line from p2 to p3
-    sketch.addGeometry(Part.LineSegment(p2, p3), False)
-
-    # Add second arc (at c2)
-    arc2 = Part.ArcOfCircle(
-        Part.Circle(c2, FreeCAD.Vector(0, 0, 1), radius),
-        angle1 + math.pi,
-        angle1 + 2 * math.pi
-    )
-    sketch.addGeometry(arc2, False)
-
-    # Add line from p4 to p1
-    sketch.addGeometry(Part.LineSegment(p4, p1), False)
-
-    # Add coincident constraints to connect the geometry
-    sketch.addConstraint(Sketcher.Constraint("Coincident", first_idx, 2, first_idx + 1, 1))
-    sketch.addConstraint(Sketcher.Constraint("Coincident", first_idx + 1, 2, first_idx + 2, 1))
-    sketch.addConstraint(Sketcher.Constraint("Coincident", first_idx + 2, 2, first_idx + 3, 1))
-    sketch.addConstraint(Sketcher.Constraint("Coincident", first_idx + 3, 2, first_idx, 1))
-
-    doc.recompute()
-    doc.commitTransaction()
-
-    _result_ = {{
-        "name": sketch.Name,
-        "geometry_indices": list(range(first_idx, sketch.GeometryCount)),
-        "sketch_status": _analyze_sketch(sketch),
-    }}
-except Exception:
-    doc.abortTransaction()
-    raise
-"""
-        result = await bridge.execute_python(code)
-        if result.success:
-            return result.result
-        raise ValueError(result.error_traceback or "Add sketch slot failed")
-
-    @mcp.tool()
-    async def add_sketch_bspline(
-        sketch_name: str,
-        points: list[list[float]],
-        closed: bool = False,
-        doc_name: str | None = None,
-    ) -> dict[str, Any]:
-        """Add a B-spline curve to a sketch.
-
-        Args:
-            sketch_name: Name of the sketch to add B-spline to.
-            points: List of control points, each as [x, y].
-            closed: Whether to close the spline. Defaults to False.
-            doc_name: Document containing the sketch. Uses active document if None.
-
-        Returns:
-            Compact edit result:
-                - name: Sketch name
-                - geometry_index: Index of the added B-spline
-                - sketch_status: Solver, constraint, and profile diagnostics
-        """
-        bridge = await get_bridge()
-
-        code = f"""
-{SKETCH_ANALYSIS_RUNTIME_HELPERS}
-
-import Part
-
-doc = (
-    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
-    else FreeCAD.ActiveDocument
-) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
-sketch = doc.getObject({sketch_name!r})
-if sketch is None:
-    raise ValueError(f"Sketch not found: {sketch_name!r}")
-
-points = {points!r}
-if len(points) < 2:
-    raise ValueError("Need at least 2 control points")
-
-# Wrap in transaction for undo support
-doc.openTransaction("Add Sketch BSpline")
-try:
-    vectors = [FreeCAD.Vector(p[0], p[1], 0) for p in points]
-
-    if {closed}:
-        bspline = Part.BSplineCurve()
-        bspline.interpolate(vectors, PeriodicFlag=True)
-    else:
-        bspline = Part.BSplineCurve()
-        bspline.interpolate(vectors)
-
-    idx = sketch.addGeometry(bspline, False)
-    doc.recompute()
-    doc.commitTransaction()
-
-    _result_ = {{
-        "name": sketch.Name,
-        "geometry_index": idx,
-        "sketch_status": _analyze_sketch(sketch),
-    }}
-except Exception:
-    doc.abortTransaction()
-    raise
-"""
-        result = await bridge.execute_python(code)
-        if result.success:
-            return result.result
-        raise ValueError(result.error_traceback or "Add sketch B-spline failed")
-
-    # =========================================================================
-    # Sketcher Constraints
-    # =========================================================================
-
-    @mcp.tool()
-    async def add_sketch_constraint(
-        sketch_name: str,
-        constraint_type: str,
-        geometry1: int,
-        point1: int = -1,
-        geometry2: int = -2,
-        point2: int = -1,
-        value: float | None = None,
-        doc_name: str | None = None,
-    ) -> dict[str, Any]:
-        """Add a constraint to a sketch.
-
-        This is a general-purpose constraint tool. For common constraints,
-        use the specific constraint tools (constrain_horizontal, etc.).
-
-        Args:
-            sketch_name: Name of the sketch.
-            constraint_type: Type of constraint. Options:
-                - Geometric: "Coincident", "Horizontal", "Vertical", "Parallel",
-                  "Perpendicular", "Tangent", "Equal", "Symmetric", "Block"
-                - Dimensional: "Distance", "DistanceX", "DistanceY", "Radius",
-                  "Diameter", "Angle"
-            geometry1: Index of first geometry element.
-            point1: Point index on first geometry (1=start, 2=end, 3=center).
-                    Use -1 for edge itself.
-            geometry2: Index of second geometry element. Use -2 for external.
-            point2: Point index on second geometry.
-            value: Value for dimensional constraints (distance, angle, etc.).
-            doc_name: Document containing the sketch. Uses active document if None.
-
-        Returns:
-            Compact edit result:
-                - name: Sketch name
-                - constraint_index: Index of the added constraint
-                - sketch_status: Solver, constraint, and profile diagnostics
-        """
-        bridge = await get_bridge()
-
-        code = f"""
-{SKETCH_ANALYSIS_RUNTIME_HELPERS}
-
-import Sketcher
-
-doc = (
-    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
-    else FreeCAD.ActiveDocument
-) or FreeCAD.newDocument({doc_name!r} or "Untitled")
-sketch = doc.getObject({sketch_name!r})
-if sketch is None:
-    raise ValueError(
-        f"Sketch not found: {sketch_name!r}",
-        "Firstly you need to create sketch by tool `create_sketch`"
-    )
-
-# Wrap in transaction for undo support
-doc.openTransaction("Add Sketch Constraint")
-try:
-    ctype = {constraint_type!r}
-    g1, p1, g2, p2 = {geometry1}, {point1}, {geometry2}, {point2}
-    value = {value!r}
-
-    # Build constraint based on type and parameters
-    if ctype in ["Horizontal", "Vertical", "Block"]:
-        if p1 >= 0:
-            constraint = Sketcher.Constraint(ctype, g1, p1)
-        else:
-            constraint = Sketcher.Constraint(ctype, g1)
-    elif ctype in ["Coincident", "Perpendicular", "Parallel", "Tangent", "Equal"]:
-        if p1 >= 0 and p2 >= 0:
-            constraint = Sketcher.Constraint(ctype, g1, p1, g2, p2)
-        else:
-            constraint = Sketcher.Constraint(ctype, g1, g2)
-    elif ctype == "Symmetric":
-        # Symmetric requires geometry2 to be the symmetry line index
-        # Points g1,p1 and g2,p2 are symmetric about line geometry2
-        if g2 < 0:
-            raise ValueError("Symmetric constraint requires geometry2 as the symmetry line index")
-        constraint = Sketcher.Constraint(ctype, g1, p1, g2, p2, geometry2)
-    elif ctype in ["Distance", "DistanceX", "DistanceY"]:
-        if value is None:
-            raise ValueError(f"{{ctype}} constraint requires a value")
-        if g2 >= 0:
-            constraint = Sketcher.Constraint(ctype, g1, p1, g2, p2, value)
-        elif p1 >= 0:
-            constraint = Sketcher.Constraint(ctype, g1, p1, value)
-        else:
-            constraint = Sketcher.Constraint(ctype, g1, value)
-    elif ctype in ["Radius", "Diameter"]:
-        if value is None:
-            raise ValueError(f"{{ctype}} constraint requires a value")
-        constraint = Sketcher.Constraint(ctype, g1, value)
-    elif ctype == "Angle":
-        if value is None:
-            raise ValueError("Angle constraint requires a value")
-        if g2 >= 0:
-            constraint = Sketcher.Constraint(ctype, g1, g2, value)
-        else:
-            constraint = Sketcher.Constraint(ctype, g1, value)
-    else:
-        raise ValueError(f"Unknown constraint type: {{ctype}}")
-
-    idx = sketch.addConstraint(constraint)
-    doc.recompute()
-    doc.commitTransaction()
-
-    _result_ = {{
-        "name": sketch.Name,
-        "constraint_index": idx,
-        "sketch_status": _analyze_sketch(sketch),
-    }}
-except Exception:
-    doc.abortTransaction()
-    raise
-"""
-        result = await bridge.execute_python(code)
-        if result.success:
-            return result.result
-        raise ValueError(result.error_traceback or "Add constraint failed")
-
-    @mcp.tool()
-    async def constrain_horizontal(
-        sketch_name: str,
-        geometry_index: int,
-        doc_name: str | None = None,
-    ) -> dict[str, Any]:
-        """Constrain a line to be horizontal.
-
-        Args:
-            sketch_name: Name of the sketch.
-            geometry_index: Index of the line geometry.
-            doc_name: Document containing the sketch. Uses active document if None.
-
-        Returns:
-            Dictionary with constraint info:
-                - name: Sketch name
-                - constraint_index: Index of the added constraint
-                - sketch_status: Solver, constraint, and profile diagnostics
-        """
-        return await add_sketch_constraint(
-            sketch_name, "Horizontal", geometry_index, doc_name=doc_name
-        )
-
-    @mcp.tool()
-    async def constrain_vertical(
-        sketch_name: str,
-        geometry_index: int,
-        doc_name: str | None = None,
-    ) -> dict[str, Any]:
-        """Constrain a line to be vertical.
-
-        Args:
-            sketch_name: Name of the sketch.
-            geometry_index: Index of the line geometry.
-            doc_name: Document containing the sketch. Uses active document if None.
-
-        Returns:
-            Dictionary with constraint info:
-                - name: Sketch name
-                - constraint_index: Index of the added constraint
-                - sketch_status: Solver, constraint, and profile diagnostics
-        """
-        return await add_sketch_constraint(
-            sketch_name, "Vertical", geometry_index, doc_name=doc_name
-        )
-
-    @mcp.tool()
-    async def constrain_coincident(
-        sketch_name: str,
-        geometry1: int,
-        point1: int,
-        geometry2: int,
-        point2: int,
-        doc_name: str | None = None,
-    ) -> dict[str, Any]:
-        """Constrain two points to be coincident (same location).
-
-        Args:
-            sketch_name: Name of the sketch.
-            geometry1: Index of first geometry element.
-            point1: Point on first geometry (1=start, 2=end, 3=center).
-            geometry2: Index of second geometry element.
-            point2: Point on second geometry.
-            doc_name: Document containing the sketch. Uses active document if None.
-
-        Returns:
-            Dictionary with constraint info:
-                - name: Sketch name
-                - constraint_index: Index of the added constraint
-                - sketch_status: Solver, constraint, and profile diagnostics
-        """
-        return await add_sketch_constraint(
-            sketch_name,
-            "Coincident",
-            geometry1,
-            point1,
-            geometry2,
-            point2,
-            doc_name=doc_name,
-        )
-
-    @mcp.tool()
-    async def constrain_parallel(
-        sketch_name: str,
-        geometry1: int,
-        geometry2: int,
-        doc_name: str | None = None,
-    ) -> dict[str, Any]:
-        """Constrain two lines to be parallel.
-
-        Args:
-            sketch_name: Name of the sketch.
-            geometry1: Index of first line.
-            geometry2: Index of second line.
-            doc_name: Document containing the sketch. Uses active document if None.
-
-        Returns:
-            Dictionary with constraint info:
-                - name: Sketch name
-                - constraint_index: Index of the added constraint
-                - sketch_status: Solver, constraint, and profile diagnostics
-        """
-        return await add_sketch_constraint(
-            sketch_name, "Parallel", geometry1, -1, geometry2, -1, doc_name=doc_name
-        )
-
-    @mcp.tool()
-    async def constrain_perpendicular(
-        sketch_name: str,
-        geometry1: int,
-        geometry2: int,
-        doc_name: str | None = None,
-    ) -> dict[str, Any]:
-        """Constrain two lines to be perpendicular.
-
-        Args:
-            sketch_name: Name of the sketch.
-            geometry1: Index of first line.
-            geometry2: Index of second line.
-            doc_name: Document containing the sketch. Uses active document if None.
-
-        Returns:
-            Dictionary with constraint info:
-                - name: Sketch name
-                - constraint_index: Index of the added constraint
-                - sketch_status: Solver, constraint, and profile diagnostics
-        """
-        return await add_sketch_constraint(
-            sketch_name,
-            "Perpendicular",
-            geometry1,
-            -1,
-            geometry2,
-            -1,
-            doc_name=doc_name,
-        )
-
-    @mcp.tool()
-    async def constrain_tangent(
-        sketch_name: str,
-        geometry1: int,
-        geometry2: int,
-        doc_name: str | None = None,
-    ) -> dict[str, Any]:
-        """Constrain two curves to be tangent.
-
-        Args:
-            sketch_name: Name of the sketch.
-            geometry1: Index of first curve.
-            geometry2: Index of second curve.
-            doc_name: Document containing the sketch. Uses active document if None.
-
-        Returns:
-            Dictionary with constraint info:
-                - name: Sketch name
-                - constraint_index: Index of the added constraint
-                - sketch_status: Solver, constraint, and profile diagnostics
-        """
-        return await add_sketch_constraint(
-            sketch_name, "Tangent", geometry1, -1, geometry2, -1, doc_name=doc_name
-        )
-
-    @mcp.tool()
-    async def constrain_equal(
-        sketch_name: str,
-        geometry1: int,
-        geometry2: int,
-        doc_name: str | None = None,
-    ) -> dict[str, Any]:
-        """Constrain two elements to have equal size (length or radius).
-
-        Args:
-            sketch_name: Name of the sketch.
-            geometry1: Index of first element.
-            geometry2: Index of second element.
-            doc_name: Document containing the sketch. Uses active document if None.
-
-        Returns:
-            Dictionary with constraint info:
-                - name: Sketch name
-                - constraint_index: Index of the added constraint
-                - sketch_status: Solver, constraint, and profile diagnostics
-        """
-        return await add_sketch_constraint(
-            sketch_name, "Equal", geometry1, -1, geometry2, -1, doc_name=doc_name
-        )
-
-    @mcp.tool()
-    async def constrain_distance(
-        sketch_name: str,
-        geometry1: int,
-        distance: float,
-        point1: int = -1,
-        geometry2: int = -2,
-        point2: int = -1,
-        doc_name: str | None = None,
-    ) -> dict[str, Any]:
-        """Add a distance constraint.
-
-        Can constrain:
-        - Line length (geometry1 only)
-        - Point to point distance (geometry1+point1, geometry2+point2)
-        - Point to line distance (geometry1+point1, geometry2 as line)
-
-        Args:
-            sketch_name: Name of the sketch.
-            geometry1: Index of first geometry element.
-            distance: The distance value.
-            point1: Point on first geometry (1=start, 2=end). -1 for line length.
-            geometry2: Index of second geometry element. -2 if not used.
-            point2: Point on second geometry.
-            doc_name: Document containing the sketch. Uses active document if None.
-
-        Returns:
-            Dictionary with constraint info:
-                - name: Sketch name
-                - constraint_index: Index of the added constraint
-                - sketch_status: Solver, constraint, and profile diagnostics
-        """
-        return await add_sketch_constraint(
-            sketch_name,
-            "Distance",
-            geometry1,
-            point1,
-            geometry2,
-            point2,
-            distance,
-            doc_name,
-        )
-
-    @mcp.tool()
-    async def constrain_distance_x(
-        sketch_name: str,
-        geometry: int,
-        point: int,
-        distance: float,
-        doc_name: str | None = None,
-    ) -> dict[str, Any]:
-        """Constrain horizontal distance from origin or between points.
-
-        Args:
-            sketch_name: Name of the sketch.
-            geometry: Index of geometry element.
-            point: Point index (1=start, 2=end, 3=center).
-            distance: The horizontal distance value.
-            doc_name: Document containing the sketch. Uses active document if None.
-
-        Returns:
-            Dictionary with constraint info:
-                - name: Sketch name
-                - constraint_index: Index of the added constraint
-                - sketch_status: Solver, constraint, and profile diagnostics
-        """
-        return await add_sketch_constraint(
-            sketch_name, "DistanceX", geometry, point, -2, -1, distance, doc_name
-        )
-
-    @mcp.tool()
-    async def constrain_distance_y(
-        sketch_name: str,
-        geometry: int,
-        point: int,
-        distance: float,
-        doc_name: str | None = None,
-    ) -> dict[str, Any]:
-        """Constrain vertical distance from origin or between points.
-
-        Args:
-            sketch_name: Name of the sketch.
-            geometry: Index of geometry element.
-            point: Point index (1=start, 2=end, 3=center).
-            distance: The vertical distance value.
-            doc_name: Document containing the sketch. Uses active document if None.
-
-        Returns:
-            Dictionary with constraint info:
-                - name: Sketch name
-                - constraint_index: Index of the added constraint
-                - sketch_status: Solver, constraint, and profile diagnostics        """
-        return await add_sketch_constraint(
-            sketch_name, "DistanceY", geometry, point, -2, -1, distance, doc_name
-        )
-
-    @mcp.tool()
-    async def constrain_radius(
-        sketch_name: str,
-        geometry_index: int,
-        radius: float,
-        doc_name: str | None = None,
-    ) -> dict[str, Any]:
-        """Constrain the radius of a circle or arc.
-
-        Args:
-            sketch_name: Name of the sketch.
-            geometry_index: Index of the circle/arc geometry.
-            radius: The radius value.
-            doc_name: Document containing the sketch. Uses active document if None.
-
-        Returns:
-            Dictionary with constraint info:
-                - name: Sketch name
-                - constraint_index: Index of the added constraint
-                - sketch_status: Solver, constraint, and profile diagnostics        """
-        return await add_sketch_constraint(
-            sketch_name, "Radius", geometry_index, -1, -2, -1, radius, doc_name
-        )
-
-    @mcp.tool()
-    async def constrain_angle(
-        sketch_name: str,
-        geometry1: int,
-        angle: float,
-        geometry2: int = -2,
-        doc_name: str | None = None,
-    ) -> dict[str, Any]:
-        """Constrain angle of a line or between two lines.
-
-        Args:
-            sketch_name: Name of the sketch.
-            geometry1: Index of first line.
-            angle: Angle in degrees.
-            geometry2: Index of second line (-2 for angle from horizontal).
-            doc_name: Document containing the sketch. Uses active document if None.
-
-        Returns:
-            Dictionary with constraint info:
-                - name: Sketch name
-                - constraint_index: Index of the added constraint
-                - sketch_status: Solver, constraint, and profile diagnostics        """
-        return await add_sketch_constraint(
-            sketch_name, "Angle", geometry1, -1, geometry2, -1, angle, doc_name
-        )
-
-    @mcp.tool()
-    async def constrain_fix(
-        sketch_name: str,
-        geometry_index: int,
-        point_index: int = -1,
-        doc_name: str | None = None,
-    ) -> dict[str, Any]:
-        """Fix (lock) a point or geometry in place.
-
-        Args:
-            sketch_name: Name of the sketch.
-            geometry_index: Index of the geometry element.
-            point_index: Point to fix (1=start, 2=end, 3=center).
-                        -1 to fix the entire element.
-            doc_name: Document containing the sketch. Uses active document if None.
-
-        Returns:
-            Dictionary with constraint info:
-                - name: Sketch name
-                - constraint_index: Index of the added constraint
-                - sketch_status: Solver, constraint, and profile diagnostics        """
-        return await add_sketch_constraint(
-            sketch_name, "Block", geometry_index, point_index, doc_name=doc_name
-        )
-
-    # =========================================================================
-    # Sketcher Operations
-    # =========================================================================
-
-    @mcp.tool()
-    async def add_external_geometry(
-        sketch_name: str,
-        object_name: str,
-        element: str,
-        doc_name: str | None = None,
-    ) -> dict[str, Any]:
-        """Add external geometry reference to a sketch.
-
-        External geometry allows referencing edges/faces from other
-        objects for construction and constraints.
-
-        Args:
-            sketch_name: Name of the sketch.
-            object_name: Name of the object to reference.
-            element: Element to reference (e.g., "Edge1", "Face1").
-            doc_name: Document containing the sketch. Uses active document if None.
-
-        Returns:
-            Dictionary with result:
-                - success: Whether the operation succeeded
-                - external_geometry_count: Number of external geometry elements
-        """
-        bridge = await get_bridge()
-
-        code = f"""
-doc = (
-    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
-    else FreeCAD.ActiveDocument
-) or FreeCAD.newDocument({doc_name!r} or "Untitled")
-sketch = doc.getObject({sketch_name!r})
-if sketch is None:
-    raise ValueError(Sketch not found
-        f"Sketch not found: {sketch_name!r}",
-        "Firstly you need to create sketch by tool `create_sketch`"
-    )
-
-ref_obj = doc.getObject({object_name!r})
-if ref_obj is None:
-    raise ValueError(
-        f"Object not found: {object_name!r}",
-        "Firstly you need to create object by tool `create_object` or another object creation tool"
-    )
-
-# Wrap in transaction for undo support
-doc.openTransaction("Add External Geometry")
-try:
-    sketch.addExternal({object_name!r}, {element!r})
-    doc.recompute()
-    doc.commitTransaction()
-
-    _result_ = {{
-        "success": True,
-        "external_geometry_count": len(sketch.ExternalGeometry),
-    }}
-except Exception:
-    doc.abortTransaction()
-    raise
-"""
-        result = await bridge.execute_python(code)
-        if result.success:
-            return result.result
-        raise ValueError(result.error_traceback or "Add external geometry failed")
-
-    @mcp.tool()
-    async def delete_sketch_geometry(
-        sketch_name: str,
-        geometry_index: int,
-        doc_name: str | None = None,
-    ) -> dict[str, Any]:
-        """Delete a geometry element from a sketch.
-
-        Args:
-            sketch_name: Name of the sketch.
-            geometry_index: Index of the geometry to delete.
-            doc_name: Document containing the sketch. Uses active document if None.
-
-        Returns:
-            Compact edit result:
-                - name: Sketch name
-                - deleted_geometry_index: Index that was deleted
-                - sketch_status: Solver, constraint, and profile diagnostics
-        """
-        bridge = await get_bridge()
-
-        code = f"""
-{SKETCH_ANALYSIS_RUNTIME_HELPERS}
-
-doc = (
-    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
-    else FreeCAD.ActiveDocument
-) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
-sketch = doc.getObject({sketch_name!r})
-if sketch is None:
-    raise ValueError(f"Sketch not found: {sketch_name!r}")
-
-# Wrap in transaction for undo support
-doc.openTransaction("Delete Sketch Geometry")
-try:
-    sketch.delGeometry({geometry_index})
-    doc.recompute()
-    doc.commitTransaction()
-
-    _result_ = {{
-        "name": sketch.Name,
-        "deleted_geometry_index": {geometry_index},
-        "sketch_status": _analyze_sketch(sketch),
-    }}
-except Exception:
-    doc.abortTransaction()
-    raise
-"""
-        result = await bridge.execute_python(code)
-        if result.success:
-            return result.result
-        raise ValueError(result.error_traceback or "Delete sketch geometry failed")
-
-    @mcp.tool()
-    async def delete_sketch_constraint(
-        sketch_name: str,
-        constraint_index: int,
-        doc_name: str | None = None,
-    ) -> dict[str, Any]:
-        """Delete a constraint from a sketch.
-
-        Args:
-            sketch_name: Name of the sketch.
-            constraint_index: Index of the constraint to delete.
-            doc_name: Document containing the sketch. Uses active document if None.
-
-        Returns:
-            Compact edit result:
-                - name: Sketch name
-                - deleted_constraint_index: Index that was deleted
-                - sketch_status: Solver, constraint, and profile diagnostics
-        """
-        bridge = await get_bridge()
-
-        code = f"""
-{SKETCH_ANALYSIS_RUNTIME_HELPERS}
-
-doc = (
-    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
-    else FreeCAD.ActiveDocument
-) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
-sketch = doc.getObject({sketch_name!r})
-if sketch is None:
-    raise ValueError(f"Sketch not found: {sketch_name!r}")
-
-# Wrap in transaction for undo support
-doc.openTransaction("Delete Sketch Constraint")
-try:
-    sketch.delConstraint({constraint_index})
-    doc.recompute()
-    doc.commitTransaction()
-
-    _result_ = {{
-        "name": sketch.Name,
-        "deleted_constraint_index": {constraint_index},
-        "sketch_status": _analyze_sketch(sketch),
-    }}
-except Exception:
-    doc.abortTransaction()
-    raise
-"""
-        result = await bridge.execute_python(code)
-        if result.success:
-            return result.result
-        raise ValueError(result.error_traceback or "Delete sketch constraint failed")
 
     @mcp.tool()
     async def get_sketch_info(
@@ -3981,63 +3252,3 @@ _result_ = {{
             return result.result
         raise ValueError(result.error_traceback or "Get sketch info failed")
 
-    @mcp.tool()
-    async def toggle_construction(
-        sketch_name: str,
-        geometry_index: int,
-        doc_name: str | None = None,
-    ) -> dict[str, Any]:
-        """Toggle construction mode for a sketch geometry.
-
-        Construction geometry is used for reference but not included
-        in the final sketch profile.
-
-        Args:
-            sketch_name: Name of the sketch.
-            geometry_index: Index of the geometry to toggle.
-            doc_name: Document containing the sketch. Uses active document if None.
-
-        Returns:
-            Compact edit result:
-                - name: Sketch name
-                - geometry_index: Modified geometry index
-                - is_construction: New construction state
-                - sketch_status: Solver, constraint, and profile diagnostics
-        """
-        bridge = await get_bridge()
-
-        code = f"""
-{SKETCH_ANALYSIS_RUNTIME_HELPERS}
-
-doc = (
-    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
-    else FreeCAD.ActiveDocument
-) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
-sketch = doc.getObject({sketch_name!r})
-if sketch is None:
-    raise ValueError(f"Sketch not found: {sketch_name!r}")
-
-# Wrap in transaction for undo support
-doc.openTransaction("Toggle Construction")
-try:
-    sketch.toggleConstruction({geometry_index})
-    doc.recompute()
-    doc.commitTransaction()
-
-    # Query construction state from SketchObject, not the geometry wrapper.
-    is_construction = bool(sketch.getConstruction({geometry_index}))
-
-    _result_ = {{
-        "name": sketch.Name,
-        "geometry_index": {geometry_index},
-        "is_construction": is_construction,
-        "sketch_status": _analyze_sketch(sketch),
-    }}
-except Exception:
-    doc.abortTransaction()
-    raise
-"""
-        result = await bridge.execute_python(code)
-        if result.success:
-            return result.result
-        raise ValueError(result.error_traceback or "Toggle construction failed")

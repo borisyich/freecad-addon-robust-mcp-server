@@ -76,7 +76,7 @@ Try these example prompts with your AI assistant:
 
 ## Step 4: Explore Available Tools
 
-The MCP server provides 150+ tools organized into categories:
+The MCP server provides 122 tools organized into categories:
 
 | Category   | Examples                                             |
 | ---------- | ---------------------------------------------------- |
@@ -84,7 +84,7 @@ The MCP server provides 150+ tools organized into categories:
 | PartDesign | `create_sketch`, `pad_sketch`, `pocket_sketch`       |
 | Operations | `boolean_operation`, `fillet_edges`, `chamfer_edges` |
 | Export     | `export_stl`, `export_step`, `export_3mf`            |
-| View (GUI) | `get_screenshot`, `set_object_color`                 |
+| View (GUI) | `get_screenshot`, `set_visual_properties`                 |
 
 See the [Tools Reference](../guide/tools.md) for the complete list.
 

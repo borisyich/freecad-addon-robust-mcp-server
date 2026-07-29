@@ -301,170 +301,152 @@ class TestViewTools:
         mock_bridge.set_view.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_set_object_visibility(self, register_tools, mock_bridge):
-        """set_object_visibility should show/hide objects via execute_python."""
-        mock_bridge.execute_python = AsyncMock(
-            return_value=ExecutionResult(
-                success=True,
-                result={"success": True, "visible": False},
-                stdout="",
-                stderr="",
-                execution_time_ms=10.0,
-            )
+    async def test_workbench_lists_available_workbenches(
+        self, register_tools, mock_bridge
+    ):
+        """workbench(action='list') should expose all available workbenches."""
+        mock_bridge.get_workbenches = AsyncMock(
+            return_value=[
+                WorkbenchInfo(name="PartDesignWorkbench", label="Part Design", is_active=True),
+                WorkbenchInfo(name="SketcherWorkbench", label="Sketcher", is_active=False),
+            ]
         )
 
-        set_visibility = register_tools["set_object_visibility"]
-        result = await set_visibility(object_name="Box", visible=False)
+        result = await register_tools["workbench"]("list")
 
-        assert result["success"] is True
-        assert result["visible"] is False
-        mock_bridge.execute_python.assert_called_once()
+        assert result["action"] == "list"
+        assert [item["name"] for item in result["workbenches"]] == [
+            "PartDesignWorkbench",
+            "SketcherWorkbench",
+        ]
+        mock_bridge.get_workbenches.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_set_object_visibility_headless(self, register_tools, mock_bridge):
-        """set_object_visibility should return error in headless mode."""
+    async def test_workbench_activates_requested_workbench(
+        self, register_tools, mock_bridge
+    ):
+        """workbench(action='activate') should require and activate one name."""
+        mock_bridge.activate_workbench = AsyncMock()
+
+        result = await register_tools["workbench"](
+            "activate", workbench_name="PartDesignWorkbench"
+        )
+
+        assert result == {
+            "success": True,
+            "action": "activate",
+            "workbench_name": "PartDesignWorkbench",
+        }
+        mock_bridge.activate_workbench.assert_awaited_once_with("PartDesignWorkbench")
+
+    @pytest.mark.asyncio
+    async def test_workbench_rejects_missing_activation_target(
+        self, register_tools, mock_bridge
+    ):
+        """Activate without a workbench name should fail before bridge access."""
+        with pytest.raises(ValueError, match="workbench_name is required"):
+            await register_tools["workbench"]("activate")
+        mock_bridge.activate_workbench.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_set_visual_properties_applies_multiple_properties_once(
+        self, register_tools, mock_bridge
+    ):
+        """Visual properties should be changed by one consolidated GUI operation."""
         mock_bridge.execute_python = AsyncMock(
             return_value=ExecutionResult(
                 success=True,
                 result={
-                    "success": False,
-                    "error": "GUI not available - visibility cannot be set in headless mode",
+                    "success": True,
+                    "object_name": "Pad",
+                    "applied": {
+                        "visible": False,
+                        "color": [0.2, 0.3, 0.4],
+                        "display_mode": "Flat Lines",
+                    },
                 },
                 stdout="",
                 stderr="",
-                execution_time_ms=5.0,
+                execution_time_ms=10.0,
             )
         )
 
-        set_visibility = register_tools["set_object_visibility"]
-        result = await set_visibility(object_name="Box", visible=True)
+        result = await register_tools["set_visual_properties"](
+            "Pad",
+            visible=False,
+            color=[0.2, 0.3, 0.4],
+            display_mode="Flat Lines",
+        )
 
-        assert result["success"] is False
-        assert "headless" in result["error"]
+        assert result["applied"]["visible"] is False
+        assert result["applied"]["display_mode"] == "Flat Lines"
+        mock_bridge.execute_python.assert_awaited_once()
+        generated_code = mock_bridge.execute_python.await_args.args[0]
+        assert "ViewObject.Visibility" in generated_code
+        assert "ViewObject.ShapeColor" in generated_code
+        assert "ViewObject.DisplayMode" in generated_code
 
     @pytest.mark.asyncio
-    async def test_set_display_mode(self, register_tools, mock_bridge):
-        """set_display_mode should change display mode via execute_python."""
+    async def test_set_visual_properties_validates_request_before_freecad(
+        self, register_tools, mock_bridge
+    ):
+        """Empty requests and invalid RGB values should not touch FreeCAD."""
+        with pytest.raises(ValueError, match="Provide visible"):
+            await register_tools["set_visual_properties"]("Pad")
+        with pytest.raises(ValueError, match="three values"):
+            await register_tools["set_visual_properties"]("Pad", color=[1.2, 0, 0])
+        mock_bridge.execute_python.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("action", ["undo", "redo", "status"])
+    async def test_history_handles_all_supported_actions(
+        self, register_tools, mock_bridge, action
+    ):
+        """One history tool should dispatch undo, redo, and status consistently."""
         mock_bridge.execute_python = AsyncMock(
             return_value=ExecutionResult(
                 success=True,
-                result={"success": True, "mode": "Wireframe"},
+                result={
+                    "success": True,
+                    "action": action,
+                    "undo_count": 1,
+                    "redo_count": 0,
+                    "undo_names": ["Edit Sketch"],
+                    "redo_names": [],
+                    "error": None,
+                },
                 stdout="",
                 stderr="",
                 execution_time_ms=10.0,
             )
         )
 
-        set_mode = register_tools["set_display_mode"]
-        result = await set_mode(object_name="Box", mode="Wireframe")
+        result = await register_tools["history"](action)
 
-        assert result["success"] is True
-        assert result["mode"] == "Wireframe"
-        mock_bridge.execute_python.assert_called_once()
+        assert result["action"] == action
+        assert result["undo_count"] == 1
+        generated_code = mock_bridge.execute_python.await_args.args[0]
+        assert f"action = {action!r}" in generated_code
 
-    @pytest.mark.asyncio
-    async def test_set_object_color(self, register_tools, mock_bridge):
-        """set_object_color should change object color via execute_python."""
-        mock_bridge.execute_python = AsyncMock(
-            return_value=ExecutionResult(
-                success=True,
-                result={"success": True, "color": [1.0, 0.0, 0.0]},
-                stdout="",
-                stderr="",
-                execution_time_ms=10.0,
-            )
-        )
+    def test_legacy_view_tools_are_not_registered(self, register_tools):
+        """Removed aliases and zoom tools should not remain in tools/list."""
+        removed = {
+            "set_object_visibility",
+            "set_object_color",
+            "set_display_mode",
+            "list_workbenches",
+            "activate_workbench",
+            "zoom_in",
+            "zoom_out",
+            "undo",
+            "redo",
+            "get_undo_redo_status",
+            "get_console_log",
+            "recompute",
+        }
+        assert {"set_visual_properties", "workbench", "history"} <= set(register_tools)
+        assert removed.isdisjoint(register_tools)
 
-        set_color = register_tools["set_object_color"]
-        result = await set_color(object_name="Box", color=[1.0, 0.0, 0.0])
-
-        assert result["success"] is True
-        assert result["color"] == [1.0, 0.0, 0.0]  # Red
-        mock_bridge.execute_python.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_set_object_color_invalid_color(self, register_tools, mock_bridge):
-        """set_object_color should validate color array length."""
-        set_color = register_tools["set_object_color"]
-        result = await set_color(object_name="Box", color=[1.0, 0.0])  # Missing blue
-
-        assert result["success"] is False
-        assert "must be [r, g, b]" in result["error"]
-
-    @pytest.mark.asyncio
-    async def test_list_workbenches(self, register_tools, mock_bridge):
-        """list_workbenches should return available workbenches."""
-        mock_workbenches = [
-            WorkbenchInfo(
-                name="PartDesignWorkbench",
-                label="Part Design",
-                icon="",
-                is_active=True,
-            ),
-            WorkbenchInfo(
-                name="SketcherWorkbench",
-                label="Sketcher",
-                icon="",
-                is_active=False,
-            ),
-        ]
-        mock_bridge.get_workbenches = AsyncMock(return_value=mock_workbenches)
-
-        list_workbenches = register_tools["list_workbenches"]
-        result = await list_workbenches()
-
-        assert len(result) == 2
-        assert result[0]["name"] == "PartDesignWorkbench"
-        assert result[0]["is_active"] is True
-
-    @pytest.mark.asyncio
-    async def test_activate_workbench(self, register_tools, mock_bridge):
-        """activate_workbench should switch to a workbench."""
-        mock_bridge.activate_workbench = AsyncMock(return_value=None)
-
-        activate = register_tools["activate_workbench"]
-        result = await activate(workbench_name="SketcherWorkbench")
-
-        assert result["success"] is True
-        mock_bridge.activate_workbench.assert_called_once_with("SketcherWorkbench")
-
-    @pytest.mark.asyncio
-    async def test_zoom_in(self, register_tools, mock_bridge):
-        """zoom_in should increase zoom level via execute_python."""
-        mock_bridge.execute_python = AsyncMock(
-            return_value=ExecutionResult(
-                success=True,
-                result={"success": True},
-                stdout="",
-                stderr="",
-                execution_time_ms=10.0,
-            )
-        )
-
-        zoom_in = register_tools["zoom_in"]
-        result = await zoom_in(factor=2.0)
-
-        assert result["success"] is True
-        mock_bridge.execute_python.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_zoom_out(self, register_tools, mock_bridge):
-        """zoom_out should decrease zoom level via execute_python."""
-        mock_bridge.execute_python = AsyncMock(
-            return_value=ExecutionResult(
-                success=True,
-                result={"success": True},
-                stdout="",
-                stderr="",
-                execution_time_ms=10.0,
-            )
-        )
-
-        zoom_out = register_tools["zoom_out"]
-        result = await zoom_out(factor=2.0)
-
-        assert result["success"] is True
-        mock_bridge.execute_python.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_set_camera_position(self, register_tools, mock_bridge):
@@ -487,67 +469,6 @@ class TestViewTools:
         assert result["success"] is True
         mock_bridge.execute_python.assert_called_once()
 
-    @pytest.mark.asyncio
-    async def test_undo(self, register_tools, mock_bridge):
-        """undo should undo the last operation via execute_python."""
-        mock_bridge.execute_python = AsyncMock(
-            return_value=ExecutionResult(
-                success=True,
-                result={"success": True, "can_undo": True},
-                stdout="",
-                stderr="",
-                execution_time_ms=5.0,
-            )
-        )
-
-        undo = register_tools["undo"]
-        result = await undo()
-
-        assert result["success"] is True
-        mock_bridge.execute_python.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_redo(self, register_tools, mock_bridge):
-        """redo should redo an undone operation via execute_python."""
-        mock_bridge.execute_python = AsyncMock(
-            return_value=ExecutionResult(
-                success=True,
-                result={"success": True, "can_redo": False},
-                stdout="",
-                stderr="",
-                execution_time_ms=5.0,
-            )
-        )
-
-        redo = register_tools["redo"]
-        result = await redo()
-
-        assert result["success"] is True
-        mock_bridge.execute_python.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_get_undo_redo_status(self, register_tools, mock_bridge):
-        """get_undo_redo_status should return available operations via execute_python."""
-        mock_bridge.execute_python = AsyncMock(
-            return_value=ExecutionResult(
-                success=True,
-                result={
-                    "undo_count": 5,
-                    "redo_count": 2,
-                    "undo_names": ["Create Box", "Edit Box", "Create Fillet"],
-                },
-                stdout="",
-                stderr="",
-                execution_time_ms=5.0,
-            )
-        )
-
-        get_status = register_tools["get_undo_redo_status"]
-        result = await get_status()
-
-        assert result["undo_count"] == 5
-        assert result["redo_count"] == 2
-        mock_bridge.execute_python.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_list_parts_library(self, register_tools, mock_bridge):
@@ -623,82 +544,6 @@ class TestViewTools:
         assert result["name"] == "Bolt"
         mock_bridge.execute_python.assert_called_once()
 
-    @pytest.mark.asyncio
-    async def test_get_console_log(self, register_tools, mock_bridge):
-        """get_console_log should return console messages."""
-        mock_bridge.get_console_output = AsyncMock(
-            return_value=[
-                "Info: Started",
-                "Info: Complete",
-                "Warning: Deprecated feature",
-            ]
-        )
 
-        get_log = register_tools["get_console_log"]
-        result = await get_log(lines=50)
 
-        assert len(result["messages"]) == 3
-        assert len(result["warnings"]) == 1
-        assert len(result["errors"]) == 0
-        mock_bridge.get_console_output.assert_called_once_with(50)
 
-    @pytest.mark.asyncio
-    async def test_get_console_log_with_errors(self, register_tools, mock_bridge):
-        """get_console_log should categorize error messages."""
-        mock_bridge.get_console_output = AsyncMock(
-            return_value=[
-                "Info: Started",
-                "Error: Failed to load module",
-                "Warning: Deprecated API",
-            ]
-        )
-
-        get_log = register_tools["get_console_log"]
-        result = await get_log()
-
-        assert len(result["messages"]) == 3
-        assert len(result["errors"]) == 1
-        assert "Failed to load module" in result["errors"][0]
-
-    @pytest.mark.asyncio
-    async def test_recompute(self, register_tools, mock_bridge):
-        """recompute should force document recomputation via execute_python."""
-        mock_bridge.execute_python = AsyncMock(
-            return_value=ExecutionResult(
-                success=True,
-                result={"success": True, "touch_count": 3},
-                stdout="",
-                stderr="",
-                execution_time_ms=20.0,
-            )
-        )
-
-        recompute = register_tools["recompute"]
-        result = await recompute()
-
-        assert result["success"] is True
-        assert result["touch_count"] == 3
-        mock_bridge.execute_python.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_recompute_no_document(self, register_tools, mock_bridge):
-        """recompute should handle no document gracefully."""
-        mock_bridge.execute_python = AsyncMock(
-            return_value=ExecutionResult(
-                success=True,
-                result={
-                    "success": False,
-                    "error": "No document found",
-                    "touch_count": 0,
-                },
-                stdout="",
-                stderr="",
-                execution_time_ms=5.0,
-            )
-        )
-
-        recompute = register_tools["recompute"]
-        result = await recompute()
-
-        assert result["success"] is False
-        assert "No document" in result["error"]

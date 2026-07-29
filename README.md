@@ -347,7 +347,7 @@ FREECAD_MODE=embedded freecad-mcp
 
 ### Available Tools
 
-The server currently registers **150+ MCP tools**. The tables below list common tools rather than duplicating the exact inventory. See the generated [Tools Overview](docs/guide/tools.md) or the MCP client's discovered tool list for the authoritative inventory; [MCP Tools Reference](docs/MCP_TOOLS_REFERENCE.md) provides detailed examples for core tools, while `freecad://capabilities` is a curated runtime overview. Tools marked with **GUI** require FreeCAD to be running in GUI mode; they return a structured error in headless mode.
+The server currently registers **122 MCP tools**. The tables below list common tools rather than duplicating the exact inventory. See the generated [Tools Overview](docs/guide/tools.md) or the MCP client's discovered tool list for the authoritative inventory; [MCP Tools Reference](docs/MCP_TOOLS_REFERENCE.md) provides detailed examples for core tools, while `freecad://capabilities` is a curated runtime overview. Tools marked with **GUI** require FreeCAD to be running in GUI mode; they return a structured error in headless mode.
 
 #### Execution & Debugging (5 tools)
 
@@ -384,7 +384,7 @@ The server currently registers **150+ MCP tools**. The tables below list common 
 | `create_wedge`    | Create a Part::Wedge (tapered box)                 | All  |
 | `create_helix`    | Create a Part::Helix curve for sweeps and threads  | All  |
 
-#### Object Management (12 tools)
+#### Object Management (11 common tools)
 
 | Tool                | Description                                        | Mode |
 | ------------------- | -------------------------------------------------- | ---- |
@@ -398,29 +398,24 @@ The server currently registers **150+ MCP tools**. The tables below list common 
 | `copy_object`       | Create a copy of an object                         | All  |
 | `mirror_object`     | Mirror an object across a plane (XY, XZ, YZ)       | All  |
 | `boolean_operation` | Fuse, cut, or intersect objects                    | All  |
-| `get_selection`     | Get currently selected objects                     | GUI  |
-| `set_selection`     | Select specific objects by name                    | GUI  |
-| `clear_selection`   | Clear all selections                               | GUI  |
+| `selection`         | Get, set, or clear the GUI selection               | GUI  |
 
-#### PartDesign - Sketching and Core Features (15 tools)
+#### PartDesign - Sketching and Core Features (12 common tools)
 
-| Tool                     | Description                                     | Mode |
-| ------------------------ | ----------------------------------------------- | ---- |
-| `create_partdesign_body` | Create a PartDesign::Body container             | All  |
-| `create_sketch`          | Create a sketch on a plane or face              | All  |
-| `add_sketch_rectangle`   | Add a rectangle to a sketch                     | All  |
-| `add_sketch_circle`      | Add a circle to a sketch                        | All  |
-| `add_sketch_line`        | Add a line (with optional construction flag)    | All  |
-| `add_sketch_arc`         | Add an arc by center, radius, and angles        | All  |
-| `add_sketch_point`       | Add a reference point to a sketch               | All  |
-| `pad_sketch`             | Extrude a sketch (additive)                     | All  |
-| `pocket_sketch`          | Cut into solid using a sketch (subtractive)     | All  |
-| `revolution_sketch`      | Revolve a sketch around an axis (additive)      | All  |
-| `groove_sketch`          | Revolve a sketch around an axis (subtractive)   | All  |
-| `create_hole`            | Create validated holes from a supported sketch  | All  |
-| `create_cylindrical_cut` | Create radial/off-face cylindrical cuts         | All  |
-| `loft_sketches`          | Create a loft through multiple sketches         | All  |
-| `sweep_sketch`           | Sweep a profile along a spine path              | All  |
+| Tool                       | Description                                                | Mode |
+| -------------------------- | ---------------------------------------------------------- | ---- |
+| `create_partdesign_body`   | Create a PartDesign::Body container                        | All  |
+| `create_sketch`            | Create a sketch on a plane or face                         | All  |
+| `edit_sketch_geometry`     | Apply an ordered batch of sketch geometry edits            | All  |
+| `edit_sketch_constraints`  | Apply an ordered batch of Sketcher constraint edits        | All  |
+| `pad_sketch`               | Extrude a sketch (additive)                                | All  |
+| `pocket_sketch`            | Cut into solid using a sketch (subtractive)                | All  |
+| `revolution_sketch`        | Revolve a sketch around an axis (additive)                 | All  |
+| `groove_sketch`            | Revolve a sketch around an axis (subtractive)              | All  |
+| `create_hole`              | Create validated holes from a supported sketch             | All  |
+| `create_cylindrical_cut`   | Create radial/off-face cylindrical cuts                    | All  |
+| `loft_sketches`            | Create a loft through multiple sketches                    | All  |
+| `sweep_sketch`             | Sweep a profile along a spine path                         | All  |
 
 #### PartDesign - Patterns & Edges (5 tools)
 
@@ -432,26 +427,20 @@ The server currently registers **150+ MCP tools**. The tables below list common 
 | `fillet_edges`     | Add fillets (rounded edges)                | All  |
 | `chamfer_edges`    | Add chamfers (beveled edges)               | All  |
 
-#### View & Display (11 tools)
+#### View & Display (10 common tools)
 
-| Tool                    | Description                                     | Mode |
-| ----------------------- | ----------------------------------------------- | ---- |
-| `get_screenshot`        | Return a FreeCAD view as MCP image content with a global X/Y/Z corner cross by default | GUI  |
-| `open_image`            | Open a local drawing or saved screenshot         | Both |
-| `open_image_tiles`      | Return a numbered overview plus enlarged overlapping fragments | Both |
-| `compare_images`        | Compare reference and candidate side by side     | Both |
-| `evaluate_model_checkpoint` | Optional deterministic continue/rework assessment | Both |
-| `set_view_angle`        | Set camera to standard views (Front, Top, etc.) | GUI  |
-| `fit_all`               | Zoom to fit all objects in view                 | GUI  |
-| `zoom_in`               | Zoom in by a factor                             | GUI  |
-| `zoom_out`              | Zoom out by a factor                            | GUI  |
-| `set_camera_position`   | Set camera position and look-at point           | GUI  |
-| `set_object_visibility` | Show/hide objects                               | GUI  |
-| `set_display_mode`      | Set display mode (Shaded, Wireframe, etc.)      | GUI  |
-| `set_object_color`      | Set object color as RGB values                  | GUI  |
-| `list_workbenches`      | List available FreeCAD workbenches              | All  |
-| `activate_workbench`    | Switch to a different workbench                 | All  |
-
+| Tool                        | Description                                                   | Mode |
+| --------------------------- | ------------------------------------------------------------- | ---- |
+| `get_screenshot`            | Return the FreeCAD view as MCP image content                  | GUI  |
+| `open_image`                | Open a local drawing or saved screenshot                      | Both |
+| `open_image_tiles`          | Return a numbered overview plus enlarged overlapping tiles   | Both |
+| `compare_images`            | Compare reference and candidate side by side                  | Both |
+| `evaluate_model_checkpoint` | Optional deterministic continue/rework assessment             | Both |
+| `set_view_angle`            | Set camera to a standard view                                 | GUI  |
+| `fit_all`                   | Fit all visible objects in the view                           | GUI  |
+| `set_camera_position`       | Set camera position and look-at point                         | GUI  |
+| `set_visual_properties`     | Set visibility, RGB color, and/or display mode                | GUI  |
+| `workbench`                 | List or activate a FreeCAD workbench                          | All  |
 
 ### Agent engineering guidance
 
@@ -486,13 +475,11 @@ informative and does not by itself prove drawing correspondence.
 | `undo_if_invalid` | Undo after invalid document state | All |
 | `safe_execute` | Run Python with optional validation and rollback | All |
 
-#### Undo/Redo (3 tools)
+#### History (1 tool)
 
-| Tool                   | Description                        | Mode |
-| ---------------------- | ---------------------------------- | ---- |
-| `undo`                 | Undo the last operation            | All  |
-| `redo`                 | Redo a previously undone operation | All  |
-| `get_undo_redo_status` | Get available undo/redo operations | All  |
+| Tool      | Description                                   | Mode |
+| --------- | --------------------------------------------- | ---- |
+| `history` | Undo, redo, or inspect available history steps | All  |
 
 #### Export/Import (7 tools)
 

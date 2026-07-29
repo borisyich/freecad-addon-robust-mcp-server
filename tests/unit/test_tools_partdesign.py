@@ -114,56 +114,26 @@ class TestPartDesignTools:
         assert 'TypeId", "") != "PartDesign::Plane"' in generated_code
 
     @pytest.mark.asyncio
-    async def test_add_sketch_rectangle(self, register_tools, mock_bridge):
-        """add_sketch_rectangle should add a rectangle via execute_python."""
-        mock_bridge.execute_python = AsyncMock(
-            return_value=ExecutionResult(
-                success=True,
-                result={"constraint_count": 8, "geometry_count": 4},
-                stdout="",
-                stderr="",
-                execution_time_ms=10.0,
-            )
-        )
-
-        add_rectangle = register_tools["add_sketch_rectangle"]
-        result = await add_rectangle(
-            sketch_name="Sketch", x=-10, y=-10, width=20, height=20
-        )
-
-        assert result["constraint_count"] == 8
-        assert result["geometry_count"] == 4
-        mock_bridge.execute_python.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_add_sketch_circle(self, register_tools, mock_bridge):
-        """add_sketch_circle should add a circle via execute_python."""
+    async def test_edit_sketch_geometry_batches_operations_atomically(
+        self, register_tools, mock_bridge
+    ):
+        """Mixed geometry edits should use one bridge call and one transaction."""
         mock_bridge.execute_python = AsyncMock(
             return_value=ExecutionResult(
                 success=True,
                 result={
-                    "geometry_index": 0,
-                    "sketch_status": {
-                        "geometry_count": 1,
-                        "constraint_count": 0,
-                        "construction_geometry_count": 0,
-                        "external_geometry_count": 0,
-                        "solver": {
-                            "status": "under_constrained",
-                            "solve_code": 0,
-                            "fully_constrained": False,
-                            "remaining_dof": 3,
+                    "name": "Sketch",
+                    "operations_applied": 3,
+                    "operation_results": [
+                        {"op": "add_rectangle", "geometry_indices": [0, 1, 2, 3]},
+                        {"op": "add_circle", "geometry_index": 4},
+                        {
+                            "op": "toggle_construction",
+                            "geometry_index": 0,
+                            "is_construction": True,
                         },
-                        "profile": {
-                            "state": "closed",
-                            "closed": True,
-                            "closed_wire_count": 1,
-                            "open_wire_count": 0,
-                            "open_vertices": [],
-                            "shape_valid": True,
-                        },
-                        "profile_ready": True,
-                    },
+                    ],
+                    "sketch_status": {"profile_ready": True},
                 },
                 stdout="",
                 stderr="",
@@ -171,81 +141,261 @@ class TestPartDesignTools:
             )
         )
 
-        add_circle = register_tools["add_sketch_circle"]
-        result = await add_circle(
-            sketch_name="Sketch", center_x=0, center_y=0, radius=10
-        )
-
-        assert result["geometry_index"] == 0
-        assert result["sketch_status"]["profile_ready"] is True
-        generated_code = mock_bridge.execute_python.await_args.args[0]
-        assert "_analyze_sketch(sketch)" in generated_code
-        assert '"sketch_status"' in generated_code
-        mock_bridge.execute_python.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_add_sketch_line(self, register_tools, mock_bridge):
-        """add_sketch_line should add a line via execute_python."""
-        mock_bridge.execute_python = AsyncMock(
-            return_value=ExecutionResult(
-                success=True,
-                result={"geometry_index": 0, "geometry_count": 1},
-                stdout="",
-                stderr="",
-                execution_time_ms=10.0,
-            )
-        )
-
-        add_line = register_tools["add_sketch_line"]
-        result = await add_line(sketch_name="Sketch", x1=0, y1=0, x2=10, y2=10)
-
-        assert result["geometry_index"] == 0
-        mock_bridge.execute_python.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_add_sketch_arc(self, register_tools, mock_bridge):
-        """add_sketch_arc should add an arc via execute_python."""
-        mock_bridge.execute_python = AsyncMock(
-            return_value=ExecutionResult(
-                success=True,
-                result={"geometry_index": 0, "geometry_count": 1},
-                stdout="",
-                stderr="",
-                execution_time_ms=10.0,
-            )
-        )
-
-        add_arc = register_tools["add_sketch_arc"]
-        result = await add_arc(
+        result = await register_tools["edit_sketch_geometry"](
             sketch_name="Sketch",
-            center_x=0,
-            center_y=0,
-            radius=10,
-            start_angle=0,
-            end_angle=90,
+            operations=[
+                {"op": "add_rectangle", "x": 0, "y": 0, "width": 20, "height": 10},
+                {"op": "add_circle", "center_x": 10, "center_y": 5, "radius": 2},
+                {"op": "toggle_construction", "geometry_index": 0},
+            ],
         )
 
-        assert result["geometry_index"] == 0
-        mock_bridge.execute_python.assert_called_once()
+        assert result["operations_applied"] == 3
+        assert result["sketch_status"]["profile_ready"] is True
+        mock_bridge.execute_python.assert_awaited_once()
+        generated_code = mock_bridge.execute_python.await_args.args[0]
+        assert 'doc.openTransaction("Edit Sketch Geometry")' in generated_code
+        assert generated_code.count("doc.recompute()") == 1
+        assert '"add_rectangle"' in generated_code
+        assert '"toggle_construction"' in generated_code
 
     @pytest.mark.asyncio
-    async def test_add_sketch_point(self, register_tools, mock_bridge):
-        """add_sketch_point should add a point via execute_python."""
+    async def test_edit_sketch_geometry_supports_every_replaced_operation(
+        self, register_tools, mock_bridge
+    ):
+        """The consolidated contract should cover every removed geometry tool."""
         mock_bridge.execute_python = AsyncMock(
             return_value=ExecutionResult(
                 success=True,
-                result={"geometry_index": 0, "geometry_count": 1},
+                result={
+                    "name": "Sketch",
+                    "operations_applied": 12,
+                    "operation_results": [],
+                    "sketch_status": {},
+                },
+                stdout="",
+                stderr="",
+                execution_time_ms=10.0,
+            )
+        )
+        operations = [
+            {"op": "add_rectangle", "x": 0, "y": 0, "width": 10, "height": 5},
+            {"op": "add_circle", "center_x": 0, "center_y": 0, "radius": 2},
+            {"op": "add_line", "x1": 0, "y1": 0, "x2": 1, "y2": 1},
+            {
+                "op": "add_arc",
+                "center_x": 0,
+                "center_y": 0,
+                "radius": 2,
+                "start_angle": 0,
+                "end_angle": 90,
+            },
+            {"op": "add_point", "x": 1, "y": 2},
+            {
+                "op": "add_ellipse",
+                "center_x": 0,
+                "center_y": 0,
+                "major_radius": 3,
+                "minor_radius": 2,
+            },
+            {"op": "add_polygon", "center_x": 0, "center_y": 0, "radius": 3},
+            {
+                "op": "add_slot",
+                "center1_x": 0,
+                "center1_y": 0,
+                "center2_x": 5,
+                "center2_y": 0,
+                "radius": 1,
+            },
+            {"op": "add_bspline", "points": [[0, 0], [1, 1], [2, 0]]},
+            {
+                "op": "add_external_geometry",
+                "object_name": "Pad",
+                "element": "Edge1",
+            },
+            {"op": "delete_geometry", "geometry_index": 0},
+            {"op": "toggle_construction", "geometry_index": 1},
+        ]
+
+        await register_tools["edit_sketch_geometry"]("Sketch", operations)
+        generated_code = mock_bridge.execute_python.await_args.args[0]
+        for operation in operations:
+            assert f'"{operation["op"]}"' in generated_code
+
+    @pytest.mark.asyncio
+    async def test_edit_sketch_geometry_rejects_invalid_payload_before_freecad(
+        self, register_tools, mock_bridge
+    ):
+        """Invalid dimensions should fail without starting a FreeCAD operation."""
+        with pytest.raises(ValueError, match="width must be positive"):
+            await register_tools["edit_sketch_geometry"](
+                "Sketch",
+                [{"op": "add_rectangle", "x": 0, "y": 0, "width": 0, "height": 5}],
+            )
+        mock_bridge.execute_python.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_edit_sketch_constraints_batches_named_generic_and_delete(
+        self, register_tools, mock_bridge
+    ):
+        """Constraint edits should share one transaction and preserve generic access."""
+        mock_bridge.execute_python = AsyncMock(
+            return_value=ExecutionResult(
+                success=True,
+                result={
+                    "name": "Sketch",
+                    "operations_applied": 4,
+                    "operation_results": [
+                        {"op": "horizontal", "constraint_index": 0},
+                        {"op": "distance", "constraint_index": 1},
+                        {"op": "add_constraint", "constraint_index": 2},
+                        {"op": "delete_constraint", "deleted_constraint_index": 0},
+                    ],
+                    "sketch_status": {"solver": {"status": "under_constrained"}},
+                },
                 stdout="",
                 stderr="",
                 execution_time_ms=10.0,
             )
         )
 
-        add_point = register_tools["add_sketch_point"]
-        result = await add_point(sketch_name="Sketch", x=5, y=5)
+        result = await register_tools["edit_sketch_constraints"](
+            "Sketch",
+            [
+                {"op": "horizontal", "geometry1": 0},
+                {"op": "distance", "geometry1": 0, "value": 20},
+                {
+                    "op": "add_constraint",
+                    "constraint_type": "Diameter",
+                    "geometry1": 1,
+                    "value": 4,
+                },
+                {"op": "delete_constraint", "constraint_index": 0},
+            ],
+        )
 
-        assert result["geometry_index"] == 0
-        mock_bridge.execute_python.assert_called_once()
+        assert result["operations_applied"] == 4
+        mock_bridge.execute_python.assert_awaited_once()
+        generated_code = mock_bridge.execute_python.await_args.args[0]
+        assert 'doc.openTransaction("Edit Sketch Constraints")' in generated_code
+        assert generated_code.count("doc.recompute()") == 1
+        assert '"Diameter"' in generated_code
+        assert '"delete_constraint"' in generated_code
+
+    @pytest.mark.asyncio
+    async def test_edit_sketch_constraints_supports_every_replaced_operation(
+        self, register_tools, mock_bridge
+    ):
+        """The consolidated contract should accept every removed constraint tool."""
+        mock_bridge.execute_python = AsyncMock(
+            return_value=ExecutionResult(
+                success=True,
+                result={
+                    "name": "Sketch",
+                    "operations_applied": 15,
+                    "operation_results": [],
+                    "sketch_status": {},
+                },
+                stdout="",
+                stderr="",
+                execution_time_ms=10.0,
+            )
+        )
+        operations = [
+            {
+                "op": "add_constraint",
+                "constraint_type": "Diameter",
+                "geometry1": 0,
+                "value": 4,
+            },
+            {"op": "horizontal", "geometry1": 0},
+            {"op": "vertical", "geometry1": 1},
+            {
+                "op": "coincident",
+                "geometry1": 0,
+                "point1": 2,
+                "geometry2": 1,
+                "point2": 1,
+            },
+            {"op": "parallel", "geometry1": 0, "geometry2": 2},
+            {"op": "perpendicular", "geometry1": 0, "geometry2": 1},
+            {"op": "tangent", "geometry1": 3, "geometry2": 4},
+            {"op": "equal", "geometry1": 3, "geometry2": 4},
+            {"op": "distance", "geometry1": 0, "value": 20},
+            {
+                "op": "distance_x",
+                "geometry1": 0,
+                "point1": 1,
+                "value": 5,
+            },
+            {
+                "op": "distance_y",
+                "geometry1": 0,
+                "point1": 1,
+                "value": 6,
+            },
+            {"op": "radius", "geometry1": 3, "value": 2},
+            {"op": "angle", "geometry1": 0, "value": 45},
+            {"op": "fix", "geometry1": 0, "point1": 1},
+            {"op": "delete_constraint", "constraint_index": 0},
+        ]
+
+        await register_tools["edit_sketch_constraints"]("Sketch", operations)
+
+        generated_code = mock_bridge.execute_python.await_args.args[0]
+        for operation in operations:
+            assert f'"{operation["op"]}"' in generated_code
+
+    @pytest.mark.asyncio
+    async def test_edit_sketch_constraints_rejects_missing_semantic_arguments(
+        self, register_tools, mock_bridge
+    ):
+        """Named constraints should require the geometry/value they operate on."""
+        with pytest.raises(ValueError, match="distance requires value"):
+            await register_tools["edit_sketch_constraints"](
+                "Sketch", [{"op": "distance", "geometry1": 0}]
+            )
+        with pytest.raises(ValueError, match="parallel requires geometry2"):
+            await register_tools["edit_sketch_constraints"](
+                "Sketch", [{"op": "parallel", "geometry1": 0}]
+            )
+        mock_bridge.execute_python.assert_not_awaited()
+
+    def test_legacy_sketch_edit_tools_are_not_registered(self, register_tools):
+        """Only the two consolidated sketch-edit entry points should remain public."""
+        removed = {
+            "add_sketch_rectangle",
+            "add_sketch_circle",
+            "add_sketch_line",
+            "add_sketch_arc",
+            "add_sketch_point",
+            "add_sketch_ellipse",
+            "add_sketch_polygon",
+            "add_sketch_slot",
+            "add_sketch_bspline",
+            "add_external_geometry",
+            "delete_sketch_geometry",
+            "toggle_construction",
+            "add_sketch_constraint",
+            "constrain_horizontal",
+            "constrain_vertical",
+            "constrain_coincident",
+            "constrain_parallel",
+            "constrain_perpendicular",
+            "constrain_tangent",
+            "constrain_equal",
+            "constrain_distance",
+            "constrain_distance_x",
+            "constrain_distance_y",
+            "constrain_radius",
+            "constrain_angle",
+            "constrain_fix",
+            "delete_sketch_constraint",
+        }
+        assert "edit_sketch_geometry" in register_tools
+        assert "edit_sketch_constraints" in register_tools
+        assert removed.isdisjoint(register_tools)
+
 
     @pytest.mark.asyncio
     async def test_pad_sketch(self, register_tools, mock_bridge):
@@ -1024,441 +1174,7 @@ class TestPartDesignTools:
         assert result["type_id"] == "PartDesign::SubtractivePipe"
         mock_bridge.execute_python.assert_called_once()
 
-    # Tests for Sketcher geometry tools
-
-    @pytest.mark.asyncio
-    async def test_add_sketch_ellipse(self, register_tools, mock_bridge):
-        """add_sketch_ellipse should add an ellipse to a sketch."""
-        mock_bridge.execute_python = AsyncMock(
-            return_value=ExecutionResult(
-                success=True,
-                result={"geometry_index": 0, "geometry_count": 1},
-                stdout="",
-                stderr="",
-                execution_time_ms=10.0,
-            )
-        )
-
-        add_ellipse = register_tools["add_sketch_ellipse"]
-        result = await add_ellipse(
-            sketch_name="Sketch",
-            center_x=0,
-            center_y=0,
-            major_radius=20,
-            minor_radius=10,
-        )
-
-        assert result["geometry_index"] == 0
-        mock_bridge.execute_python.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_add_sketch_polygon(self, register_tools, mock_bridge):
-        """add_sketch_polygon should add a regular polygon to a sketch."""
-        mock_bridge.execute_python = AsyncMock(
-            return_value=ExecutionResult(
-                success=True,
-                result={"geometry_count": 6, "constraint_count": 12},
-                stdout="",
-                stderr="",
-                execution_time_ms=15.0,
-            )
-        )
-
-        add_polygon = register_tools["add_sketch_polygon"]
-        result = await add_polygon(
-            sketch_name="Sketch", center_x=0, center_y=0, radius=10, sides=6
-        )
-
-        assert result["geometry_count"] == 6
-        mock_bridge.execute_python.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_add_sketch_slot(self, register_tools, mock_bridge):
-        """add_sketch_slot should add a slot to a sketch."""
-        mock_bridge.execute_python = AsyncMock(
-            return_value=ExecutionResult(
-                success=True,
-                result={"geometry_count": 4, "constraint_count": 8},
-                stdout="",
-                stderr="",
-                execution_time_ms=15.0,
-            )
-        )
-
-        add_slot = register_tools["add_sketch_slot"]
-        result = await add_slot(
-            sketch_name="Sketch",
-            center1_x=-10,
-            center1_y=0,
-            center2_x=10,
-            center2_y=0,
-            radius=5,
-        )
-
-        assert result["geometry_count"] == 4
-        mock_bridge.execute_python.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_add_sketch_bspline(self, register_tools, mock_bridge):
-        """add_sketch_bspline should add a B-spline to a sketch."""
-        mock_bridge.execute_python = AsyncMock(
-            return_value=ExecutionResult(
-                success=True,
-                result={"geometry_index": 0, "geometry_count": 1},
-                stdout="",
-                stderr="",
-                execution_time_ms=15.0,
-            )
-        )
-
-        add_bspline = register_tools["add_sketch_bspline"]
-        result = await add_bspline(
-            sketch_name="Sketch",
-            points=[[0, 0], [10, 5], [20, 0], [30, -5]],
-            closed=False,
-        )
-
-        assert result["geometry_index"] == 0
-        mock_bridge.execute_python.assert_called_once()
-
-    # Tests for Sketcher constraint tools
-
-    @pytest.mark.asyncio
-    async def test_add_sketch_constraint(self, register_tools, mock_bridge):
-        """add_sketch_constraint should add a constraint to a sketch."""
-        mock_bridge.execute_python = AsyncMock(
-            return_value=ExecutionResult(
-                success=True,
-                result={"constraint_index": 0, "constraint_count": 1},
-                stdout="",
-                stderr="",
-                execution_time_ms=10.0,
-            )
-        )
-
-        add_constraint = register_tools["add_sketch_constraint"]
-        result = await add_constraint(
-            sketch_name="Sketch",
-            constraint_type="Horizontal",
-            geometry1=0,
-        )
-
-        assert result["constraint_index"] == 0
-        mock_bridge.execute_python.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_constrain_horizontal(self, register_tools, mock_bridge):
-        """constrain_horizontal should add a horizontal constraint."""
-        mock_bridge.execute_python = AsyncMock(
-            return_value=ExecutionResult(
-                success=True,
-                result={"constraint_index": 0, "constraint_count": 1},
-                stdout="",
-                stderr="",
-                execution_time_ms=10.0,
-            )
-        )
-
-        constrain = register_tools["constrain_horizontal"]
-        result = await constrain(sketch_name="Sketch", geometry_index=0)
-
-        assert result["constraint_index"] == 0
-        mock_bridge.execute_python.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_constrain_vertical(self, register_tools, mock_bridge):
-        """constrain_vertical should add a vertical constraint."""
-        mock_bridge.execute_python = AsyncMock(
-            return_value=ExecutionResult(
-                success=True,
-                result={"constraint_index": 0, "constraint_count": 1},
-                stdout="",
-                stderr="",
-                execution_time_ms=10.0,
-            )
-        )
-
-        constrain = register_tools["constrain_vertical"]
-        result = await constrain(sketch_name="Sketch", geometry_index=0)
-
-        assert result["constraint_index"] == 0
-        mock_bridge.execute_python.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_constrain_coincident(self, register_tools, mock_bridge):
-        """constrain_coincident should make two points coincident."""
-        mock_bridge.execute_python = AsyncMock(
-            return_value=ExecutionResult(
-                success=True,
-                result={"constraint_index": 0, "constraint_count": 1},
-                stdout="",
-                stderr="",
-                execution_time_ms=10.0,
-            )
-        )
-
-        constrain = register_tools["constrain_coincident"]
-        result = await constrain(
-            sketch_name="Sketch", geometry1=0, point1=1, geometry2=1, point2=2
-        )
-
-        assert result["constraint_index"] == 0
-        mock_bridge.execute_python.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_constrain_parallel(self, register_tools, mock_bridge):
-        """constrain_parallel should make two lines parallel."""
-        mock_bridge.execute_python = AsyncMock(
-            return_value=ExecutionResult(
-                success=True,
-                result={"constraint_index": 0, "constraint_count": 1},
-                stdout="",
-                stderr="",
-                execution_time_ms=10.0,
-            )
-        )
-
-        constrain = register_tools["constrain_parallel"]
-        result = await constrain(sketch_name="Sketch", geometry1=0, geometry2=1)
-
-        assert result["constraint_index"] == 0
-        mock_bridge.execute_python.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_constrain_perpendicular(self, register_tools, mock_bridge):
-        """constrain_perpendicular should make two lines perpendicular."""
-        mock_bridge.execute_python = AsyncMock(
-            return_value=ExecutionResult(
-                success=True,
-                result={"constraint_index": 0, "constraint_count": 1},
-                stdout="",
-                stderr="",
-                execution_time_ms=10.0,
-            )
-        )
-
-        constrain = register_tools["constrain_perpendicular"]
-        result = await constrain(sketch_name="Sketch", geometry1=0, geometry2=1)
-
-        assert result["constraint_index"] == 0
-        mock_bridge.execute_python.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_constrain_tangent(self, register_tools, mock_bridge):
-        """constrain_tangent should make two curves tangent."""
-        mock_bridge.execute_python = AsyncMock(
-            return_value=ExecutionResult(
-                success=True,
-                result={"constraint_index": 0, "constraint_count": 1},
-                stdout="",
-                stderr="",
-                execution_time_ms=10.0,
-            )
-        )
-
-        constrain = register_tools["constrain_tangent"]
-        result = await constrain(sketch_name="Sketch", geometry1=0, geometry2=1)
-
-        assert result["constraint_index"] == 0
-        mock_bridge.execute_python.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_constrain_equal(self, register_tools, mock_bridge):
-        """constrain_equal should make two elements equal."""
-        mock_bridge.execute_python = AsyncMock(
-            return_value=ExecutionResult(
-                success=True,
-                result={"constraint_index": 0, "constraint_count": 1},
-                stdout="",
-                stderr="",
-                execution_time_ms=10.0,
-            )
-        )
-
-        constrain = register_tools["constrain_equal"]
-        result = await constrain(sketch_name="Sketch", geometry1=0, geometry2=1)
-
-        assert result["constraint_index"] == 0
-        mock_bridge.execute_python.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_constrain_distance(self, register_tools, mock_bridge):
-        """constrain_distance should set distance between elements."""
-        mock_bridge.execute_python = AsyncMock(
-            return_value=ExecutionResult(
-                success=True,
-                result={"constraint_index": 0, "constraint_count": 1},
-                stdout="",
-                stderr="",
-                execution_time_ms=10.0,
-            )
-        )
-
-        constrain = register_tools["constrain_distance"]
-        result = await constrain(sketch_name="Sketch", geometry1=0, distance=25.0)
-
-        assert result["constraint_index"] == 0
-        mock_bridge.execute_python.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_constrain_distance_x(self, register_tools, mock_bridge):
-        """constrain_distance_x should set horizontal distance."""
-        mock_bridge.execute_python = AsyncMock(
-            return_value=ExecutionResult(
-                success=True,
-                result={"constraint_index": 0, "constraint_count": 1},
-                stdout="",
-                stderr="",
-                execution_time_ms=10.0,
-            )
-        )
-
-        constrain = register_tools["constrain_distance_x"]
-        result = await constrain(
-            sketch_name="Sketch", geometry=0, point=1, distance=15.0
-        )
-
-        assert result["constraint_index"] == 0
-        mock_bridge.execute_python.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_constrain_distance_y(self, register_tools, mock_bridge):
-        """constrain_distance_y should set vertical distance."""
-        mock_bridge.execute_python = AsyncMock(
-            return_value=ExecutionResult(
-                success=True,
-                result={"constraint_index": 0, "constraint_count": 1},
-                stdout="",
-                stderr="",
-                execution_time_ms=10.0,
-            )
-        )
-
-        constrain = register_tools["constrain_distance_y"]
-        result = await constrain(
-            sketch_name="Sketch", geometry=0, point=1, distance=20.0
-        )
-
-        assert result["constraint_index"] == 0
-        mock_bridge.execute_python.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_constrain_radius(self, register_tools, mock_bridge):
-        """constrain_radius should set radius of a circle/arc."""
-        mock_bridge.execute_python = AsyncMock(
-            return_value=ExecutionResult(
-                success=True,
-                result={"constraint_index": 0, "constraint_count": 1},
-                stdout="",
-                stderr="",
-                execution_time_ms=10.0,
-            )
-        )
-
-        constrain = register_tools["constrain_radius"]
-        result = await constrain(sketch_name="Sketch", geometry_index=0, radius=12.5)
-
-        assert result["constraint_index"] == 0
-        mock_bridge.execute_python.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_constrain_angle(self, register_tools, mock_bridge):
-        """constrain_angle should set angle of a line."""
-        mock_bridge.execute_python = AsyncMock(
-            return_value=ExecutionResult(
-                success=True,
-                result={"constraint_index": 0, "constraint_count": 1},
-                stdout="",
-                stderr="",
-                execution_time_ms=10.0,
-            )
-        )
-
-        constrain = register_tools["constrain_angle"]
-        result = await constrain(sketch_name="Sketch", geometry1=0, angle=45.0)
-
-        assert result["constraint_index"] == 0
-        mock_bridge.execute_python.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_constrain_fix(self, register_tools, mock_bridge):
-        """constrain_fix should fix a point at its position."""
-        mock_bridge.execute_python = AsyncMock(
-            return_value=ExecutionResult(
-                success=True,
-                result={"constraint_index": 0, "constraint_count": 1},
-                stdout="",
-                stderr="",
-                execution_time_ms=10.0,
-            )
-        )
-
-        constrain = register_tools["constrain_fix"]
-        result = await constrain(sketch_name="Sketch", geometry_index=0, point_index=1)
-
-        assert result["constraint_index"] == 0
-        mock_bridge.execute_python.assert_called_once()
-
-    # Tests for Sketcher operations
-
-    @pytest.mark.asyncio
-    async def test_add_external_geometry(self, register_tools, mock_bridge):
-        """add_external_geometry should reference external edges."""
-        mock_bridge.execute_python = AsyncMock(
-            return_value=ExecutionResult(
-                success=True,
-                result={"geometry_index": -3, "success": True},
-                stdout="",
-                stderr="",
-                execution_time_ms=10.0,
-            )
-        )
-
-        add_external = register_tools["add_external_geometry"]
-        result = await add_external(
-            sketch_name="Sketch", object_name="Box", element="Edge1"
-        )
-
-        assert result["success"] is True
-        mock_bridge.execute_python.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_delete_sketch_geometry(self, register_tools, mock_bridge):
-        """delete_sketch_geometry should delete geometry from sketch."""
-        mock_bridge.execute_python = AsyncMock(
-            return_value=ExecutionResult(
-                success=True,
-                result={"success": True, "geometry_count": 3},
-                stdout="",
-                stderr="",
-                execution_time_ms=10.0,
-            )
-        )
-
-        delete_geometry = register_tools["delete_sketch_geometry"]
-        result = await delete_geometry(sketch_name="Sketch", geometry_index=0)
-
-        assert result["success"] is True
-        mock_bridge.execute_python.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_delete_sketch_constraint(self, register_tools, mock_bridge):
-        """delete_sketch_constraint should delete constraint from sketch."""
-        mock_bridge.execute_python = AsyncMock(
-            return_value=ExecutionResult(
-                success=True,
-                result={"success": True, "constraint_count": 5},
-                stdout="",
-                stderr="",
-                execution_time_ms=10.0,
-            )
-        )
-
-        delete_constraint = register_tools["delete_sketch_constraint"]
-        result = await delete_constraint(sketch_name="Sketch", constraint_index=0)
-
-        assert result["success"] is True
-        mock_bridge.execute_python.assert_called_once()
+    # Tests for sketch inspection
 
     @pytest.mark.asyncio
     async def test_get_sketch_info(self, register_tools, mock_bridge):
@@ -1498,32 +1214,6 @@ class TestPartDesignTools:
         generated_code = mock_bridge.execute_python.await_args.args[0]
         assert "sketch.solve()" in generated_code
         assert "sketch.DoF" in generated_code
-        mock_bridge.execute_python.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_toggle_construction(self, register_tools, mock_bridge):
-        """toggle_construction should toggle geometry mode."""
-        mock_bridge.execute_python = AsyncMock(
-            return_value=ExecutionResult(
-                success=True,
-                result={
-                    "geometry_index": 0,
-                    "is_construction": True,
-                    "sketch_status": {"geometry_count": 1},
-                },
-                stdout="",
-                stderr="",
-                execution_time_ms=10.0,
-            )
-        )
-
-        toggle = register_tools["toggle_construction"]
-        result = await toggle(sketch_name="Sketch", geometry_index=0)
-
-        assert result["geometry_index"] == 0
-        assert result["is_construction"] is True
-        generated_code = mock_bridge.execute_python.await_args.args[0]
-        assert "sketch.getConstruction(0)" in generated_code
         mock_bridge.execute_python.assert_called_once()
 
 
