@@ -366,6 +366,18 @@ class TestMain:
         mock_config.http_host = "127.0.0.1"
         mock_config.http_port = 8080
         mock_config.access_token = "x" * 64
+        mock_config.http_json_response = True
+        mock_config.http_unstructured_tool_results = True
+        mock_config.log_tool_arguments = True
+        mock_config.log_tool_results = True
+        mock_config.log_value_max_chars = 4_000
+        mock_config.wire_audit_enabled = True
+        mock_config.wire_audit_dir = "logs/mcp-wire"
+        mock_config.wire_save_raw = True
+        mock_config.wire_console_body = True
+        mock_config.wire_console_max_chars = 50_000
+        mock_config.wire_capture_max_bytes = 128 * 1024 * 1024
+        mock_config.wire_validate = True
 
         upstream_app = object()
         with (
@@ -394,6 +406,10 @@ class TestMain:
             assert isinstance(auth_app, StaticBearerAuthMiddleware)
             assert isinstance(auth_app.app, McpMethodAuditMiddleware)
             assert auth_app.app.app is upstream_app
+            assert auth_app.app.wire_audit_enabled is True
+            assert auth_app.app.wire_save_raw is True
+            assert auth_app.app.wire_console_body is True
+            assert auth_app.app.wire_validate is True
             assert call_kwargs["host"] == "127.0.0.1"
             assert call_kwargs["port"] == 8080
             assert call_kwargs["log_level"] == "info"

@@ -1,5 +1,8 @@
 $ErrorActionPreference = 'Stop'
 
+$projectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+Set-Location $projectRoot
+
 # PowerShell/Windows Terminal/VS Code can keep a long-lived parent process with
 # stale environment variables. Read the persisted per-user value directly as a
 # fallback instead of relying only on the inherited process environment.
@@ -74,6 +77,18 @@ $env:FREECAD_HTTP_UNSTRUCTURED_TOOL_RESULTS = 'true'
 $env:FREECAD_LOG_TOOL_ARGUMENTS = 'true'
 $env:FREECAD_LOG_TOOL_RESULTS = 'true'
 $env:FREECAD_LOG_VALUE_MAX_CHARS = '4000'
+
+# Final wire-level diagnostics. The console log shows the actual JSON-RPC
+# response structure with only binary base64 replaced by hash/length markers.
+# The raw response file contains the exact HTTP entity body emitted to the SaaS
+# connector and may therefore contain complete images and sensitive model data.
+$env:FREECAD_WIRE_AUDIT_ENABLED = 'true'
+$env:FREECAD_WIRE_AUDIT_DIR = (Join-Path $projectRoot 'logs\mcp-wire')
+$env:FREECAD_WIRE_SAVE_RAW = 'true'
+$env:FREECAD_WIRE_CONSOLE_BODY = 'true'
+$env:FREECAD_WIRE_CONSOLE_MAX_CHARS = '50000'
+$env:FREECAD_WIRE_CAPTURE_MAX_BYTES = '134217728'
+$env:FREECAD_WIRE_VALIDATE = 'true'
 
 $existingListener = Get-NetTCPConnection `
     -LocalPort ([int]$env:FREECAD_HTTP_PORT) `

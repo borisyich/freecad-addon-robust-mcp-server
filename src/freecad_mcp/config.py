@@ -53,6 +53,13 @@ class ServerConfig(BaseSettings):
         log_tool_arguments: Log sanitized tool arguments for remote debugging.
         log_tool_results: Log a compact summary of tool results.
         log_value_max_chars: Maximum string size retained in diagnostic logs.
+        wire_audit_enabled: Enable final HTTP/JSON-RPC wire auditing.
+        wire_audit_dir: Directory for exact request/response audit artifacts.
+        wire_save_raw: Save the exact response entity body, including base64 images.
+        wire_console_body: Log the final JSON-RPC body with binary data redacted.
+        wire_console_max_chars: Maximum sanitized wire body logged to the console.
+        wire_capture_max_bytes: Maximum response size retained for validation.
+        wire_validate: Validate final messages against MCP revision rules.
         log_level: Logging level.
     """
 
@@ -151,6 +158,42 @@ class ServerConfig(BaseSettings):
         int,
         Field(ge=128, le=100_000, description="Maximum logged string length"),
     ] = 4_000
+    wire_audit_enabled: Annotated[
+        bool,
+        Field(description="Audit final HTTP JSON-RPC request/response payloads"),
+    ] = False
+    wire_audit_dir: Annotated[
+        Path,
+        Field(description="Directory for MCP wire audit artifacts"),
+    ] = Path("logs/mcp-wire")
+    wire_save_raw: Annotated[
+        bool,
+        Field(
+            description=(
+                "Save exact response bodies, including image/audio base64, to disk"
+            )
+        ),
+    ] = False
+    wire_console_body: Annotated[
+        bool,
+        Field(description="Log final JSON-RPC bodies with only binary data redacted"),
+    ] = False
+    wire_console_max_chars: Annotated[
+        int,
+        Field(ge=1_000, le=1_000_000, description="Maximum wire body console length"),
+    ] = 20_000
+    wire_capture_max_bytes: Annotated[
+        int,
+        Field(
+            ge=1_000_000,
+            le=512 * 1024 * 1024,
+            description="Maximum response bytes retained for wire validation",
+        ),
+    ] = 128 * 1024 * 1024
+    wire_validate: Annotated[
+        bool,
+        Field(description="Validate final HTTP responses against MCP revision rules"),
+    ] = True
     log_level: str = "INFO"
 
     # Security settings

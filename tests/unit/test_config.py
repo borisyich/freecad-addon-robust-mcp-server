@@ -31,6 +31,13 @@ class TestServerConfig:
         assert config.log_tool_arguments is False
         assert config.log_tool_results is False
         assert config.log_value_max_chars == 4_000
+        assert config.wire_audit_enabled is False
+        assert str(config.wire_audit_dir).replace("\\", "/").endswith("logs/mcp-wire")
+        assert config.wire_save_raw is False
+        assert config.wire_console_body is False
+        assert config.wire_console_max_chars == 20_000
+        assert config.wire_capture_max_bytes == 128 * 1024 * 1024
+        assert config.wire_validate is True
         assert config.log_level == "INFO"
         assert config.enable_sandbox is True
 
@@ -68,6 +75,13 @@ class TestServerConfig:
                 "FREECAD_LOG_TOOL_ARGUMENTS": "true",
                 "FREECAD_LOG_TOOL_RESULTS": "true",
                 "FREECAD_LOG_VALUE_MAX_CHARS": "9000",
+                "FREECAD_WIRE_AUDIT_ENABLED": "true",
+                "FREECAD_WIRE_AUDIT_DIR": "D:/mcp-audit",
+                "FREECAD_WIRE_SAVE_RAW": "true",
+                "FREECAD_WIRE_CONSOLE_BODY": "true",
+                "FREECAD_WIRE_CONSOLE_MAX_CHARS": "60000",
+                "FREECAD_WIRE_CAPTURE_MAX_BYTES": "67108864",
+                "FREECAD_WIRE_VALIDATE": "false",
             },
         ):
             config = ServerConfig()
@@ -80,6 +94,13 @@ class TestServerConfig:
         assert config.log_tool_arguments is True
         assert config.log_tool_results is True
         assert config.log_value_max_chars == 9_000
+        assert config.wire_audit_enabled is True
+        assert str(config.wire_audit_dir).replace("\\", "/") == "D:/mcp-audit"
+        assert config.wire_save_raw is True
+        assert config.wire_console_body is True
+        assert config.wire_console_max_chars == 60_000
+        assert config.wire_capture_max_bytes == 67_108_864
+        assert config.wire_validate is False
 
     def test_invalid_port_raises_error(self):
         """Invalid port should raise validation error."""

@@ -763,8 +763,29 @@ def main() -> None:
             config.log_tool_results,
             config.log_value_max_chars,
         )
+        logger.info(
+            "Wire audit: enabled=%s, save_raw=%s, console_body=%s, "
+            "validate=%s, directory=%s",
+            config.wire_audit_enabled,
+            config.wire_save_raw,
+            config.wire_console_body,
+            config.wire_validate,
+            config.wire_audit_dir,
+        )
+        if config.wire_save_raw:
+            logger.warning(
+                "Raw MCP wire auditing is enabled. Audit files may contain "
+                "complete images, model data, local paths, and tool output."
+            )
         mcp_app = McpMethodAuditMiddleware(
-            mcp.streamable_http_app()
+            mcp.streamable_http_app(),
+            wire_audit_enabled=config.wire_audit_enabled,
+            wire_audit_dir=config.wire_audit_dir,
+            wire_save_raw=config.wire_save_raw,
+            wire_console_body=config.wire_console_body,
+            wire_console_max_chars=config.wire_console_max_chars,
+            wire_capture_max_bytes=config.wire_capture_max_bytes,
+            wire_validate=config.wire_validate,
         )
 
         app = StaticBearerAuthMiddleware(

@@ -54,6 +54,18 @@
   FreeCAD-side workbench on Windows with backup of the previous installation.
 - Added opt-in sanitized logging of parsed MCP tool arguments via
   `FREECAD_LOG_TOOL_ARGUMENTS`, compact summaries via `FREECAD_LOG_TOOL_RESULTS`.
+- Added final ASGI-boundary logging of the exact JSON-RPC response entity body
+  sent to remote MCP clients.
+- Added per-request raw request/response artifacts with byte counts and SHA-256
+  hashes under `logs/mcp-wire`.
+- Added console-safe full response logging that redacts only binary base64.
+- Added separate client-request and server-response MCP validation results.
+- Added stable revision profiles for 2024-11-05, 2025-03-26, 2025-06-18,
+  and 2025-11-25.
+- Added live Streamable HTTP verification for 2025-03-26, 2025-06-18, and
+  2025-11-25.
+- Added outputSchema/structuredContent, image, audio, version-header, JSON-RPC
+  correlation, and missing-content regression tests.
 
 This project uses **component-specific versioning**. Each component has its own
 release notes and version history.
