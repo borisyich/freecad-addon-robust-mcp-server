@@ -48,7 +48,6 @@ This document describes the architecture for a Model Context Protocol (MCP) serv
       - [`add_sketch_geometry`](#add_sketch_geometry)
       - [`boolean_operation`](#boolean_operation)
     - [Export/Import Tools](#exportimport-tools)
-      - [`export_mesh`](#export_mesh)
       - [`export`](#export)
       - [`import`](#import)
     - [Debugging Tools](#debugging-tools)
@@ -1150,32 +1149,6 @@ async def boolean_operation(
 ```
 
 ### Export/Import Tools
-
-#### `export_mesh`
-
-```python
-@mcp.tool()
-async def export_mesh(
-    objects: list[str],
-    path: str,
-    format: str = "stl",
-    options: dict | None = None,
-    doc_name: str | None = None,
-) -> dict:
-    """Export objects as mesh (STL, OBJ, etc.).
-
-    Args:
-        objects: List of object names to export
-        path: Output file path
-        format: Export format ('stl', 'obj', 'ply', 'off')
-        options: Format-specific options (e.g., mesh deflection)
-        doc_name: Document name
-
-    Returns:
-        Export status and file info
-    """
-    pass
-```
 
 #### `export`
 
