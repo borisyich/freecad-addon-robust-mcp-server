@@ -429,6 +429,8 @@ class TestFreecadResources:
         assert "Milling" in result
         assert "Turning" in result
         assert "Sheet-metal" in result
+        assert "flat pattern/developed blank" in result
+        assert "fixed/moving panels" in result
 
     @pytest.mark.asyncio
     async def test_resource_best_practices(

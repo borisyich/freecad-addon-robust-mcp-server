@@ -196,21 +196,45 @@ detail and should be created earlier.
 
 - Start with the largest functional planar panel or the panel that best controls
   the coordinate system, then establish the nominal thickness.
+- When a **flat pattern/developed blank** is present, treat it as a manufacturing
+  representation rather than an orthographic view of the formed part. It defines
+  the planar blank perimeter, flat-domain hole/cutout locations, bend lines, and
+  panel adjacency. Do not use its overall extents as the final 3D bounding box.
+- Before modeling, split the flat pattern into named panel regions and build a
+  bend table containing each bend axis, adjacent fixed/moving panels, signed
+  up/down direction, angle, inside radius, neutral rule, and expected final panel
+  normal. `BEND UP`/`BEND DOWN` are relative to the viewed blank face, not
+  automatically to global FreeCAD `+Z`/`-Z`.
+- Distinguish planar **profile radii** on the cut perimeter from **bend radii** at
+  bend lines. Curved blank edges remain panel boundaries; they are not evidence
+  of a curved bend axis.
 - Add connected flanges/tabs and bends while preserving one continuous body and
-  constant nominal thickness. Verify overlap, gaps, and bend direction after
-  every major flange.
+  constant nominal thickness. Holes and cutouts belong to their panels and must
+  rotate with those panels during folding. Verify overlap, gaps, and bend
+  direction after every major flange.
 - A bend deforms material around a neutral axis; do **not** generically simulate
   it by adding volume on one side and subtracting an equal volume on the other.
   Use sheet-metal/bend features when available. If they are unavailable, use a
-  documented constant-thickness approximation and do not claim a reliable flat
-  pattern.
+  documented constant-thickness approximation with tangent bend zones and do not
+  claim a reliable native unfold.
 - Bend allowance, bend deduction, K-factor, inside radius, and thickness control
   the developed blank. Use explicit drawing/manufacturing data when supplied;
-  do not invent production values.
+  do not invent production values or apply bend compensation twice to an already
+  dimensioned flat pattern.
+- Verify both representations when possible: the formed state against formed or
+  isometric views, and the unfolded state against the supplied flat contour,
+  bend lines, and feature locations.
+- Separate bend-dominated stamped parts from stretch-formed or deep-drawn
+  parts. Ordinary bend allowance/K-factor reasoning applies to developable bend
+  zones, not to material stretched over dies. Do not claim an exact blank for a
+  deep draw, emboss, or complex stamping without explicit tooling/forming data.
 - Beads, dimples, louvers, embossed ribs, and other formed details require local
   thickness continuity. Simple additive/subtractive approximations are allowed
   only when they preserve the intended outer/inner surfaces sufficiently for the
   task and are clearly reported as approximations.
+
+Read the detailed flat-pattern workflow in
+[references/sheet-metal-flat-patterns.md](references/sheet-metal-flat-patterns.md).
 
 ## 5. Reconstruct from drawings or images
 

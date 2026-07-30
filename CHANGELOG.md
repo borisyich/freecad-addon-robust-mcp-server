@@ -76,6 +76,7 @@
 - Consolidated GUI/view utility entry points into `set_visual_properties`, `workbench`, `history`, and `selection`; removed zoom and duplicate console/recompute tools.
 - Consolidated file exchange into `export` and `import`, with explicit format routing and consistent import results.
 - Consolidated Box, Cylinder, Sphere, Cone, Torus, Wedge, and Helix creation into the typed `create_primitive` tool.
+- Expanded the engineering Skill with flat-pattern recognition, panel-and-bend graphs, neutral-axis/developed-length rules, formed/unfolded validation, and a FreeCAD fallback strategy for stamped and bent sheet-metal parts.
 
 This project uses **component-specific versioning**. Each component has its own
 release notes and version history.

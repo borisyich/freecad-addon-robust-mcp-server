@@ -88,6 +88,52 @@ def test_prompts_page_contains_every_registered_prompt() -> None:
     assert missing == []
 
 
+def test_freecad_engineering_skill_covers_flat_pattern_reconstruction() -> None:
+    skill_path = ROOT / ".agents/skills/freecad-engineering/SKILL.md"
+    reference_path = (
+        ROOT
+        / ".agents/skills/freecad-engineering/references"
+        / "sheet-metal-flat-patterns.md"
+    )
+
+    skill = skill_path.read_text(encoding="utf-8")
+    reference = reference_path.read_text(encoding="utf-8")
+    normalized_skill = " ".join(skill.split())
+    normalized_reference = " ".join(reference.split())
+
+    assert reference_path.exists()
+    assert "references/sheet-metal-flat-patterns.md" in skill
+
+    # The main Skill must route the agent through the essential reconstruction
+    # decisions, not merely mention sheet metal as a supported process.
+    for concept in (
+        "manufacturing representation rather than an orthographic view",
+        "panel regions",
+        "fixed/moving panels",
+        "relative to the viewed blank face",
+        "profile radii",
+        "rotate with those panels",
+        "apply bend compensation twice",
+        "formed state",
+        "unfolded state",
+    ):
+        assert concept in normalized_skill
+
+    # The detailed reference must provide enough information to derive a formed
+    # model from a blank without conflating flat and world coordinates.
+    for concept in (
+        "Separate flat and formed dimension domains",
+        "Build a panel-and-bend graph",
+        "neutral radius Rn = Ri + K * t",
+        "bend allowance BA = theta * (Ri + K * t)",
+        "A hole belongs to a panel",
+        "constant-thickness quarter-annular",
+        "Deep drawing, stretch forming",
+        "Never claim a manufacturing-correct flat pattern",
+    ):
+        assert concept in normalized_reference
+
+
 def test_freecad_engineering_skill_has_codex_routing_metadata() -> None:
     skill = (
         ROOT / ".agents/skills/freecad-engineering/SKILL.md"

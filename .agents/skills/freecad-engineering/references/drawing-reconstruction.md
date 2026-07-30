@@ -19,7 +19,25 @@ Determine whether the sheet follows first-angle, third-angle, or a deliberately
 non-standard arrangement. When the convention is unclear, classify views from
 feature correspondence rather than layout.
 
-## 2. FreeCAD view, plane, and normal-axis contract
+## 2. Treat flat patterns as manufacturing views
+
+A flat pattern/developed blank does not belong to the front/top/side camera
+system. Identify it before constructing the orthographic view map.
+
+Evidence includes a single planar blank contour, all holes shown in one plane,
+straight bend lines, `BEND UP`/`BEND DOWN` callouts, and notes for thickness,
+bend radius, or neutral factor. Two regions of a drawing may repeat the same
+flat contour—one for bend/radius callouts and another for ordinate dimensions.
+Do not classify those duplicates as different formed views.
+
+Use the flat pattern for blank geometry, bend-line coordinates, panel adjacency,
+and pre-bend feature locations. Use formed orthographic/isometric views for final
+panel normals, bend signs, and spatial envelope. Build the panel-and-bend graph
+described in
+[sheet-metal-flat-patterns.md](sheet-metal-flat-patterns.md)
+before choosing sketch planes or transforms.
+
+## 3. FreeCAD view, plane, and normal-axis contract
 
 Unless the model has an explicitly different global coordinate system, use:
 
@@ -45,7 +63,7 @@ This rule prevents a common failure: reproducing the correct circular outline on
 the wrong plane, producing a plausible isometric model whose axis is rotated by
 90 degrees.
 
-## 3. Build a view map before the feature plan
+## 4. Build a view map before the feature plan
 
 Create a compact table such as:
 
@@ -68,7 +86,7 @@ For every planned feature state:
 Do not proceed with a feature whose profile plane and normal axis are still
 implicit.
 
-## 4. Assign dimensions to model axes
+## 5. Assign dimensions to model axes
 
 Create an axis-aware evidence table:
 
@@ -93,7 +111,7 @@ Rules:
 5. Shared coordinates and overall dimensions must reconcile across all views
    before they become driving constraints.
 
-## 5. Evidence extraction
+## 6. Evidence extraction
 
 1. Inspect the full sheet to identify views, sections, details, notes, units, and
    scale relationships.
@@ -106,7 +124,7 @@ Rules:
 5. Treat isometric views as a spatial cross-check, not the source of exact
    orthographic dimensions unless explicitly annotated.
 
-## 6. Planning
+## 7. Planning
 
 Choose the stock/process classification first. Then plan a parametric sequence
 with:
@@ -122,7 +140,7 @@ A feature plan that says only “draw this outline and extrude” is incomplete.
 must also say **which view supplied the outline** and **which view supplied the
 extrusion depth**.
 
-## 7. Visual checking and multi-view fallback
+## 8. Visual checking and multi-view fallback
 
 Use same-view comparisons. A whole drawing sheet compared with an isometric
 screenshot is weak evidence. Crop the relevant drawing view and orient FreeCAD
@@ -151,7 +169,7 @@ Do not accept a model because its isometric image merely “looks similar.” Th
 orthographic set must agree on width, height, depth, axis orientation, and
 feature placement.
 
-## 8. ACT → OBSERVE → REACT with a view contract
+## 9. ACT → OBSERVE → REACT with a view contract
 
 ### ACT
 
@@ -174,7 +192,7 @@ normal axis, and reference view.
 - continue only when the current feature is consistent with all relevant views;
 - otherwise correct or undo the causal feature before adding downstream detail.
 
-## 9. Autonomous ambiguity handling
+## 10. Autonomous ambiguity handling
 
 When a value is unreadable or ambiguous:
 

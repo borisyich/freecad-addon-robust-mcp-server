@@ -99,7 +99,18 @@ Start with the largest functional panel or the panel that best defines the datum
 scheme. Establish nominal thickness once and preserve it through connected
 features.
 
-### Bends and flanges
+### Bends, flanges, and flat patterns
+
+A flat pattern is the planar developed blank before bending. It is not an
+orthographic view of the formed part. Treat its cut perimeter, holes/cutouts,
+bend lines, and panel adjacency as flat-domain evidence, while formed views
+control final panel orientation and envelope.
+
+Before creating geometry, build a panel-and-bend graph. Record the flat bend
+axis, adjacent fixed/moving panels, direction relative to the viewed blank face,
+angle, inside radius, neutral rule, and expected final panel normal. Distinguish
+profile radii in the blank outline from bend radii at bend lines, and transform
+holes with their owning panels.
 
 A bend is a deformation with an inside radius and a neutral axis. Flat length is
 controlled by bend allowance/deduction or K-factor. Therefore:
@@ -143,6 +154,13 @@ A useful design-history order is:
 Actual manufacturing may punch holes before bending. The model should preserve
 final design intent and, when flat-pattern accuracy matters, use proper sheet
 metal parameters rather than imitate shop-floor order with arbitrary booleans.
+Do not apply bend allowance/deduction twice when the drawing already supplies a
+fully dimensioned blank.
+
+See
+[sheet-metal-flat-patterns.md](sheet-metal-flat-patterns.md)
+for recognition, panel/bend tables, neutral-axis equations, FreeCAD fallback
+construction, and validation requirements.
 
 ## General additions often missed
 

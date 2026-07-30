@@ -43,7 +43,11 @@ principles. These links are references, not runtime dependencies.
 
 The sheet-metal guidance therefore rejects a universal "add equal volume on one
 side and remove it on the other" rule. That boolean heuristic does not represent
-neutral-axis deformation or guarantee a correct developed blank.
+neutral-axis deformation or guarantee a correct developed blank. The detailed
+flat-pattern reference uses the common convention `Rn = Ri + K * t` and
+`BA = theta * Rn`, while requiring explicit drawing values or bend tables to
+override generic formulas and preventing compensation from being applied twice
+to an already dimensioned blank.
 
 ## Manufacturing-oriented classification
 

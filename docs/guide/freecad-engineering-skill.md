@@ -29,7 +29,7 @@ freecad://skills/freecad-engineering
 The Skill covers:
 
 - stock and dominant-process classification;
-- milling, turning, and sheet-metal modeling strategies;
+- milling, turning, and sheet-metal modeling strategies, including flat-pattern/developed-blank reconstruction;
 - editable Body/Sketch/PartDesign structure;
 - feature dependency/order guidance;
 - drawing-view identification, FreeCAD plane/axis mapping, and dimension-axis evidence;
