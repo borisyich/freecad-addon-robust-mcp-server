@@ -11,7 +11,7 @@ Prompt Categories:
     - Troubleshooting: Common issues and solutions
 """
 
-from typing import Any
+from typing import Any, Literal
 
 from freecad_mcp.guidance import (
     DRAWING_RECONSTRUCTION_WORKFLOW,
@@ -224,7 +224,11 @@ local drawings or screenshots without changing the FreeCAD camera.""",
 ```
 create_document(name="MyPart")
 create_partdesign_body(name="Body")
-create_sketch(body_name="Body", plane="XY_Plane", name="BaseSketch")
+create_sketch(
+    body_name="Body",
+    support={"kind": "origin_plane", "plane": "XY_Plane"},
+    name="BaseSketch",
+)
 edit_sketch_geometry(
     sketch_name="BaseSketch",
     operations=[{"op": "add_rectangle", "x": -10, "y": -10, "width": 20, "height": 20}],
@@ -248,7 +252,7 @@ transaction and one recompute. Use `get_sketch_info` after editing.
 
 ## Common Mistakes
 - Creating sketch without a body (will fail on pad).
-- Using wrong plane name (must be exact: "XY_Plane" not "XY").
+- Guessing transient `FaceN` values instead of identifying the intended face.
 - Not closing sketch contour (pad requires closed profile).
 - Not constraining sketches (use get_sketch_info to check degrees of freedom).
 
@@ -264,7 +268,7 @@ significant findings.""",
 4. Inspect solver and profile state with `get_sketch_info`.
 
 ## Geometry Operations
-`edit_sketch_geometry(sketch_name, operations)` supports: 
+`edit_sketch_geometry(sketch_name, operations)` supports:
   `add_rectangle`, `add_circle`, `add_line`, `add_arc`, `add_point`,
   `add_ellipse`, `add_polygon`, `add_slot`, `add_bspline`;
   `add_external_geometry`, `delete_geometry`, `toggle_construction`.
@@ -533,7 +537,7 @@ Create a PartDesign body to contain the parametric features:
 
 ### 3. Create Base Sketch
 Design the base profile:
-- Use `create_sketch` on the XY plane (or appropriate plane)
+- Use `create_sketch` with an `origin_plane`, face, or `datum_plane` typed support
 - Add geometry with `edit_sketch_geometry`.
 - Close the sketch when complete
 
@@ -561,13 +565,13 @@ All dimensions should be specified in **{units}**.
     @mcp.prompt()
     async def create_sketch_guide(
         shape_type: str = "rectangle",
-        plane: str = "XY",
+        origin_plane: Literal["XY_Plane", "XZ_Plane", "YZ_Plane"] = "XY_Plane",
     ) -> str:
         """Guide for creating 2D sketches for part design.
 
         Args:
             shape_type: Type of shape (rectangle, circle, polygon).
-            plane: Sketch plane (XY, XZ, YZ).
+            origin_plane: Origin plane used as the typed sketch support.
 
         Returns:
             Sketch creation guidance.
@@ -575,10 +579,13 @@ All dimensions should be specified in **{units}**.
         return f"""# FreeCAD Sketch Creation Guide
 
 ## Target Shape: {shape_type}
-## Sketch Plane: {plane}
+## Sketch Plane: {origin_plane}
 
 ### Step 1: Create Sketch
-Use `create_sketch` with plane="{plane}" to start a new sketch.
+Use `create_sketch` with
+`support={{"kind": "origin_plane", "plane": "{origin_plane}"}}` to start a new
+sketch. For generated faces use `body_tip_face` or `feature_face`; for a datum
+use `datum_plane`.
 
 ### Step 2: Add Geometry
 

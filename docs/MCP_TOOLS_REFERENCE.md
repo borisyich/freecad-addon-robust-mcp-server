@@ -411,11 +411,24 @@ Create a sketch attached to a Body origin plane, explicit face, or datum plane.
 ```python
 create_sketch(
     body_name: str | None = None,
-    plane: str = "XY_Plane",  # origin plane, "FaceN", "Object.FaceN", or datum name
+    support: SketchSupport | None = None,
     name: str | None = None,
-    doc_name: str | None = None
+    doc_name: str | None = None,
 ) -> dict
 ```
+
+Use the discriminated `support` object:
+
+```python
+{"kind": "origin_plane", "plane": "XY_Plane"}
+{"kind": "body_tip_face", "face": "Face6"}
+{"kind": "feature_face", "feature": "Pad", "face": "Face6"}
+{"kind": "datum_plane", "name": "DP_OilHole"}
+```
+
+If `support` is omitted, the sketch defaults to the `XY_Plane` origin support.
+The result includes the resolved FreeCAD `support` reference and
+`support_kind`.
 
 ### Sketch Geometry and Constraints
 

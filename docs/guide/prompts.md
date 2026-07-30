@@ -20,7 +20,7 @@ Codex and `.clinerules/` for Cline, while detailed modeling policy lives in the
 | Prompt | Parameters | Purpose |
 | --- | --- | --- |
 | `design_part` | `description`, `units` | Produces a concise PartDesign-oriented plan for a requested part. |
-| `create_sketch_guide` | `shape_type`, `plane` | Guides creation and constraint of a sketch. |
+| `create_sketch_guide` | `shape_type`, `origin_plane` | Guides creation and constraint of a sketch using typed support. |
 | `boolean_operations_guide` | none | Guides validation and execution of boolean operations. |
 | `export_guide` | `target_format` | Guides pre-export validation and format selection. |
 | `import_guide` | `source_format` | Guides import and post-import inspection. |

@@ -289,7 +289,10 @@ async def test_parameterized_bracket_full_feature_history(
 
         # 1. Base: 100 x 65 x 14 with two R20 front corners.
         await tools["create_sketch"](
-            "BracketBody", "XY_Plane", "SK_Base", doc_name
+            body_name="BracketBody",
+            support={"kind": "origin_plane", "plane": "XY_Plane"},
+            name="SK_Base",
+            doc_name=doc_name,
         )
         await _replace_sketch_geometry(
             live_bridge,
@@ -316,7 +319,10 @@ sketch.addGeometry(Part.ArcOfCircle(Part.Circle(FreeCAD.Vector(-30,-45,0), FreeC
         # the XZ plane can produce a valid fused solid with increased volume.
         # Build the intended side and verify its world-space bounds explicitly.
         await tools["create_sketch"](
-            "BracketBody", "XZ_Plane", "SK_RearPlate", doc_name
+            body_name="BracketBody",
+            support={"kind": "origin_plane", "plane": "XZ_Plane"},
+            name="SK_RearPlate",
+            doc_name=doc_name,
         )
         await _replace_sketch_geometry(
             live_bridge,
@@ -358,7 +364,10 @@ _result_ = {{
 
         # 3. Solid Ø60 boss. The Ø35 bore is deliberately not part of this Pad.
         await tools["create_sketch"](
-            "BracketBody", "XZ_Plane", "SK_RingBoss", doc_name
+            body_name="BracketBody",
+            support={"kind": "origin_plane", "plane": "XZ_Plane"},
+            name="SK_RingBoss",
+            doc_name=doc_name,
         )
         await _replace_sketch_geometry(
             live_bridge,
@@ -381,7 +390,10 @@ sketch.addGeometry(Part.Circle(FreeCAD.Vector(0,75,0), FreeCAD.Vector(0,0,1), 30
 
         # 4. Central 10 mm rib, symmetric around the YZ plane.
         await tools["create_sketch"](
-            "BracketBody", "YZ_Plane", "SK_CenterRib", doc_name
+            body_name="BracketBody",
+            support={"kind": "origin_plane", "plane": "YZ_Plane"},
+            name="SK_CenterRib",
+            doc_name=doc_name,
         )
         await _replace_sketch_geometry(
             live_bridge,
@@ -427,7 +439,10 @@ _result_ = {{
 
         # 5. All subtractive features are intentionally performed last.
         await tools["create_sketch"](
-            "BracketBody", "XZ_Plane", "SK_Bore35", doc_name
+            body_name="BracketBody",
+            support={"kind": "origin_plane", "plane": "XZ_Plane"},
+            name="SK_Bore35",
+            doc_name=doc_name,
         )
         await _attach_circle_sketch_to_planar_face(
             live_bridge,
@@ -451,7 +466,10 @@ _result_ = {{
         assert bore["removed_volume"] > 0
 
         await tools["create_sketch"](
-            "BracketBody", "XY_Plane", "SK_MountHoles", doc_name
+            body_name="BracketBody",
+            support={"kind": "origin_plane", "plane": "XY_Plane"},
+            name="SK_MountHoles",
+            doc_name=doc_name,
         )
         await _attach_circle_sketch_to_planar_face(
             live_bridge,

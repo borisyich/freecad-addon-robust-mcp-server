@@ -14,8 +14,14 @@ pytestmark = [pytest.mark.integration, pytest.mark.slow]
 async def _base_plate(tools: dict[str, Any], doc: str, body: str = "Body") -> str:
     await _fresh(tools, doc)
     await _call(tools, "create_partdesign_body", name=body, doc_name=doc)
-    await _call(tools, "create_sketch", body_name=body, plane="XY_Plane",
-                name="BaseSketch", doc_name=doc)
+    await _call(
+        tools,
+        "create_sketch",
+        body_name=body,
+        support={"kind": "origin_plane", "plane": "XY_Plane"},
+        name="BaseSketch",
+        doc_name=doc,
+    )
     await _call(
         tools,
         "edit_sketch_geometry",
@@ -32,13 +38,80 @@ async def _base_plate(tools: dict[str, Any], doc: str, body: str = "Body") -> st
 
 
 @pytest.mark.asyncio
+async def test_create_sketch_typed_support_variants(live_tools: dict[str, Any]) -> None:
+    """All four discriminated support variants must work in real FreeCAD."""
+    tools = live_tools
+
+    origin_doc = "McpAuditSupportOrigin"
+    await _fresh(tools, origin_doc)
+    await _call(tools, "create_partdesign_body", name="Body", doc_name=origin_doc)
+    origin = await _call(
+        tools,
+        "create_sketch",
+        body_name="Body",
+        support={"kind": "origin_plane", "plane": "XZ_Plane"},
+        name="OriginSketch",
+        doc_name=origin_doc,
+    )
+    assert origin["support_kind"] == "origin_plane"
+
+    for kind, support in (
+        ("body_tip_face", {"kind": "body_tip_face", "face": "Face6"}),
+        (
+            "feature_face",
+            {"kind": "feature_face", "feature": "BasePad", "face": "Face6"},
+        ),
+    ):
+        doc = f"McpAuditSupport{kind.title().replace('_', '')}"
+        await _base_plate(tools, doc)
+        result = await _call(
+            tools,
+            "create_sketch",
+            body_name="Body",
+            support=support,
+            name=f"{kind}Sketch",
+            doc_name=doc,
+        )
+        assert result["support_kind"] == kind
+        assert result["support"].endswith("Face6")
+
+    datum_doc = "McpAuditSupportDatum"
+    await _fresh(tools, datum_doc)
+    await _call(tools, "create_partdesign_body", name="Body", doc_name=datum_doc)
+    await _call(
+        tools,
+        "create_datum_plane",
+        body_name="Body",
+        base_plane="XY_Plane",
+        offset=12,
+        name="SketchDatum",
+        doc_name=datum_doc,
+    )
+    datum = await _call(
+        tools,
+        "create_sketch",
+        body_name="Body",
+        support={"kind": "datum_plane", "name": "SketchDatum"},
+        name="DatumSketch",
+        doc_name=datum_doc,
+    )
+    assert datum["support_kind"] == "datum_plane"
+
+
+@pytest.mark.asyncio
 async def test_sketch_geometry_and_constraint_operation_catalog(live_tools: dict[str, Any]) -> None:
     tools = live_tools
     doc = "McpAuditSketchOps"
     await _fresh(tools, doc)
     await _call(tools, "create_partdesign_body", name="Body", doc_name=doc)
-    await _call(tools, "create_sketch", body_name="Body", plane="XY_Plane",
-                name="Geometry", doc_name=doc)
+    await _call(
+        tools,
+        "create_sketch",
+        body_name="Body",
+        support={"kind": "origin_plane", "plane": "XY_Plane"},
+        name="Geometry",
+        doc_name=doc,
+    )
     operations = [
         {"op": "add_rectangle", "x": -20, "y": -10, "width": 15, "height": 10},
         {"op": "add_circle", "center_x": 5, "center_y": 5, "radius": 3},
@@ -72,7 +145,7 @@ async def test_sketch_geometry_and_constraint_operation_catalog(live_tools: dict
         tools,
         "create_sketch",
         body_name=None,
-        plane="XY_Plane",
+        support={"kind": "origin_plane", "plane": "XY_Plane"},
         name="ExternalGeometrySketch",
         doc_name=external_doc,
     )
@@ -154,8 +227,14 @@ async def test_sketch_geometry_and_constraint_operation_catalog(live_tools: dict
     }
     for index, (case, (geometry, constraint)) in enumerate(constraint_cases.items()):
         sketch = f"C{index}_{case}"
-        await _call(tools, "create_sketch", body_name="Body", plane="XY_Plane",
-                    name=sketch, doc_name=doc)
+        await _call(
+            tools,
+            "create_sketch",
+            body_name="Body",
+            support={"kind": "origin_plane", "plane": "XY_Plane"},
+            name=sketch,
+            doc_name=doc,
+        )
         await _call(tools, "edit_sketch_geometry", sketch_name=sketch,
                     operations=geometry, doc_name=doc)
         result = await _call(tools, "edit_sketch_constraints", sketch_name=sketch,
@@ -179,8 +258,14 @@ async def test_prismatic_feature_chain_and_choice_values(live_tools: dict[str, A
     await _call(tools, "create_cylindrical_cut", body_name="Body",
                 axis_origin=[0, 0, -1], axis_direction=[0, 0, 1],
                 diameter=8, depth=12, name="CenterCut", doc_name=doc)
-    await _call(tools, "create_sketch", body_name="Body", plane="XY_Plane",
-                name="PocketSketch", doc_name=doc)
+    await _call(
+        tools,
+        "create_sketch",
+        body_name="Body",
+        support={"kind": "origin_plane", "plane": "XY_Plane"},
+        name="PocketSketch",
+        doc_name=doc,
+    )
     await _call(tools, "execute_python", code=f"""
 doc = FreeCAD.getDocument({doc!r})
 sketch = doc.getObject("PocketSketch")
@@ -222,16 +307,28 @@ async def test_revolution_loft_sweep_and_subtractive_families(live_tools: dict[s
     doc = "McpAuditTurned"
     await _fresh(tools, doc)
     await _call(tools, "create_partdesign_body", name="Body", doc_name=doc)
-    await _call(tools, "create_sketch", body_name="Body", plane="XZ_Plane",
-                name="TurnProfile", doc_name=doc)
+    await _call(
+        tools,
+        "create_sketch",
+        body_name="Body",
+        support={"kind": "origin_plane", "plane": "XZ_Plane"},
+        name="TurnProfile",
+        doc_name=doc,
+    )
     await _call(tools, "edit_sketch_geometry", sketch_name="TurnProfile",
                 operations=[{"op": "add_rectangle", "x": 0, "y": 8, "width": 25, "height": 8}],
                 doc_name=doc)
     turned = await _call(tools, "revolution_sketch", sketch_name="TurnProfile",
                          axis="Sketch_H", angle=360, name="Revolution", doc_name=doc)
     assert turned["validated"] is True
-    await _call(tools, "create_sketch", body_name="Body", plane="XZ_Plane",
-                name="GrooveProfile", doc_name=doc)
+    await _call(
+        tools,
+        "create_sketch",
+        body_name="Body",
+        support={"kind": "origin_plane", "plane": "XZ_Plane"},
+        name="GrooveProfile",
+        doc_name=doc,
+    )
     await _call(tools, "edit_sketch_geometry", sketch_name="GrooveProfile",
                 operations=[{"op": "add_rectangle", "x": 10, "y": 12, "width": 3, "height": 5}],
                 doc_name=doc)
@@ -242,15 +339,27 @@ async def test_revolution_loft_sweep_and_subtractive_families(live_tools: dict[s
     loft_doc = "McpAuditLoft"
     await _fresh(tools, loft_doc)
     await _call(tools, "create_partdesign_body", name="Body", doc_name=loft_doc)
-    await _call(tools, "create_sketch", body_name="Body", plane="XY_Plane",
-                name="LoftA", doc_name=loft_doc)
+    await _call(
+        tools,
+        "create_sketch",
+        body_name="Body",
+        support={"kind": "origin_plane", "plane": "XY_Plane"},
+        name="LoftA",
+        doc_name=loft_doc,
+    )
     await _call(tools, "edit_sketch_geometry", sketch_name="LoftA",
                 operations=[{"op": "add_circle", "center_x": 0, "center_y": 0, "radius": 8}],
                 doc_name=loft_doc)
     await _call(tools, "create_datum_plane", body_name="Body", offset=20,
                 base_plane="XY_Plane", name="LoftPlane", doc_name=loft_doc)
-    await _call(tools, "create_sketch", body_name="Body", plane="LoftPlane",
-                name="LoftB", doc_name=loft_doc)
+    await _call(
+        tools,
+        "create_sketch",
+        body_name="Body",
+        support={"kind": "datum_plane", "name": "LoftPlane"},
+        name="LoftB",
+        doc_name=loft_doc,
+    )
     await _call(tools, "edit_sketch_geometry", sketch_name="LoftB",
                 operations=[{"op": "add_circle", "center_x": 0, "center_y": 0, "radius": 4}],
                 doc_name=loft_doc)
@@ -270,11 +379,17 @@ profile.Shape = Part.makeCylinder(8, 30)
 body.addObject(profile)
 for transition in ("Transformed", "Right", "Round"):
     p = body.newObject("Sketcher::SketchObject", "Profile_" + transition)
-    p.Support = (doc.getObject("XZ_Plane"), [""])
+    if hasattr(p, "AttachmentSupport"):
+        p.AttachmentSupport = [(doc.getObject("XZ_Plane"), [""])]
+    else:
+        p.Support = (doc.getObject("XZ_Plane"), [""])
     p.MapMode = "FlatFace"
     p.addGeometry(Part.Circle(FreeCAD.Vector(0,0,0), FreeCAD.Vector(0,0,1), 2), False)
     s = body.newObject("Sketcher::SketchObject", "Spine_" + transition)
-    s.Support = (doc.getObject("YZ_Plane"), [""])
+    if hasattr(s, "AttachmentSupport"):
+        s.AttachmentSupport = [(doc.getObject("YZ_Plane"), [""])]
+    else:
+        s.Support = (doc.getObject("YZ_Plane"), [""])
     s.MapMode = "FlatFace"
     s.addGeometry(Part.LineSegment(FreeCAD.Vector(0,0,0), FreeCAD.Vector(0,20,0)), False)
 doc.recompute()

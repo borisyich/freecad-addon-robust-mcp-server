@@ -1919,7 +1919,7 @@ The MCP server provides a `freecad://capabilities` resource with a curated JSON 
 | Tool                     | Description                                       |
 | ------------------------ | ------------------------------------------------- |
 | `create_partdesign_body` | Create a new PartDesign::Body container.          |
-| `create_sketch`          | Create a sketch attached to a plane or face.      |
+| `create_sketch`          | Create a sketch with typed origin, face, or datum support. |
 | `pad_sketch`             | Extrude a sketch (additive).                      |
 | `pocket_sketch`          | Cut into solid using a sketch (subtractive).      |
 | `revolution_sketch`      | Revolve a sketch around an axis (additive).       |
@@ -2081,17 +2081,21 @@ await create_document(name="MyPart")
 # Create a PartDesign body
 await create_partdesign_body(name="Body")
 
-# Create a sketch on the XY plane
-await create_sketch(body_name="Body", plane="XY_Plane", sketch_name="Sketch")
+# Create a sketch on the XY origin plane
+await create_sketch(
+    body_name="Body",
+    support={"kind": "origin_plane", "plane": "XY_Plane"},
+    name="Sketch",
+)
 
 # Add a rectangle to the sketch
 await edit_sketch_geometry(sketch_name="Sketch", operations=[{"op": "add_rectangle", "x": -10, "y": -10, "width": 20, "height": 20}])
 
 # Extrude the sketch
-await pad_sketch(body_name="Body", sketch_name="Sketch", length=15)
+await pad_sketch(sketch_name="Sketch", length=15)
 
 # Add fillets
-await fillet_edges(body_name="Body", edges=["Edge1", "Edge2"], radius=2)
+await fillet_edges(object_name="Pad", edges=["Edge1", "Edge2"], radius=2)
 
 # Export to STL
 await export(file_format="stl", object_names=["Body"], file_path="/tmp/mypart.stl")

@@ -1060,37 +1060,24 @@ _result_ = {{
 ```python
 @mcp.tool()
 async def create_sketch(
-    plane: str = "XY",
+    body_name: str | None = None,
+    support: SketchSupport | None = None,
     name: str | None = None,
     doc_name: str | None = None,
 ) -> dict:
-    """Create a new sketch on a standard plane.
+    """Create a sketch with a typed origin-plane, face, or datum support.
 
     Args:
-        plane: One of 'XY', 'XZ', 'YZ'
+        support: Discriminated support selector
         name: Sketch name
         doc_name: Target document
 
     Returns:
         Sketch object information
     """
-    plane_vectors = {
-        "XY": "FreeCAD.Vector(0, 0, 1)",
-        "XZ": "FreeCAD.Vector(0, 1, 0)",
-        "YZ": "FreeCAD.Vector(1, 0, 0)",
-    }
-    code = f'''
-doc = FreeCAD.getDocument({repr(doc_name)}) if {repr(doc_name)} else FreeCAD.ActiveDocument
-sketch = doc.addObject("Sketcher::SketchObject", {repr(name) or '"Sketch"'})
-sketch.MapMode = "Deactivated"
-sketch.Placement = FreeCAD.Placement(
-    FreeCAD.Vector(0, 0, 0),
-    FreeCAD.Rotation({plane_vectors[plane]}, 0)
-)
-doc.recompute()
-_result_ = {{"name": sketch.Name, "geometry_count": sketch.GeometryCount}}
-'''
-    return await bridge.execute_python(code)
+    # Normalize the discriminated support variant to a verified FreeCAD
+    # object/sub-element, attach the Sketch, then recompute.
+    ...
 ```
 
 ### Geometry Tools

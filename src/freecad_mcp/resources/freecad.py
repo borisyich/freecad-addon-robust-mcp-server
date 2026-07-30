@@ -644,8 +644,8 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                         },
                         {
                             "name": "create_sketch",
-                            "description": "Create sketch on plane or face",
-                            "key_params": ["body_name", "plane"],
+                            "description": "Create sketch with a typed origin-plane, face, or datum support",
+                            "key_params": ["body_name", "support"],
                         },
                         {
                             "name": "edit_sketch_geometry",
@@ -1174,7 +1174,7 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                 {
                     "name": "create_sketch_guide",
                     "description": "Guide for creating 2D sketches",
-                    "key_params": ["shape_type", "plane"],
+                    "key_params": ["shape_type", "origin_plane"],
                 },
                 {
                     "name": "boolean_operations_guide",
@@ -1225,7 +1225,7 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                     "steps": [
                         "create_document(name='MyPart')",
                         "create_partdesign_body(name='Body')",
-                        "create_sketch(body_name='Body', plane='XY_Plane')",
+                        "create_sketch(body_name='Body', support={'kind': 'origin_plane', 'plane': 'XY_Plane'})",
                         "edit_sketch_geometry(...)",
                         "pad_sketch(...)",
                     ],

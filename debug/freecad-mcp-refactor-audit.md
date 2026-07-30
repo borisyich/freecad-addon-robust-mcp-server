@@ -150,3 +150,42 @@ Verification:
 Remaining environment issue: pytest still reports `WinError 5` when attempting
 to update `.pytest_cache`; this does not affect test results and is not a
 freecad-mcp behavior defect.
+
+## Typed sketch support follow-up
+
+`create_sketch` now provides a discriminated `support` union with four variants:
+`origin_plane`, `body_tip_face`, `feature_face`, and `datum_plane`. Face
+identifiers are schema-validated with `^Face[1-9]\d*$`, origin planes use an
+enum, and extra fields are forbidden. The overloaded `plane` string has been
+removed from the public tool schema.
+
+All four variants passed live FreeCAD 1.0.2 GUI/XML-RPC tests. A repository-wide
+AST/docstring audit found no remaining finite documented choices exposed as
+unconstrained tool parameters. Dynamic identifiers such as object names,
+workbench names, display modes, and thread sizes remain
+strings intentionally because their valid values depend on document or runtime
+state.
+
+The removal follow-up also found two previously masked live-test defects:
+
+- an unescaped inner `f"{plane!r}"` in the generated sketch code depended on
+  the removed outer argument and now correctly remains inside the FreeCAD code;
+- `create_datum_point` attempted to attach to a nonexistent Body origin
+  `Point`. FreeCAD 1.0 exposes origin axes and planes but no point object, so a
+  free datum point now uses `MapMode = "Deactivated"` and a direct `Placement`.
+
+Verification after removing the argument:
+
+- the production MCP schema has no top-level `create_sketch.plane` property;
+- its `support` schema has a `kind` discriminator with all four variants;
+- 514 unit tests passed;
+- all four PartDesign choice-workflow integration scenarios and the full
+  bracket workflow passed against FreeCAD 1.0.2 GUI/XML-RPC;
+- the prompt catalog exposes `origin_plane`, not `plane`, for
+  `create_sketch_guide`.
+
+The repository-wide Ruff check is not currently clean because of existing lint
+debt in touched large modules/tests (unused guidance imports, fixture-import
+redefinition warnings, commented test code, and older whitespace). Ruff must be
+run with `--no-cache` in this checkout because `.ruff_cache` has the same
+`WinError 5` permission issue as `.pytest_cache`.

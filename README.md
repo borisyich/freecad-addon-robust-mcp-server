@@ -399,7 +399,7 @@ The server currently registers **111 MCP tools**. The tables below list common t
 | Tool                       | Description                                                | Mode |
 | -------------------------- | ---------------------------------------------------------- | ---- |
 | `create_partdesign_body`   | Create a PartDesign::Body container                        | All  |
-| `create_sketch`            | Create a sketch on a plane or face                         | All  |
+| `create_sketch`            | Create a sketch with a typed plane/face/datum support      | All  |
 | `edit_sketch_geometry`     | Apply an ordered batch of sketch geometry edits            | All  |
 | `edit_sketch_constraints`  | Apply an ordered batch of Sketcher constraint edits        | All  |
 | `pad_sketch`               | Extrude a sketch (additive)                                | All  |

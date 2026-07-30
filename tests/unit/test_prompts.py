@@ -1,5 +1,6 @@
 """Tests for FreeCAD Robust MCP prompts."""
 
+import inspect
 from collections.abc import Callable
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -274,6 +275,20 @@ class TestFreecadPrompts:
     ) -> None:
         """create_sketch_guide prompt should be registered."""
         assert "create_sketch_guide" in register_prompts
+
+    @pytest.mark.asyncio
+    async def test_create_sketch_guide_uses_typed_origin_support(
+        self, register_prompts: dict[str, Callable[..., Any]]
+    ) -> None:
+        """Sketch guidance must not expose the removed tool argument."""
+        prompt = register_prompts["create_sketch_guide"]
+        parameters = inspect.signature(prompt).parameters
+
+        assert "plane" not in parameters
+        assert "origin_plane" in parameters
+        result = await prompt(origin_plane="XZ_Plane")
+        assert '"kind": "origin_plane"' in result
+        assert '"plane": "XZ_Plane"' in result
 
     def test_boolean_operations_guide_prompt_is_registered(
         self, register_prompts: dict[str, Callable[..., Any]]

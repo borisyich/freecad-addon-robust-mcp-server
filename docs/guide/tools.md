@@ -86,7 +86,7 @@ Geometry-changing operations are transaction-backed where applicable. Use `histo
 | Tool | Description |
 |---|---|
 | `create_partdesign_body` | Create a new PartDesign Body. |
-| `create_sketch` | Create a new Sketch attached to an origin plane, datum plane, or face. |
+| `create_sketch` | Create a Sketch using a typed `support` selector for an origin plane, Body Tip face, explicit feature face, or datum plane. |
 | `edit_sketch_geometry` | Apply geometry edits to one sketch in a single transaction. |
 | `edit_sketch_constraints` | Apply constraint edits to one sketch in a single transaction. |
 | `pad_sketch` | Create a Pad (extrusion) from a sketch. |

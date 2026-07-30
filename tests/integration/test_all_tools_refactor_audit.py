@@ -150,7 +150,12 @@ DOCUMENTED_CHOICES: dict[tuple[str, str], tuple[str, ...]] = {
     ("mirror_object", "plane"): ("XY", "XZ", "YZ"),
     ("selection", "action"): ("get", "set", "clear"),
     ("section_shape", "plane"): ("XY", "XZ", "YZ"),
-    ("create_sketch", "plane"): ("XY_Plane", "XZ_Plane", "YZ_Plane"),
+    ("create_sketch", "support.kind"): (
+        "origin_plane",
+        "body_tip_face",
+        "feature_face",
+        "datum_plane",
+    ),
     ("edit_sketch_geometry", "operations[].op"): (
         "add_rectangle", "add_circle", "add_line", "add_arc", "add_point",
         "add_ellipse", "add_polygon", "add_slot", "add_bspline",
@@ -263,6 +268,27 @@ def test_runtime_registry_has_explicit_111_tool_coverage() -> None:
     actual = asyncio.run(registered())
     assert len(actual) == 111
     assert set(TOOL_SCENARIOS) == actual
+
+
+def test_create_sketch_runtime_schema_has_only_typed_support() -> None:
+    async def schema() -> dict[str, Any]:
+        tool = next(
+            tool
+            for tool in await production_mcp.list_tools()
+            if tool.name == "create_sketch"
+        )
+        return tool.inputSchema
+
+    input_schema = asyncio.run(schema())
+    assert "plane" not in input_schema["properties"]
+    support_schema = input_schema["properties"]["support"]["anyOf"][0]
+    assert support_schema["discriminator"]["propertyName"] == "kind"
+    assert set(support_schema["discriminator"]["mapping"]) == {
+        "origin_plane",
+        "body_tip_face",
+        "feature_face",
+        "datum_plane",
+    }
 
 
 def test_documented_choice_catalog_is_nonempty_and_unique() -> None:

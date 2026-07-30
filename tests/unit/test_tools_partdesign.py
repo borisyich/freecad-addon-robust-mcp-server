@@ -1,5 +1,6 @@
 """Tests for PartDesign tools module."""
 
+import inspect
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -81,9 +82,11 @@ class TestPartDesignTools:
         )
 
         create_sketch = register_tools["create_sketch"]
-        result = await create_sketch(body_name="Body", plane="XY_Plane")
+        result = await create_sketch(body_name="Body")
+        generated_code = mock_bridge.execute_python.await_args.args[0]
 
         assert result["name"] == "Sketch"
+        assert "'XY_Plane'" in generated_code
         mock_bridge.execute_python.assert_called_once()
 
     @pytest.mark.asyncio
@@ -107,11 +110,79 @@ class TestPartDesignTools:
         )
 
         create_sketch = register_tools["create_sketch"]
-        await create_sketch(body_name="Body", plane="Pad.Face6")
+        await create_sketch(
+            body_name="Body",
+            support={"kind": "feature_face", "feature": "Pad", "face": "Face6"},
+        )
         generated_code = mock_bridge.execute_python.await_args.args[0]
 
         assert 'plane.rsplit(".", 1)' in generated_code
         assert 'TypeId", "") != "PartDesign::Plane"' in generated_code
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("support", "expected_reference"),
+        [
+            ({"kind": "origin_plane", "plane": "XZ_Plane"}, "XZ_Plane"),
+            ({"kind": "body_tip_face", "face": "Face3"}, "Face3"),
+            (
+                {"kind": "feature_face", "feature": "Pad", "face": "Face6"},
+                "Pad.Face6",
+            ),
+            ({"kind": "datum_plane", "name": "DP_OilHole"}, "DP_OilHole"),
+        ],
+    )
+    async def test_create_sketch_normalizes_typed_support(
+        self, register_tools, mock_bridge, support, expected_reference
+    ):
+        """Every typed support variant should reach the established resolver."""
+        mock_bridge.execute_python = AsyncMock(
+            return_value=ExecutionResult(
+                success=True,
+                result={
+                    "name": "Sketch",
+                    "label": "Sketch",
+                    "type_id": "Sketcher::SketchObject",
+                    "support": expected_reference,
+                    "support_kind": support["kind"],
+                },
+                stdout="",
+                stderr="",
+                execution_time_ms=10.0,
+            )
+        )
+
+        result = await register_tools["create_sketch"](
+            body_name="Body", support=support
+        )
+        generated_code = mock_bridge.execute_python.await_args.args[0]
+
+        assert repr(expected_reference) in generated_code
+        assert result["support_kind"] == support["kind"]
+
+    def test_create_sketch_support_schema_is_discriminated(self):
+        """The public schema must preserve variant discovery and face patterns."""
+        from freecad_mcp.tools.partdesign import _SKETCH_SUPPORT_ADAPTER
+
+        schema = _SKETCH_SUPPORT_ADAPTER.json_schema()
+        assert schema["discriminator"]["propertyName"] == "kind"
+        assert set(schema["discriminator"]["mapping"]) == {
+            "origin_plane",
+            "body_tip_face",
+            "feature_face",
+            "datum_plane",
+        }
+        assert (
+            schema["$defs"]["BodyTipFaceSketchSupport"]["properties"]["face"]["pattern"]
+            == r"^Face[1-9]\d*$"
+        )
+
+    def test_create_sketch_has_no_legacy_plane_parameter(self, register_tools):
+        """The removed plane argument must not leak into the public tool signature."""
+        parameters = inspect.signature(register_tools["create_sketch"]).parameters
+
+        assert "plane" not in parameters
+        assert "support" in parameters
 
     @pytest.mark.asyncio
     async def test_edit_sketch_geometry_batches_operations_atomically(
@@ -395,7 +466,6 @@ class TestPartDesignTools:
         assert "edit_sketch_geometry" in register_tools
         assert "edit_sketch_constraints" in register_tools
         assert removed.isdisjoint(register_tools)
-
 
     @pytest.mark.asyncio
     async def test_pad_sketch(self, register_tools, mock_bridge):
@@ -1065,9 +1135,13 @@ class TestPartDesignTools:
 
         create_datum_point = register_tools["create_datum_point"]
         result = await create_datum_point(body_name="Body", position=[10.0, 20.0, 30.0])
+        generated_code = mock_bridge.execute_python.await_args.args[0]
 
         assert result["name"] == "DatumPoint"
         assert result["type_id"] == "PartDesign::Point"
+        assert 'datum.MapMode = "Deactivated"' in generated_code
+        assert "datum.Placement = FreeCAD.Placement" in generated_code
+        assert '_resolve_body_origin_feature(body, "Point")' not in generated_code
         mock_bridge.execute_python.assert_called_once()
 
     # Tests for PartDesign dress-up features

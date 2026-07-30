@@ -8,9 +8,9 @@ comprehensive PartDesign coverage.
 """
 
 from collections.abc import Awaitable, Callable, Mapping
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
 from freecad_mcp.tools._freecad_runtime_helpers import (
     BODY_RUNTIME_HELPERS,
@@ -128,6 +128,49 @@ class SketchGeometryOperation(BaseModel):
         if self.geometry_index is not None and self.geometry_index < 0:
             raise ValueError("geometry_index must be non-negative")
         return self
+
+
+class OriginPlaneSketchSupport(BaseModel):
+    """Attach a sketch to one of the Body origin planes."""
+
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["origin_plane"]
+    plane: Literal["XY_Plane", "XZ_Plane", "YZ_Plane"]
+
+
+class BodyTipFaceSketchSupport(BaseModel):
+    """Attach a sketch to a face of the current Body Tip."""
+
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["body_tip_face"]
+    face: str = Field(pattern=r"^Face[1-9]\d*$")
+
+
+class FeatureFaceSketchSupport(BaseModel):
+    """Attach a sketch to an explicit feature face."""
+
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["feature_face"]
+    feature: str = Field(min_length=1)
+    face: str = Field(pattern=r"^Face[1-9]\d*$")
+
+
+class DatumPlaneSketchSupport(BaseModel):
+    """Attach a sketch to an existing PartDesign datum plane."""
+
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["datum_plane"]
+    name: str = Field(min_length=1)
+
+
+SketchSupport = Annotated[
+    OriginPlaneSketchSupport
+    | BodyTipFaceSketchSupport
+    | FeatureFaceSketchSupport
+    | DatumPlaneSketchSupport,
+    Field(discriminator="kind"),
+]
+_SKETCH_SUPPORT_ADAPTER = TypeAdapter(SketchSupport)
 
 
 class SketchConstraintOperation(BaseModel):
@@ -342,7 +385,7 @@ def register_partdesign_tools(
     @mcp.tool()
     async def create_sketch(
         body_name: str | None = None,
-        plane: str = "XY_Plane",
+        support: SketchSupport | None = None,
         name: str | None = None,
         doc_name: str | None = None,
     ) -> dict[str, Any]:
@@ -350,13 +393,11 @@ def register_partdesign_tools(
 
         Args:
             body_name: Name of PartDesign Body to attach to. Creates standalone if None.
-            plane: Support to attach the sketch to. Options:
-                - "XY_Plane" - Horizontal plane
-                - "XZ_Plane" - Front vertical plane
-                - "YZ_Plane" - Side vertical plane
-                - Face name like "Face1" to attach to the current Body Tip
-                - Explicit face like "Pad_Base.Face8"
-                - Datum plane object name like "DP_OilHole"
+            support: Typed support selector:
+                - ``{"kind": "origin_plane", "plane": "XY_Plane"}``
+                - ``{"kind": "body_tip_face", "face": "Face1"}``
+                - ``{"kind": "feature_face", "feature": "Pad", "face": "Face6"}``
+                - ``{"kind": "datum_plane", "name": "DP_OilHole"}``
             name: Sketch name. Auto-generated if None.
             doc_name: Target document. Uses active document if None.
 
@@ -366,14 +407,47 @@ def register_partdesign_tools(
                 - label: Sketch label
                 - type_id: Object type
                 - support: What the sketch is attached to
+                - support_kind: Typed selector kind
         """
         bridge = await get_bridge()
+        if support is not None:
+            normalized_support = (
+                support
+                if isinstance(
+                    support,
+                    (
+                        OriginPlaneSketchSupport,
+                        BodyTipFaceSketchSupport,
+                        FeatureFaceSketchSupport,
+                        DatumPlaneSketchSupport,
+                    ),
+                )
+                else _SKETCH_SUPPORT_ADAPTER.validate_python(support)
+            )
+            if isinstance(normalized_support, OriginPlaneSketchSupport):
+                support_reference = normalized_support.plane
+            elif isinstance(normalized_support, BodyTipFaceSketchSupport):
+                support_reference = normalized_support.face
+            elif isinstance(normalized_support, FeatureFaceSketchSupport):
+                support_reference = (
+                    f"{normalized_support.feature}.{normalized_support.face}"
+                )
+            else:
+                support_reference = normalized_support.name
+            support_kind = normalized_support.kind
+            if body_name is None and support_kind != "origin_plane":
+                raise ValueError(
+                    f"{support_kind} support requires an existing PartDesign Body"
+                )
+        else:
+            support_reference = "XY_Plane"
+            support_kind = "origin_plane"
 
         code = f"""
 {BODY_RUNTIME_HELPERS}
 
 doc = (
-    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
+    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None
     else FreeCAD.ActiveDocument
 ) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
 
@@ -392,10 +466,10 @@ try:
 
         # Set support plane - FreeCAD 1.x uses AttachmentSupport, older versions use Support
         # Check which property exists and use the appropriate one
-        plane = {plane!r}
+        plane = {support_reference!r}
         if plane in ["XY_Plane", "XZ_Plane", "YZ_Plane"]:
             plane_obj = _resolve_body_origin_feature(body, plane)
-            
+
             if hasattr(sketch, "AttachmentSupport"):
                 sketch.AttachmentSupport = [(plane_obj, [""])]
             else:
@@ -413,7 +487,7 @@ try:
             try:
                 face_index = int(plane[4:])
             except Exception as exc:
-                raise ValueError(f"Invalid face reference: {plane!r}") from exc
+                raise ValueError(f"Invalid face reference: {{plane!r}}") from exc
             if face_index < 1 or face_index > len(support_feature.Shape.Faces):
                 raise ValueError(
                     f"Face not found: {{support_feature.Name}}.{{plane}}. "
@@ -478,7 +552,7 @@ try:
         # Standalone sketch
         sketch = doc.addObject("Sketcher::SketchObject", sketch_name)
 
-        plane = {plane!r}
+        plane = {support_reference!r}
         if plane == "XY_Plane":
             sketch.Placement = FreeCAD.Placement(FreeCAD.Vector(0,0,0), FreeCAD.Rotation(0,0,0,1))
         elif plane == "XZ_Plane":
@@ -508,6 +582,7 @@ _result_ = {{
     "label": sketch.Label,
     "type_id": sketch.TypeId,
     "support": support_info,
+    "support_kind": {support_kind!r},
 }}
 """
         result = await bridge.execute_python(code)
@@ -2831,11 +2906,10 @@ try:
     datum_name = {name!r} or "DatumPoint"
     datum = body.newObject("PartDesign::Point", datum_name)
 
-    # Set offset from the origin point that belongs to this Body.
-    origin_point = _resolve_body_origin_feature(body, "Point")
-    datum.AttachmentSupport = [(origin_point, "")]
-    datum.MapMode = "ObjectOrigin"
-    datum.AttachmentOffset = FreeCAD.Placement(
+    # FreeCAD Bodies expose origin axes and planes, but no attachable origin
+    # point object. A free datum point is therefore positioned directly.
+    datum.MapMode = "Deactivated"
+    datum.Placement = FreeCAD.Placement(
         FreeCAD.Vector({pos[0]}, {pos[1]}, {pos[2]}),
         FreeCAD.Rotation(0, 0, 0, 1)
     )

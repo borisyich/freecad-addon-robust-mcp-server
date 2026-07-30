@@ -212,7 +212,7 @@ Create a parametric mounting plate:
 **What Claude does:**
 
 1. `create_partdesign_body()` - Creates the Body container
-1. `create_sketch(body_name="Body", plane="XY_Plane")` - Creates attached sketch
+1. `create_sketch(body_name="Body", support={"kind": "origin_plane", "plane": "XY_Plane"})` - Creates attached sketch
 1. `edit_sketch_geometry(...)` - Adds the profile geometry as a batch
 1. `pad_sketch(sketch_name="Sketch", length=8)` - Extrudes to solid
 1. Identifies the planar top face geometrically
@@ -297,18 +297,18 @@ create_document(name="MountingBracket")
 create_partdesign_body(name="Body")
 
 # 2. Create base plate sketch and pad
-create_sketch(body_name="Body", plane="XY_Plane", name="BaseSketch")
+create_sketch(body_name="Body", support={"kind": "origin_plane", "plane": "XY_Plane"}, name="BaseSketch")
 edit_sketch_geometry(sketch_name="BaseSketch", operations=[{"op": "add_rectangle", "x": 0, "y": 0, "width": 80, "height": 60}])
 pad_sketch(sketch_name="BaseSketch", length=5)
 
 # 3. Add vertical support
-create_sketch(body_name="Body", plane="XZ_Plane", name="SupportSketch")
+create_sketch(body_name="Body", support={"kind": "origin_plane", "plane": "XZ_Plane"}, name="SupportSketch")
 # ... add geometry
 pad_sketch(sketch_name="SupportSketch", length=60)
 
 # 4. Add mounting holes after all additive features.
 # Determine the actual planar top face first; do not guess FaceN.
-create_sketch(body_name="Body", plane="Pad.Face6", name="HoleSketch")
+create_sketch(body_name="Body", support={"kind": "feature_face", "feature": "Pad", "face": "Face6"}, name="HoleSketch")
 edit_sketch_geometry(
     sketch_name="HoleSketch",
     operations=[
@@ -330,7 +330,7 @@ oil_hole = create_cylindrical_cut(
 )
 
 # 5. Add slot (as pocket)
-create_sketch(body_name="Body", plane="Face...", name="SlotSketch")
+create_sketch(body_name="Body", support={"kind": "body_tip_face", "face": "Face1"}, name="SlotSketch")
 edit_sketch_geometry(sketch_name="SlotSketch", operations=[{"op": "add_rectangle", "x": 0, "y": 0, "width": 10, "height": 20}])
 pocket_sketch(sketch_name="SlotSketch", length=5, type="ThroughAll")
 
