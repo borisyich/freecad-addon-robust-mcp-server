@@ -101,9 +101,7 @@ class SketchGeometryOperation(BaseModel):
             "toggle_construction": ("geometry_index",),
         }
         missing = [
-            field
-            for field in required_by_op[self.op]
-            if getattr(self, field) is None
+            field for field in required_by_op[self.op] if getattr(self, field) is None
         ]
         if missing:
             raise ValueError(f"{self.op} requires: {', '.join(missing)}")
@@ -176,13 +174,17 @@ class SketchConstraintOperation(BaseModel):
             raise ValueError(f"{self.op} requires geometry1")
         if self.op == "add_constraint" and not self.constraint_type:
             raise ValueError("add_constraint requires constraint_type")
-        if self.op in {
-            "coincident",
-            "parallel",
-            "perpendicular",
-            "tangent",
-            "equal",
-        } and self.geometry2 < 0:
+        if (
+            self.op
+            in {
+                "coincident",
+                "parallel",
+                "perpendicular",
+                "tangent",
+                "equal",
+            }
+            and self.geometry2 < 0
+        ):
             raise ValueError(f"{self.op} requires geometry2")
         if self.op in {"distance", "distance_x", "distance_y", "radius", "angle"}:
             if self.value is None:
@@ -258,9 +260,7 @@ def register_partdesign_tools(
     def require_additive_result(payload: Any, operation: str) -> dict[str, Any]:
         """Enforce the public host-side contract for additive feature tools."""
         normalized = _validation_payload(payload, operation)
-        added_volume = _optional_numeric_field(
-            normalized, "added_volume", operation
-        )
+        added_volume = _optional_numeric_field(normalized, "added_volume", operation)
         _validate_optional_common_evidence(normalized, operation)
 
         if normalized.get("validated") is not True or not (
@@ -272,9 +272,7 @@ def register_partdesign_tools(
             )
 
         base_volume = _optional_numeric_field(normalized, "base_volume", operation)
-        result_volume = _optional_numeric_field(
-            normalized, "result_volume", operation
-        )
+        result_volume = _optional_numeric_field(normalized, "result_volume", operation)
         if base_volume is not None and result_volume is not None:
             measured_delta = result_volume - base_volume
             tolerance = max(1e-7, abs(added_volume) * 1e-9)
@@ -302,9 +300,7 @@ def register_partdesign_tools(
             )
 
         base_volume = _optional_numeric_field(normalized, "base_volume", operation)
-        result_volume = _optional_numeric_field(
-            normalized, "result_volume", operation
-        )
+        result_volume = _optional_numeric_field(normalized, "result_volume", operation)
         if base_volume is not None and result_volume is not None:
             measured_delta = base_volume - result_volume
             tolerance = max(1e-7, abs(removed_volume) * 1e-9)
@@ -941,7 +937,6 @@ _result_ = {{
             return result.result
         raise ValueError(result.error_traceback or "Edit sketch constraints failed")
 
-
     @mcp.tool()
     async def pad_sketch(
         sketch_name: str,
@@ -1075,14 +1070,14 @@ _result_ = {{
 """
         result = await bridge.execute_python(code)
         if result.success:
-            return require_additive_result(result.result, 'Pad')
+            return require_additive_result(result.result, "Pad")
         raise ValueError(result.error_traceback or "Pad failed")
 
     @mcp.tool()
     async def pocket_sketch(
         sketch_name: str,
         length: float,
-        type: str = "Length",
+        type: Literal["Length", "ThroughAll", "UpToFirst", "UpToFace"] = "Length",
         name: str | None = None,
         doc_name: str | None = None,
     ) -> dict[str, Any]:
@@ -1340,7 +1335,7 @@ _result_ = {{
     async def revolution_sketch(
         sketch_name: str,
         angle: float = 360.0,
-        axis: str = "Base_X",
+        axis: Literal["Base_X", "Base_Y", "Base_Z", "Sketch_V", "Sketch_H"] = "Base_X",
         symmetric: bool = False,
         reversed: bool = False,
         name: str | None = None,
@@ -1448,14 +1443,14 @@ _result_ = {{
 """
         result = await bridge.execute_python(code)
         if result.success:
-            return require_additive_result(result.result, 'Revolution')
+            return require_additive_result(result.result, "Revolution")
         raise ValueError(result.error_traceback or "Revolution failed")
 
     @mcp.tool()
     async def groove_sketch(
         sketch_name: str,
         angle: float = 360.0,
-        axis: str = "Base_X",
+        axis: Literal["Base_X", "Base_Y", "Base_Z", "Sketch_V", "Sketch_H"] = "Base_X",
         symmetric: bool = False,
         reversed: bool = False,
         name: str | None = None,
@@ -1565,11 +1560,11 @@ _result_ = {{
         sketch_name: str,
         diameter: float = 6.0,
         depth: float = 10.0,
-        hole_type: str = "Dimension",
+        hole_type: Literal["Dimension", "ThroughAll"] = "Dimension",
         threaded: bool = False,
-        thread_type: str = "ISO",
+        thread_type: Literal["ISO", "ISO_FINE", "UNC", "UNF"] = "ISO",
         thread_size: str = "M6",
-        drill_point: str = "Flat",
+        drill_point: Literal["Flat", "Angled"] = "Flat",
         reversed: bool | None = None,
         name: str | None = None,
         doc_name: str | None = None,
@@ -1643,9 +1638,7 @@ _result_ = {{
             "UNF": "UNF",
         }
         if threaded and normalized_thread_type not in thread_type_map:
-            raise ValueError(
-                "Unsupported thread_type. Use ISO, ISO_FINE, UNC, or UNF."
-            )
+            raise ValueError("Unsupported thread_type. Use ISO, ISO_FINE, UNC, or UNF.")
         resolved_thread_type = thread_type_map.get(
             normalized_thread_type, "ISOMetricProfile"
         )
@@ -2201,7 +2194,7 @@ _result_ = {{
     @mcp.tool()
     async def linear_pattern(
         feature_name: str,
-        direction: str = "X",
+        direction: Literal["X", "Y", "Z"] = "X",
         length: float = 50.0,
         occurrences: int = 3,
         name: str | None = None,
@@ -2280,7 +2273,7 @@ _result_ = {{
     @mcp.tool()
     async def polar_pattern(
         feature_name: str,
-        axis: str = "Z",
+        axis: Literal["X", "Y", "Z"] = "Z",
         angle: float = 360.0,
         occurrences: int = 6,
         name: str | None = None,
@@ -2359,7 +2352,7 @@ _result_ = {{
     @mcp.tool()
     async def mirrored_feature(
         feature_name: str,
-        plane: str = "XY",
+        plane: Literal["XY", "XZ", "YZ"] = "XY",
         name: str | None = None,
         doc_name: str | None = None,
     ) -> dict[str, Any]:
@@ -2434,7 +2427,6 @@ _result_ = {{
         if result.success:
             return result.result
         raise ValueError(result.error_traceback or "Mirrored feature failed")
-
 
     @mcp.tool()
     async def loft_sketches(
@@ -2531,14 +2523,14 @@ _result_ = {{
 """
         result = await bridge.execute_python(code)
         if result.success:
-            return require_additive_result(result.result, 'Loft')
+            return require_additive_result(result.result, "Loft")
         raise ValueError(result.error_traceback or "Loft failed")
 
     @mcp.tool()
     async def sweep_sketch(
         profile_sketch: str,
         spine_sketch: str,
-        transition: str = "Transformed",
+        transition: Literal["Transformed", "Right", "Round"] = "Transformed",
         name: str | None = None,
         doc_name: str | None = None,
     ) -> dict[str, Any]:
@@ -2640,7 +2632,7 @@ _result_ = {{
 """
         result = await bridge.execute_python(code)
         if result.success:
-            return require_additive_result(result.result, 'Sweep')
+            return require_additive_result(result.result, "Sweep")
         raise ValueError(result.error_traceback or "Sweep failed")
 
     # =========================================================================
@@ -2651,7 +2643,7 @@ _result_ = {{
     async def create_datum_plane(
         body_name: str,
         offset: float = 0.0,
-        base_plane: str = "XY_Plane",
+        base_plane: Literal["XY_Plane", "XZ_Plane", "YZ_Plane"] = "XY_Plane",
         name: str | None = None,
         doc_name: str | None = None,
     ) -> dict[str, Any]:
@@ -2729,7 +2721,7 @@ except Exception:
     @mcp.tool()
     async def create_datum_line(
         body_name: str,
-        base_axis: str = "X_Axis",
+        base_axis: Literal["X_Axis", "Y_Axis", "Z_Axis"] = "X_Axis",
         name: str | None = None,
         doc_name: str | None = None,
     ) -> dict[str, Any]:
@@ -2873,7 +2865,7 @@ except Exception:
     async def draft_feature(
         object_name: str,
         angle: float,
-        plane: str = "XY",
+        plane: Literal["XY", "XZ", "YZ"] = "XY",
         faces: list[str] | None = None,
         name: str | None = None,
         doc_name: str | None = None,
@@ -3123,7 +3115,7 @@ except Exception:
     async def subtractive_pipe(
         profile_sketch: str,
         spine_sketch: str,
-        transition: str = "Transformed",
+        transition: Literal["Transformed", "Right", "Round"] = "Transformed",
         name: str | None = None,
         doc_name: str | None = None,
     ) -> dict[str, Any]:
@@ -3251,4 +3243,3 @@ _result_ = {{
         if result.success:
             return result.result
         raise ValueError(result.error_traceback or "Get sketch info failed")
-

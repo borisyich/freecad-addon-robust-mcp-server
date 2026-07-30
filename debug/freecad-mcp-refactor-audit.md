@@ -124,3 +124,29 @@ finite public choice and add one invalid-value schema test per argument.
 The two focused Draft regressions are expected to fail until FC-MCP-001 and
 FC-MCP-002 are fixed. Other failures should not be blanket-xfailed: inspect
 whether they are a geometry precondition error or a tool regression.
+
+## Resolution — 2026-07-30
+
+- **FC-MCP-001 fixed:** `draft_shapestring.name` now always contains the
+  internal FreeCAD `Name`; the user-facing `Label` remains in `label`.
+- **FC-MCP-002 fixed:** the requested document is activated around
+  `Draft.make_shapestring`, and the previous active document is restored in
+  `finally`.
+- **FC-MCP-003 fixed for closed-choice arguments:** public annotations now use
+  `Literal[...]`; runtime MCP schemas expose enums for 27 tools instead of 8.
+  `create_sketch.plane` intentionally remains a string because it also accepts
+  face references and datum-plane object names.
+- The invalid external-geometry fixture is isolated in a standalone Sketch and
+  uses a real box edge instead of an empty `Part::Line`; PartDesign correctly
+  rejects unrelated solids as external geometry for a Body-owned first sketch.
+
+Verification:
+
+- 507 unit tests passed.
+- Both live Draft regressions passed using FreeCAD 1.0.2 in GUI/XML-RPC mode.
+- Registry, documented-choice and schema introspection checks passed.
+- Ruff formatting check passed for all modified source modules.
+
+Remaining environment issue: pytest still reports `WinError 5` when attempting
+to update `.pytest_cache`; this does not affect test results and is not a
+freecad-mcp behavior defect.

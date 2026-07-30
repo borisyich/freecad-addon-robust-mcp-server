@@ -33,12 +33,14 @@ def register_view_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> N
 
     @mcp.tool()
     async def get_screenshot(
-        view_angle: str = "Isometric",
+        view_angle: Literal[
+            "Isometric", "Front", "Back", "Top", "Bottom", "Left", "Right", "FitAll"
+        ] = "Isometric",
         width: int = 800,
         height: int = 600,
         doc_name: str | None = None,
         fit_all: bool = True,
-        background: str = "White",
+        background: Literal["White", "Current"] = "White",
         show_corner_cross: bool = True,
         corner_cross_size: int = 10,
         settle_time_seconds: float = 2.0,
@@ -162,7 +164,9 @@ def register_view_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> N
 
     @mcp.tool()
     async def set_view_angle(
-        view_angle: str,
+        view_angle: Literal[
+            "Isometric", "Front", "Back", "Top", "Bottom", "Left", "Right", "FitAll"
+        ],
         doc_name: str | None = None,
     ) -> dict[str, Any]:
         """Set the 3D view angle.
@@ -272,7 +276,9 @@ def register_view_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> N
         if visible is None and color is None and display_mode is None:
             raise ValueError("Provide visible, color, or display_mode")
         if color is not None:
-            if len(color) != 3 or any(component < 0 or component > 1 for component in color):
+            if len(color) != 3 or any(
+                component < 0 or component > 1 for component in color
+            ):
                 raise ValueError("color must contain three values between 0.0 and 1.0")
 
         bridge = await get_bridge()
@@ -376,7 +382,6 @@ else:
             "redo_names": [],
         }
 
-
     @mcp.tool()
     async def fit_all(doc_name: str | None = None) -> dict[str, Any]:
         """Fit all objects in the current view.
@@ -395,7 +400,6 @@ else:
         bridge = await get_bridge()
         await bridge.set_view(ViewAngle.FIT_ALL, doc_name)
         return {"success": True}
-
 
     @mcp.tool()
     async def set_camera_position(
@@ -456,7 +460,6 @@ else:
             "success": False,
             "error": result.error_traceback or "Set camera position failed",
         }
-
 
     @mcp.tool()
     async def list_parts_library() -> list[dict[str, Any]]:
@@ -593,5 +596,3 @@ except Exception:
             "success": False,
             "error": result.error_traceback or "Insert part from library failed",
         }
-
-

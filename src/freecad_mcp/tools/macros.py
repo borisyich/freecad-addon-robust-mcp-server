@@ -8,7 +8,7 @@ macro-centric workflow with templates and validation.
 """
 
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Any, Literal
 
 
 def register_macro_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> None:
@@ -195,7 +195,7 @@ _result_ = {{
     @mcp.tool()
     async def create_macro_from_template(
         name: str,
-        template: str = "basic",
+        template: Literal["basic", "part", "sketch", "gui"] = "basic",
         description: str = "",
     ) -> dict[str, Any]:
         """Create a new macro from a predefined template.

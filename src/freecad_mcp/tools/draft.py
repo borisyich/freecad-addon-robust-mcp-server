@@ -5,7 +5,7 @@ ShapeString for creating 3D text geometry that can be used with PartDesign.
 """
 
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Any, Literal
 
 from freecad_mcp.tools._freecad_runtime_helpers import BODY_RUNTIME_HELPERS
 
@@ -118,7 +118,7 @@ def register_draft_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> 
 
         Returns:
             Dictionary with created ShapeString information:
-                - name: Object name (prefers Label if set, falls back to Name)
+                - name: Internal FreeCAD object name, suitable for chaining
                 - label: Object label
                 - type_id: Object type
                 - text: The text that was created
@@ -150,6 +150,11 @@ import os
 doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
 if doc is None:
     doc = FreeCAD.newDocument("Unnamed")
+
+previous_active_name = (
+    FreeCAD.ActiveDocument.Name if FreeCAD.ActiveDocument is not None else None
+)
+FreeCAD.setActiveDocument(doc.Name)
 
 # Wrap in transaction for undo support
 doc.openTransaction("Create ShapeString")
@@ -198,7 +203,7 @@ try:
     doc.commitTransaction()
 
     _result_ = {{
-        "name": shape_string.Label if shape_string.Label else shape_string.Name,
+        "name": shape_string.Name,
         "label": shape_string.Label,
         "type_id": shape_string.TypeId,
         "text": text,
@@ -208,6 +213,9 @@ try:
 except Exception:
     doc.abortTransaction()
     raise
+finally:
+    if previous_active_name and previous_active_name in FreeCAD.listDocuments():
+        FreeCAD.setActiveDocument(previous_active_name)
 """
         result = await bridge.execute_python(code)
         if result.success and result.result:
@@ -300,7 +308,7 @@ _result_ = {
     async def draft_shapestring_to_sketch(
         shapestring_name: str,
         body_name: str | None = None,
-        plane: str = "XY_Plane",
+        plane: Literal["XY_Plane", "XZ_Plane", "YZ_Plane"] = "XY_Plane",
         sketch_name: str | None = None,
         doc_name: str | None = None,
     ) -> dict[str, Any]:
@@ -573,7 +581,7 @@ except Exception:
         font_path: str | None = None,
         size: float = 10.0,
         position: list[float] | None = None,
-        operation: str = "engrave",
+        operation: Literal["emboss", "engrave"] = "engrave",
         name: str | None = None,
         doc_name: str | None = None,
     ) -> dict[str, Any]:

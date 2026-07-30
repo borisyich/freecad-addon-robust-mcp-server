@@ -158,6 +158,7 @@ def _primitive_definition(spec: PrimitiveSpec) -> tuple[str, dict[str, Any]]:
         }
     raise TypeError(f"Unsupported primitive specification: {type(spec).__name__}")
 
+
 def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> None:
     """Register object-related tools with the Robust MCP Server.
 
@@ -375,7 +376,7 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
 
     @mcp.tool()
     async def boolean_operation(
-        operation: str,
+        operation: Literal["fuse", "cut", "common"],
         object1_name: str,
         object2_name: str,
         result_name: str | None = None,
@@ -750,7 +751,7 @@ _result_ = {{
     @mcp.tool()
     async def mirror_object(
         object_name: str,
-        plane: str = "XY",
+        plane: Literal["XY", "XZ", "YZ"] = "XY",
         result_name: str | None = None,
         doc_name: str | None = None,
     ) -> dict[str, Any]:
@@ -1357,7 +1358,7 @@ except Exception:
     @mcp.tool()
     async def section_shape(
         object_name: str,
-        plane: str = "XY",
+        plane: Literal["XY", "XZ", "YZ"] = "XY",
         offset: float = 0.0,
         result_name: str | None = None,
         doc_name: str | None = None,

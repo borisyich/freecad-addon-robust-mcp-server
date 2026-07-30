@@ -59,15 +59,30 @@ async def test_sketch_geometry_and_constraint_operation_catalog(live_tools: dict
     result = await _call(tools, "edit_sketch_geometry", sketch_name="Geometry",
                          operations=operations, doc_name=doc)
     assert result["operations_applied"] == len(operations)
-    await _call(tools, "create_object", type_id="Part::Line", name="ExternalLine",
-                doc_name=doc)
+    external_doc = "McpAuditExternalGeometry"
+    await _fresh(tools, external_doc)
+    await _call(
+        tools,
+        "create_primitive",
+        primitive={"kind": "box", "length": 10, "width": 10, "height": 10},
+        name="ExternalBox",
+        doc_name=external_doc,
+    )
+    await _call(
+        tools,
+        "create_sketch",
+        body_name=None,
+        plane="XY_Plane",
+        name="ExternalGeometrySketch",
+        doc_name=external_doc,
+    )
     await _call(
         tools,
         "edit_sketch_geometry",
-        sketch_name="Geometry",
-        operations=[{"op": "add_external_geometry", "object_name": "ExternalLine",
+        sketch_name="ExternalGeometrySketch",
+        operations=[{"op": "add_external_geometry", "object_name": "ExternalBox",
                      "element": "Edge1"}],
-        doc_name=doc,
+        doc_name=external_doc,
     )
 
     # Each constraint operation is isolated so a deliberate solver interaction
