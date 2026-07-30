@@ -69,6 +69,8 @@
 - Added protocol-level FastMCP `instructions` with the required FreeCAD engineering workflow.
 - Consolidated sketch geometry and constraint editing into atomic batch tools: `edit_sketch_geometry` and `edit_sketch_constraints`.
 - Consolidated GUI/view utility entry points into `set_visual_properties`, `workbench`, `history`, and `selection`; removed zoom and duplicate console/recompute tools.
+- Consolidated file exchange into `export` and `import`, with explicit format routing and consistent import results.
+- Consolidated Box, Cylinder, Sphere, Cone, Torus, Wedge, and Helix creation into the typed `create_primitive` tool.
 
 This project uses **component-specific versioning**. Each component has its own
 release notes and version history.

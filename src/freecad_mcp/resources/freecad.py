@@ -482,46 +482,9 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                             "key_params": ["type_id", "name", "properties"],
                         },
                         {
-                            "name": "create_box",
-                            "description": "Create Part::Box primitive",
-                            "key_params": ["length", "width", "height"],
-                        },
-                        {
-                            "name": "create_cylinder",
-                            "description": "Create Part::Cylinder primitive",
-                            "key_params": ["radius", "height"],
-                        },
-                        {
-                            "name": "create_sphere",
-                            "description": "Create Part::Sphere primitive",
-                            "key_params": ["radius"],
-                        },
-                        {
-                            "name": "create_cone",
-                            "description": "Create Part::Cone primitive",
-                            "key_params": ["radius1", "radius2", "height"],
-                        },
-                        {
-                            "name": "create_torus",
-                            "description": "Create Part::Torus primitive",
-                            "key_params": ["radius1", "radius2"],
-                        },
-                        {
-                            "name": "create_wedge",
-                            "description": "Create Part::Wedge primitive",
-                            "key_params": [
-                                "xmin",
-                                "xmax",
-                                "ymin",
-                                "ymax",
-                                "zmin",
-                                "zmax",
-                            ],
-                        },
-                        {
-                            "name": "create_helix",
-                            "description": "Create Part::Helix primitive",
-                            "key_params": ["pitch", "height", "radius"],
+                            "name": "create_primitive",
+                            "description": "Create a Box, Cylinder, Sphere, Cone, Torus, Wedge, or Helix",
+                            "key_params": ["primitive", "name", "doc_name"],
                         },
                         {
                             "name": "create_line",
@@ -1020,39 +983,14 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                     "description": "File export and import",
                     "tools": [
                         {
-                            "name": "export_step",
-                            "description": "Export to STEP format",
-                            "key_params": ["object_names", "file_path"],
+                            "name": "export",
+                            "description": "Export to STEP, IGES, STL, 3MF, or OBJ",
+                            "key_params": ["file_format", "file_path", "object_names"],
                         },
                         {
-                            "name": "export_stl",
-                            "description": "Export to STL format (3D printing)",
-                            "key_params": ["object_names", "file_path"],
-                        },
-                        {
-                            "name": "export_3mf",
-                            "description": "Export to 3MF format",
-                            "key_params": ["object_names", "file_path"],
-                        },
-                        {
-                            "name": "export_obj",
-                            "description": "Export to OBJ format",
-                            "key_params": ["object_names", "file_path"],
-                        },
-                        {
-                            "name": "export_iges",
-                            "description": "Export to IGES format",
-                            "key_params": ["object_names", "file_path"],
-                        },
-                        {
-                            "name": "import_step",
-                            "description": "Import STEP file",
-                            "key_params": ["file_path"],
-                        },
-                        {
-                            "name": "import_stl",
-                            "description": "Import STL file",
-                            "key_params": ["file_path"],
+                            "name": "import",
+                            "description": "Import STEP or STL",
+                            "key_params": ["file_format", "file_path", "doc_name"],
                         },
                     ],
                 },
@@ -1295,8 +1233,8 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                 "export_for_printing": {
                     "description": "Export model for 3D printing",
                     "steps": [
-                        "export_stl(object_names=['Body'], file_path='...')",
-                        "Or export_3mf for color/material support",
+                        "export(file_format='stl', object_names=['Body'], file_path='...')",
+                        "Or use file_format='3mf' for color/material support",
                     ],
                 },
             },

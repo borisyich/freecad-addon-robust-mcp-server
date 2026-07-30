@@ -25,11 +25,29 @@ def _decorated_functions(path: Path, decorator_name: str) -> list[ast.AST]:
     return result
 
 
+def _registered_tool_name(node: ast.AST) -> str:
+    """Return the MCP name, honoring ``@mcp.tool(name=...)`` aliases."""
+    for decorator in node.decorator_list:  # type: ignore[attr-defined]
+        if not (
+            isinstance(decorator, ast.Call)
+            and isinstance(decorator.func, ast.Attribute)
+            and decorator.func.attr == "tool"
+        ):
+            continue
+        for keyword in decorator.keywords:
+            if keyword.arg == "name":
+                assert isinstance(keyword.value, ast.Constant)
+                assert isinstance(keyword.value.value, str)
+                return keyword.value.value
+    return node.name  # type: ignore[attr-defined]
+
+
 def test_tools_overview_contains_every_registered_tool() -> None:
     tool_names: list[str] = []
     for path in sorted((ROOT / "src/freecad_mcp/tools").glob("*.py")):
         tool_names.extend(
-            node.name for node in _decorated_functions(path, "tool")  # type: ignore[attr-defined]
+            _registered_tool_name(node)
+            for node in _decorated_functions(path, "tool")
         )
 
     text = (ROOT / "docs/guide/tools.md").read_text(encoding="utf-8")

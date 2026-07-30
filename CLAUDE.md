@@ -1381,7 +1381,7 @@ code = wrap_with_transaction(
 
 The following categories of tools MUST use transaction wrapping:
 
-- **Object creation**: `create_box`, `create_cylinder`, `create_object`, etc.
+- **Object creation**: `create_primitive`, `create_object`, etc.
 - **Object modification**: `edit_object`, `set_placement`, `rotate_object`, `scale_object`
 - **Object deletion**: `delete_object`
 - **Boolean operations**: `boolean_operation`, `copy_object`, `mirror_object`
@@ -1392,7 +1392,7 @@ The following categories of tools MUST use transaction wrapping:
 #### Tools NOT Requiring Transactions
 
 - **Read-only operations**: `list_objects`, `inspect_object`, `get_screenshot`
-- **Export operations**: `export_step`, `export_stl` (writes to external files, not the document)
+- **Export operations**: `export` (writes to external files, not the document)
 - **View operations**: `set_view_angle`, `fit_all`, `set_visual_properties` (do not modify document geometry)
 - **History tool**: `history(action="undo|redo|status")` (manages transactions itself)
 
@@ -1854,13 +1854,7 @@ The MCP server provides a `freecad://capabilities` resource with a curated JSON 
 | `list_objects`            | List all objects in a document with their types and properties. |
 | `inspect_object`          | Get detailed information about a specific object.               |
 | `create_object`           | Create a generic FreeCAD object.                                |
-| `create_box`              | Create a Part::Box primitive.                                   |
-| `create_cylinder`         | Create a Part::Cylinder primitive.                              |
-| `create_sphere`           | Create a Part::Sphere primitive.                                |
-| `create_cone`             | Create a Part::Cone primitive.                                  |
-| `create_torus`            | Create a Part::Torus primitive.                                 |
-| `create_wedge`            | Create a Part::Wedge primitive.                                 |
-| `create_helix`            | Create a Part::Helix primitive.                                 |
+| `create_primitive`        | Create a Box, Cylinder, Sphere, Cone, Torus, Wedge, or Helix.  |
 | `create_line`             | Create a Part::Line between two points.                         |
 | `create_plane`            | Create a Part::Plane surface.                                   |
 | `create_ellipse`          | Create a Part::Ellipse curve.                                   |
@@ -2035,13 +2029,8 @@ The MCP server provides a `freecad://capabilities` resource with a curated JSON 
 
 | Tool          | Description                                        |
 | ------------- | -------------------------------------------------- |
-| `export_step` | Export objects to STEP format.                     |
-| `export_stl`  | Export objects to STL format (for 3D printing).    |
-| `export_3mf`  | Export objects to 3MF format (modern 3D printing). |
-| `export_obj`  | Export objects to OBJ format.                      |
-| `export_iges` | Export objects to IGES format.                     |
-| `import_step` | Import STEP files.                                 |
-| `import_stl`  | Import STL files.                                  |
+| `export` | Export objects to STEP, IGES, STL, 3MF, or OBJ. |
+| `import` | Import STEP or STL files.                         |
 
 ### Macro Tools
 
@@ -2105,7 +2094,7 @@ await pad_sketch(body_name="Body", sketch_name="Sketch", length=15)
 await fillet_edges(body_name="Body", edges=["Edge1", "Edge2"], radius=2)
 
 # Export to STL
-await export_stl(object_names=["Body"], file_path="/tmp/mypart.stl")
+await export(file_format="stl", object_names=["Body"], file_path="/tmp/mypart.stl")
 ```
 
 ---

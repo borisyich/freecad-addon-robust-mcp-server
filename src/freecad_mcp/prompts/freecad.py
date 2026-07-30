@@ -338,13 +338,15 @@ If boolean fails:
             "export": """# Export Operations Guidance
 
 ## Available Formats
-| Format | Tool | Best For |
-|--------|------|----------|
-| STEP | `export_step()` | CAD interchange, precise geometry |
-| STL | `export_stl()` | 3D printing (mesh format) |
-| 3MF | `export_3mf()` | 3D printing with color/material |
-| OBJ | `export_obj()` | Graphics, rendering, games |
-| IGES | `export_iges()` | Legacy CAD systems |
+Use `export(file_format=..., file_path=...)` for every supported format.
+
+| Format | `file_format` | Best For |
+|--------|---------------|----------|
+| STEP | `step` | CAD interchange, precise geometry |
+| STL | `stl` | 3D printing (mesh format) |
+| 3MF | `3mf` | 3D printing with color/material |
+| OBJ | `obj` | Graphics, rendering, games |
+| IGES | `iges` | Legacy CAD systems |
 
 ## Pre-Export Checklist
 1. `validate_document()` - Ensure all objects are valid
@@ -357,8 +359,8 @@ If boolean fails:
 - Use absolute paths for `file_path`
 
 ## Import Formats
-- `import_step()` - Preserves precise CAD geometry
-- `import_stl()` - Imports as mesh (may need conversion for CAD ops)
+- `import(file_format="step", ...)` - Preserves precise CAD geometry
+- `import(file_format="stl", ...)` - Imports as mesh (may need conversion for CAD ops)
 
 ## Common Issues
 - **Export fails**: Object has invalid shape
@@ -453,7 +455,7 @@ Fallback protected code execution; do not use it instead of available standard t
 After any operation:
 ```
 # Option 1: Simple undo if something goes wrong
-create_box(length=10, width=10, height=10)
+create_primitive(primitive={"kind": "box", "length": 10, "width": 10, "height": 10})
 # Oops, wrong size
 history(action="undo")  # Reverts the box creation
 
@@ -550,7 +552,7 @@ Add additional features as needed:
 When complete:
 - Use `inspect_object` to verify dimensions
 - Use `get_screenshot` to visualize the result
-- Export with `export_step` or `export_stl` as needed
+- Export with `export(file_format=...)` using the required target format
 
 ## Units
 All dimensions should be specified in **{units}**.
@@ -674,32 +676,32 @@ boolean_operation(
         """
         format_info = {
             "STEP": {
-                "tool": "export_step",
+                "tool": "export",
                 "extension": ".step",
                 "description": "Standard for exchanging 3D CAD data between systems",
                 "best_for": "CAD interchange, preserves geometry precisely",
-                "params": "file_path, object_names (optional)",
+                "params": "file_format, file_path, object_names (optional)",
             },
             "STL": {
-                "tool": "export_stl",
+                "tool": "export",
                 "extension": ".stl",
                 "description": "Triangulated mesh format",
                 "best_for": "3D printing, mesh-based workflows",
-                "params": "file_path, object_names (optional), mesh_tolerance (default 0.1)",
+                "params": "file_format, file_path, object_names (optional), mesh_tolerance (default 0.1)",
             },
             "OBJ": {
-                "tool": "export_obj",
+                "tool": "export",
                 "extension": ".obj",
                 "description": "Wavefront OBJ mesh format",
                 "best_for": "3D graphics, rendering, game engines",
-                "params": "file_path, object_names (optional)",
+                "params": "file_format, file_path, object_names (optional)",
             },
             "IGES": {
-                "tool": "export_iges",
+                "tool": "export",
                 "extension": ".iges",
                 "description": "Initial Graphics Exchange Specification",
                 "best_for": "Legacy CAD systems, surface data",
-                "params": "file_path, object_names (optional)",
+                "params": "file_format, file_path, object_names (optional)",
             },
         }
 
@@ -719,6 +721,7 @@ Use the `{info["tool"]}` tool with parameters:
 ## Example
 ```python
 {info["tool"]}(
+    file_format="{target_format.lower()}",
     file_path="/path/to/output{info["extension"]}",
     object_names=["Part1", "Part2"]  # Optional: exports all if not specified
 )
@@ -748,12 +751,12 @@ Use the `{info["tool"]}` tool with parameters:
         """
         format_info = {
             "STEP": {
-                "tool": "import_step",
+                "tool": "import",
                 "description": "Imports precise CAD geometry",
                 "notes": "Preserves feature boundaries, faces, and edges",
             },
             "STL": {
-                "tool": "import_stl",
+                "tool": "import",
                 "description": "Imports triangulated mesh",
                 "notes": "Results in Mesh object, may need conversion for CAD operations",
             },
@@ -772,6 +775,7 @@ Use the `{info["tool"]}` tool with parameters:
 Use the `{info["tool"]}` tool:
 ```python
 {info["tool"]}(
+    file_format="{source_format.lower()}",
     file_path="/path/to/file.{source_format.lower()}",
     doc_name="TargetDocument"  # Optional
 )

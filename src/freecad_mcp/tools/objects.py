@@ -5,8 +5,158 @@ creating, editing, deleting, and inspecting objects.
 """
 
 from collections.abc import Awaitable, Callable
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
+
+
+class _PrimitiveBase(BaseModel):
+    """Strict base model for one concrete primitive contract."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class BoxPrimitive(_PrimitiveBase):
+    kind: Literal["box"]
+    length: float = Field(default=10.0, gt=0)
+    width: float = Field(default=10.0, gt=0)
+    height: float = Field(default=10.0, gt=0)
+
+
+class CylinderPrimitive(_PrimitiveBase):
+    kind: Literal["cylinder"]
+    radius: float = Field(default=5.0, gt=0)
+    height: float = Field(default=10.0, gt=0)
+    angle: float = Field(default=360.0, gt=0, le=360)
+
+
+class SpherePrimitive(_PrimitiveBase):
+    kind: Literal["sphere"]
+    radius: float = Field(default=5.0, gt=0)
+
+
+class ConePrimitive(_PrimitiveBase):
+    kind: Literal["cone"]
+    radius1: float = Field(default=5.0, ge=0)
+    radius2: float = Field(default=0.0, ge=0)
+    height: float = Field(default=10.0, gt=0)
+    angle: float = Field(default=360.0, gt=0, le=360)
+
+    @model_validator(mode="after")
+    def validate_radii(self) -> "ConePrimitive":
+        if self.radius1 == 0 and self.radius2 == 0:
+            raise ValueError("cone requires at least one positive radius")
+        return self
+
+
+class TorusPrimitive(_PrimitiveBase):
+    kind: Literal["torus"]
+    radius1: float = Field(default=10.0, gt=0)
+    radius2: float = Field(default=2.0, gt=0)
+    angle1: float = -180.0
+    angle2: float = 180.0
+    angle3: float = Field(default=360.0, gt=0, le=360)
+
+
+class WedgePrimitive(_PrimitiveBase):
+    kind: Literal["wedge"]
+    xmin: float = 0.0
+    ymin: float = 0.0
+    zmin: float = 0.0
+    x2min: float = 2.0
+    z2min: float = 2.0
+    xmax: float = 10.0
+    ymax: float = 10.0
+    zmax: float = 10.0
+    x2max: float = 8.0
+    z2max: float = 8.0
+
+    @model_validator(mode="after")
+    def validate_extents(self) -> "WedgePrimitive":
+        if self.xmax <= self.xmin:
+            raise ValueError("xmax must be greater than xmin for wedge")
+        if self.ymax <= self.ymin:
+            raise ValueError("ymax must be greater than ymin for wedge")
+        if self.zmax <= self.zmin:
+            raise ValueError("zmax must be greater than zmin for wedge")
+        return self
+
+
+class HelixPrimitive(_PrimitiveBase):
+    kind: Literal["helix"]
+    pitch: float = Field(default=5.0, gt=0)
+    height: float = Field(default=20.0, gt=0)
+    radius: float = Field(default=5.0, gt=0)
+    angle: float = 0.0
+    left_handed: bool = False
+
+
+PrimitiveSpec = Annotated[
+    BoxPrimitive
+    | CylinderPrimitive
+    | SpherePrimitive
+    | ConePrimitive
+    | TorusPrimitive
+    | WedgePrimitive
+    | HelixPrimitive,
+    Field(discriminator="kind"),
+]
+_PRIMITIVE_ADAPTER = TypeAdapter(PrimitiveSpec)
+
+
+def _primitive_definition(spec: PrimitiveSpec) -> tuple[str, dict[str, Any]]:
+    """Map a validated primitive specification to a FreeCAD type and properties."""
+    if isinstance(spec, BoxPrimitive):
+        return "Part::Box", {
+            "Length": spec.length,
+            "Width": spec.width,
+            "Height": spec.height,
+        }
+    if isinstance(spec, CylinderPrimitive):
+        return "Part::Cylinder", {
+            "Radius": spec.radius,
+            "Height": spec.height,
+            "Angle": spec.angle,
+        }
+    if isinstance(spec, SpherePrimitive):
+        return "Part::Sphere", {"Radius": spec.radius}
+    if isinstance(spec, ConePrimitive):
+        return "Part::Cone", {
+            "Radius1": spec.radius1,
+            "Radius2": spec.radius2,
+            "Height": spec.height,
+            "Angle": spec.angle,
+        }
+    if isinstance(spec, TorusPrimitive):
+        return "Part::Torus", {
+            "Radius1": spec.radius1,
+            "Radius2": spec.radius2,
+            "Angle1": spec.angle1,
+            "Angle2": spec.angle2,
+            "Angle3": spec.angle3,
+        }
+    if isinstance(spec, WedgePrimitive):
+        return "Part::Wedge", {
+            "Xmin": spec.xmin,
+            "Ymin": spec.ymin,
+            "Zmin": spec.zmin,
+            "X2min": spec.x2min,
+            "Z2min": spec.z2min,
+            "Xmax": spec.xmax,
+            "Ymax": spec.ymax,
+            "Zmax": spec.zmax,
+            "X2max": spec.x2max,
+            "Z2max": spec.z2max,
+        }
+    if isinstance(spec, HelixPrimitive):
+        return "Part::Helix", {
+            "Pitch": spec.pitch,
+            "Height": spec.height,
+            "Radius": spec.radius,
+            "Angle": spec.angle,
+            "LocalCoord": 1 if spec.left_handed else 0,
+        }
+    raise TypeError(f"Unsupported primitive specification: {type(spec).__name__}")
 
 def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> None:
     """Register object-related tools with the Robust MCP Server.
@@ -84,7 +234,7 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
             return {"error": f"Object '{object_name}' not found", "success": False}
 
         # obj is an ObjectInfo dataclass returned by the bridge
-        result = {
+        result: dict[str, Any] = {
             "name": obj.name,
             "label": obj.label,
             "type_id": obj.type_id,
@@ -144,305 +294,38 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
         }
 
     @mcp.tool()
-    async def create_box(
-        length: float = 10.0,
-        width: float = 10.0,
-        height: float = 10.0,
+    async def create_primitive(
+        primitive: PrimitiveSpec,
         name: str | None = None,
         doc_name: str | None = None,
     ) -> dict[str, Any]:
-        """Create a Part Box primitive.
+        """Create a Box, Cylinder, Sphere, Cone, Torus, Wedge, or Helix.
 
         Args:
-            length: Box length (X dimension). Defaults to 10.0.
-            width: Box width (Y dimension). Defaults to 10.0.
-            height: Box height (Z dimension). Defaults to 10.0.
-            name: Object name. Auto-generated if None.
-            doc_name: Target document. Uses active document if None.
+            primitive: Primitive kind and its dimensions. The selected kind uses
+                its own strict schema; unrelated fields and invalid dimensions are rejected.
+            name: Object name. Auto-generated if omitted.
+            doc_name: Target document. Uses the active document if omitted.
 
         Returns:
-            Dictionary with created object information:
-                - name: Object name
-                - label: Object label
-                - volume: Box volume
-                - type_id: Object type
+            Created object identity, selected primitive kind, and box volume when
+            the selected kind is ``box``.
         """
+        if isinstance(primitive, dict):
+            primitive = _PRIMITIVE_ADAPTER.validate_python(primitive)
+        type_id, properties = _primitive_definition(primitive)
+
         bridge = await get_bridge()
-        obj = await bridge.create_object(
-            "Part::Box",
-            name,
-            {"Length": length, "Width": width, "Height": height},
-            doc_name,
-        )
-        return {
+        obj = await bridge.create_object(type_id, name, properties, doc_name)
+        result: dict[str, Any] = {
             "name": obj.name,
             "label": obj.label,
             "type_id": obj.type_id,
-            "volume": length * width * height,
+            "kind": primitive.kind,
         }
-
-    @mcp.tool()
-    async def create_cylinder(
-        radius: float = 5.0,
-        height: float = 10.0,
-        angle: float = 360.0,
-        name: str | None = None,
-        doc_name: str | None = None,
-    ) -> dict[str, Any]:
-        """Create a Part Cylinder primitive.
-
-        Args:
-            radius: Cylinder radius. Defaults to 5.0.
-            height: Cylinder height. Defaults to 10.0.
-            angle: Sweep angle in degrees (for partial cylinder). Defaults to 360.
-            name: Object name. Auto-generated if None.
-            doc_name: Target document. Uses active document if None.
-
-        Returns:
-            Dictionary with created object information:
-                - name: Object name
-                - label: Object label
-                - type_id: Object type
-        """
-        bridge = await get_bridge()
-        obj = await bridge.create_object(
-            "Part::Cylinder",
-            name,
-            {"Radius": radius, "Height": height, "Angle": angle},
-            doc_name,
-        )
-        return {
-            "name": obj.name,
-            "label": obj.label,
-            "type_id": obj.type_id,
-        }
-
-    @mcp.tool()
-    async def create_sphere(
-        radius: float = 5.0,
-        name: str | None = None,
-        doc_name: str | None = None,
-    ) -> dict[str, Any]:
-        """Create a Part Sphere primitive.
-
-        Args:
-            radius: Sphere radius. Defaults to 5.0.
-            name: Object name. Auto-generated if None.
-            doc_name: Target document. Uses active document if None.
-
-        Returns:
-            Dictionary with created object information:
-                - name: Object name
-                - label: Object label
-                - type_id: Object type
-        """
-        bridge = await get_bridge()
-        obj = await bridge.create_object(
-            "Part::Sphere",
-            name,
-            {"Radius": radius},
-            doc_name,
-        )
-        return {
-            "name": obj.name,
-            "label": obj.label,
-            "type_id": obj.type_id,
-        }
-
-    @mcp.tool()
-    async def create_cone(
-        radius1: float = 5.0,
-        radius2: float = 0.0,
-        height: float = 10.0,
-        angle: float = 360.0,
-        name: str | None = None,
-        doc_name: str | None = None,
-    ) -> dict[str, Any]:
-        """Create a Part Cone primitive.
-
-        Args:
-            radius1: Bottom radius. Defaults to 5.0.
-            radius2: Top radius (0 for pointed cone). Defaults to 0.0.
-            height: Cone height. Defaults to 10.0.
-            angle: Sweep angle in degrees (for partial cone). Defaults to 360.
-            name: Object name. Auto-generated if None.
-            doc_name: Target document. Uses active document if None.
-
-        Returns:
-            Dictionary with created object information:
-                - name: Object name
-                - label: Object label
-                - type_id: Object type
-        """
-        bridge = await get_bridge()
-        obj = await bridge.create_object(
-            "Part::Cone",
-            name,
-            {"Radius1": radius1, "Radius2": radius2, "Height": height, "Angle": angle},
-            doc_name,
-        )
-        return {
-            "name": obj.name,
-            "label": obj.label,
-            "type_id": obj.type_id,
-        }
-
-    @mcp.tool()
-    async def create_torus(
-        radius1: float = 10.0,
-        radius2: float = 2.0,
-        angle1: float = -180.0,
-        angle2: float = 180.0,
-        angle3: float = 360.0,
-        name: str | None = None,
-        doc_name: str | None = None,
-    ) -> dict[str, Any]:
-        """Create a Part Torus (donut shape) primitive.
-
-        Args:
-            radius1: Major radius (center to tube center). Defaults to 10.0.
-            radius2: Minor radius (tube radius). Defaults to 2.0.
-            angle1: Start angle for tube sweep. Defaults to -180.
-            angle2: End angle for tube sweep. Defaults to 180.
-            angle3: Rotation angle around axis. Defaults to 360.
-            name: Object name. Auto-generated if None.
-            doc_name: Target document. Uses active document if None.
-
-        Returns:
-            Dictionary with created object information:
-                - name: Object name
-                - label: Object label
-                - type_id: Object type
-        """
-        bridge = await get_bridge()
-        obj = await bridge.create_object(
-            "Part::Torus",
-            name,
-            {
-                "Radius1": radius1,
-                "Radius2": radius2,
-                "Angle1": angle1,
-                "Angle2": angle2,
-                "Angle3": angle3,
-            },
-            doc_name,
-        )
-        return {
-            "name": obj.name,
-            "label": obj.label,
-            "type_id": obj.type_id,
-        }
-
-    @mcp.tool()
-    async def create_wedge(
-        xmin: float = 0.0,
-        ymin: float = 0.0,
-        zmin: float = 0.0,
-        x2min: float = 2.0,
-        z2min: float = 2.0,
-        xmax: float = 10.0,
-        ymax: float = 10.0,
-        zmax: float = 10.0,
-        x2max: float = 8.0,
-        z2max: float = 8.0,
-        name: str | None = None,
-        doc_name: str | None = None,
-    ) -> dict[str, Any]:
-        """Create a Part Wedge primitive.
-
-        A wedge is a tapered box shape useful for ramps and similar geometry.
-
-        Args:
-            xmin: Minimum X at base. Defaults to 0.0.
-            ymin: Minimum Y (base position). Defaults to 0.0.
-            zmin: Minimum Z at base. Defaults to 0.0.
-            x2min: Minimum X at top. Defaults to 2.0.
-            z2min: Minimum Z at top. Defaults to 2.0.
-            xmax: Maximum X at base. Defaults to 10.0.
-            ymax: Maximum Y (top position). Defaults to 10.0.
-            zmax: Maximum Z at base. Defaults to 10.0.
-            x2max: Maximum X at top. Defaults to 8.0.
-            z2max: Maximum Z at top. Defaults to 8.0.
-            name: Object name. Auto-generated if None.
-            doc_name: Target document. Uses active document if None.
-
-        Returns:
-            Dictionary with created object information:
-                - name: Object name
-                - label: Object label
-                - type_id: Object type
-        """
-        bridge = await get_bridge()
-        obj = await bridge.create_object(
-            "Part::Wedge",
-            name,
-            {
-                "Xmin": xmin,
-                "Ymin": ymin,
-                "Zmin": zmin,
-                "X2min": x2min,
-                "Z2min": z2min,
-                "Xmax": xmax,
-                "Ymax": ymax,
-                "Zmax": zmax,
-                "X2max": x2max,
-                "Z2max": z2max,
-            },
-            doc_name,
-        )
-        return {
-            "name": obj.name,
-            "label": obj.label,
-            "type_id": obj.type_id,
-        }
-
-    @mcp.tool()
-    async def create_helix(
-        pitch: float = 5.0,
-        height: float = 20.0,
-        radius: float = 5.0,
-        angle: float = 0.0,
-        left_handed: bool = False,
-        name: str | None = None,
-        doc_name: str | None = None,
-    ) -> dict[str, Any]:
-        """Create a Part Helix curve.
-
-        A helix is a spiral curve, useful as a sweep path for threads and springs.
-
-        Args:
-            pitch: Distance between turns. Defaults to 5.0.
-            height: Total helix height. Defaults to 20.0.
-            radius: Helix radius. Defaults to 5.0.
-            angle: Taper angle in degrees. Defaults to 0.0.
-            left_handed: Whether helix is left-handed. Defaults to False.
-            name: Object name. Auto-generated if None.
-            doc_name: Target document. Uses active document if None.
-
-        Returns:
-            Dictionary with created object information:
-                - name: Object name
-                - label: Object label
-                - type_id: Object type
-        """
-        bridge = await get_bridge()
-        obj = await bridge.create_object(
-            "Part::Helix",
-            name,
-            {
-                "Pitch": pitch,
-                "Height": height,
-                "Radius": radius,
-                "Angle": angle,
-                "LocalCoord": 1 if left_handed else 0,
-            },
-            doc_name,
-        )
-        return {
-            "name": obj.name,
-            "label": obj.label,
-            "type_id": obj.type_id,
-        }
+        if primitive.kind == "box":
+            result["volume"] = primitive.length * primitive.width * primitive.height
+        return result
 
     @mcp.tool()
     async def edit_object(

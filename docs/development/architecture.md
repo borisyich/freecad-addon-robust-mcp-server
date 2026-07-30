@@ -191,19 +191,11 @@ Tools generate Python code that runs in FreeCAD:
 
 ```python
 @mcp.tool()
-async def create_box(length: float = 10.0, ...) -> dict:
+async def create_primitive(primitive: PrimitiveSpec, ...) -> dict:
     bridge = await get_bridge()
-
-    code = f'''
-doc = FreeCAD.ActiveDocument or FreeCAD.newDocument("Unnamed")
-obj = doc.addObject("Part::Box", "Box")
-obj.Length = {length}
-doc.recompute()
-_result_ = {{"name": obj.Name, "volume": obj.Shape.Volume}}
-'''
-
-    result = await bridge.execute_python(code)
-    return result.result
+    type_id, properties = _primitive_definition(primitive)
+    obj = await bridge.create_object(type_id, name, properties, doc_name)
+    return {"name": obj.name, "type_id": obj.type_id, "kind": primitive.kind}
 ```
 
 ---

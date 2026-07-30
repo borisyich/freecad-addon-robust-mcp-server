@@ -1,6 +1,6 @@
 # Tools Reference
 
-The server currently registers **122 MCP tools**. This page is generated from the actual `@mcp.tool()` definitions in `src/freecad_mcp/tools` and is the exact inventory.
+The server currently registers **111 MCP tools**. This page is generated from the actual `@mcp.tool()` definitions in `src/freecad_mcp/tools` and is the exact inventory.
 
 Geometry-changing operations are transaction-backed where applicable. Use `history(action="undo")` for explicit recovery, `get_console_output` for console diagnostics, and `recompute_document` for document recomputation.
 
@@ -10,7 +10,7 @@ Geometry-changing operations are transaction-backed where applicable. Use `histo
 |---|---|---:|
 | [Execution](#execution) | `src/freecad_mcp/tools/execution.py` | 5 |
 | [Documents](#documents) | `src/freecad_mcp/tools/documents.py` | 7 |
-| [Objects / Part](#objects-part) | `src/freecad_mcp/tools/objects.py` | 38 |
+| [Objects / Part](#objects-part) | `src/freecad_mcp/tools/objects.py` | 32 |
 | [PartDesign / Sketcher](#partdesign-sketcher) | `src/freecad_mcp/tools/partdesign.py` | 25 |
 | [Spreadsheet](#spreadsheet) | `src/freecad_mcp/tools/spreadsheet.py` | 10 |
 | [Draft](#draft) | `src/freecad_mcp/tools/draft.py` | 6 |
@@ -18,9 +18,9 @@ Geometry-changing operations are transaction-backed where applicable. Use `histo
 | [Checkpoints](#checkpoints) | `src/freecad_mcp/tools/checkpoints.py` | 1 |
 | [View / GUI / History](#view-gui-history) | `src/freecad_mcp/tools/view.py` | 9 |
 | [Validation](#validation) | `src/freecad_mcp/tools/validation.py` | 5 |
-| [Export / Import](#export-import) | `src/freecad_mcp/tools/export.py` | 7 |
+| [Export / Import](#export-import) | `src/freecad_mcp/tools/export.py` | 2 |
 | [Macros](#macros) | `src/freecad_mcp/tools/macros.py` | 6 |
-| **Total** |  | **122** |
+| **Total** |  | **111** |
 
 ## Execution
 
@@ -51,13 +51,7 @@ Geometry-changing operations are transaction-backed where applicable. Use `histo
 | `list_objects` | List all objects in a FreeCAD document. |
 | `inspect_object` | Get detailed information about a FreeCAD object. |
 | `create_object` | Create a new FreeCAD object. |
-| `create_box` | Create a Part Box primitive. |
-| `create_cylinder` | Create a Part Cylinder primitive. |
-| `create_sphere` | Create a Part Sphere primitive. |
-| `create_cone` | Create a Part Cone primitive. |
-| `create_torus` | Create a Part Torus (donut shape) primitive. |
-| `create_wedge` | Create a Part Wedge primitive. |
-| `create_helix` | Create a Part Helix curve. |
+| `create_primitive` | Create a Box, Cylinder, Sphere, Cone, Torus, Wedge, or Helix. |
 | `edit_object` | Edit properties of an existing FreeCAD object. |
 | `delete_object` | Delete an object from a FreeCAD document. |
 | `boolean_operation` | Perform a boolean operation on two FreeCAD objects. |
@@ -185,13 +179,8 @@ Geometry-changing operations are transaction-backed where applicable. Use `histo
 
 | Tool | Description |
 |---|---|
-| `export_step` | Export objects to STEP format. |
-| `export_stl` | Export objects to STL format. |
-| `export_3mf` | Export objects to 3MF format. |
-| `export_obj` | Export objects to OBJ format. |
-| `export_iges` | Export objects to IGES format. |
-| `import_step` | Import a STEP file into FreeCAD. |
-| `import_stl` | Import an STL file into FreeCAD. |
+| `export` | Export objects to STEP, IGES, STL, 3MF, or OBJ. |
+| `import` | Import a STEP or STL file into FreeCAD. |
 
 ## Macros
 

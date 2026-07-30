@@ -617,7 +617,7 @@ except Exception:
         Example:
             Engrave text on top of a box::
 
-                await create_box(length=100, width=50, height=20)
+                await create_primitive(primitive={"kind": "box", "length": 100, "width": 50, "height": 20})
                 result = await draft_text_on_surface(
                     text="SAMPLE",
                     target_face="Face6",  # Top face

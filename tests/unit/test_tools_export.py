@@ -1,4 +1,4 @@
-"""Tests for export/import tools module."""
+"""Tests for the consolidated import and export tools."""
 
 from unittest.mock import AsyncMock, MagicMock
 
@@ -8,17 +8,17 @@ from freecad_mcp.bridge.base import ExecutionResult
 
 
 class TestExportTools:
-    """Tests for export/import tools."""
+    """Tests for import/export routing and validation."""
 
     @pytest.fixture
     def mock_mcp(self):
-        """Create a mock MCP server that captures tool registrations."""
+        """Create a mock MCP server that respects explicit tool names."""
         mcp = MagicMock()
         mcp._registered_tools = {}
 
-        def tool_decorator():
+        def tool_decorator(name=None, **_kwargs):
             def wrapper(func):
-                mcp._registered_tools[func.__name__] = func
+                mcp._registered_tools[name or func.__name__] = func
                 return func
 
             return wrapper
@@ -42,263 +42,166 @@ class TestExportTools:
         register_export_tools(mock_mcp, get_bridge)
         return mock_mcp._registered_tools
 
+    def test_only_consolidated_tools_are_registered(self, register_tools):
+        """The public surface should contain only export and import."""
+        assert set(register_tools) == {"export", "import"}
+
     @pytest.mark.asyncio
-    async def test_export_step(self, register_tools, mock_bridge):
-        """export_step should export to STEP format via execute_python."""
+    @pytest.mark.parametrize(
+        ("file_format", "expected_method"),
+        [("step", "shape.exportStep"), ("iges", "shape.exportIges")],
+    )
+    async def test_export_routes_brep_formats(
+        self, register_tools, mock_bridge, file_format, expected_method
+    ):
+        """STEP and IGES should use precise BREP export, not meshing."""
         mock_bridge.execute_python = AsyncMock(
             return_value=ExecutionResult(
                 success=True,
                 result={
                     "success": True,
-                    "path": "/tmp/output.step",
+                    "format": file_format,
+                    "path": f"/tmp/part.{file_format}",
                     "object_count": 2,
                 },
                 stdout="",
                 stderr="",
-                execution_time_ms=50.0,
+                execution_time_ms=10.0,
             )
         )
 
-        export_step = register_tools["export_step"]
-        result = await export_step(
-            file_path="/tmp/output.step", object_names=["Box", "Cylinder"]
+        result = await register_tools["export"](
+            file_format=file_format,
+            file_path=f"/tmp/part.{file_format}",
+            object_names=["Body", "Fixture"],
         )
 
-        assert result["success"] is True
-        assert result["path"] == "/tmp/output.step"
+        code = mock_bridge.execute_python.call_args.args[0]
+        assert expected_method in code
+        assert "Part.makeCompound" in code
+        assert "MeshPart.meshFromShape" not in code
+        assert result["format"] == file_format
         assert result["object_count"] == 2
-        mock_bridge.execute_python.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_export_step_all_visible(self, register_tools, mock_bridge):
-        """export_step should export all visible objects when no names given."""
+    @pytest.mark.parametrize("file_format", ["stl", "3mf", "obj"])
+    async def test_export_routes_mesh_formats(
+        self, register_tools, mock_bridge, file_format
+    ):
+        """Mesh formats should share one meshing path and honor tolerance."""
         mock_bridge.execute_python = AsyncMock(
             return_value=ExecutionResult(
                 success=True,
                 result={
                     "success": True,
-                    "path": "/tmp/output.step",
-                    "object_count": 5,
-                },
-                stdout="",
-                stderr="",
-                execution_time_ms=75.0,
-            )
-        )
-
-        export_step = register_tools["export_step"]
-        result = await export_step(file_path="/tmp/output.step")
-
-        assert result["success"] is True
-        assert result["object_count"] == 5
-
-    @pytest.mark.asyncio
-    async def test_export_stl(self, register_tools, mock_bridge):
-        """export_stl should export to STL format via execute_python."""
-        mock_bridge.execute_python = AsyncMock(
-            return_value=ExecutionResult(
-                success=True,
-                result={
-                    "success": True,
-                    "path": "/tmp/output.stl",
+                    "format": file_format,
+                    "path": f"/tmp/part.{file_format}",
                     "object_count": 1,
                 },
                 stdout="",
                 stderr="",
-                execution_time_ms=30.0,
+                execution_time_ms=10.0,
             )
         )
 
-        export_stl = register_tools["export_stl"]
-        result = await export_stl(file_path="/tmp/output.stl", object_names=["Box"])
+        result = await register_tools["export"](
+            file_format=file_format,
+            file_path=f"/tmp/part.{file_format}",
+            object_names=["Body"],
+            mesh_tolerance=0.025,
+        )
 
-        assert result["success"] is True
-        assert result["path"] == "/tmp/output.stl"
-        mock_bridge.execute_python.assert_called_once()
+        code = mock_bridge.execute_python.call_args.args[0]
+        assert "MeshPart.meshFromShape" in code
+        assert "LinearDeflection=0.025" in code
+        assert "final_mesh.write" in code
+        assert result["format"] == file_format
 
     @pytest.mark.asyncio
-    async def test_export_stl_with_tolerance(self, register_tools, mock_bridge):
-        """export_stl should accept mesh tolerance parameter."""
+    async def test_export_rejects_invalid_mesh_tolerance_before_bridge(
+        self, register_tools, mock_bridge
+    ):
+        """Invalid mesh settings must not execute code in FreeCAD."""
+        with pytest.raises(ValueError, match="mesh_tolerance must be positive"):
+            await register_tools["export"](
+                file_format="stl", file_path="/tmp/part.stl", mesh_tolerance=0
+            )
+        mock_bridge.execute_python.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_export_rejects_unknown_format_before_bridge(
+        self, register_tools, mock_bridge
+    ):
+        """Unsupported formats must fail before touching FreeCAD."""
+        with pytest.raises(ValueError, match="Unsupported export format"):
+            await register_tools["export"](
+                file_format="fcstd", file_path="/tmp/part.FCStd"
+            )
+        mock_bridge.execute_python.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("file_format", "expected_module"), [("step", "Part"), ("stl", "Mesh")]
+    )
+    async def test_import_routes_supported_formats_with_consistent_result(
+        self, register_tools, mock_bridge, file_format, expected_module
+    ):
+        """Both import formats should report all newly imported objects."""
         mock_bridge.execute_python = AsyncMock(
             return_value=ExecutionResult(
                 success=True,
                 result={
                     "success": True,
-                    "path": "/tmp/fine.stl",
-                    "object_count": 1,
+                    "format": file_format,
+                    "document": "Target",
+                    "objects": ["Imported001", "Imported002"],
                 },
                 stdout="",
                 stderr="",
-                execution_time_ms=45.0,
+                execution_time_ms=10.0,
             )
         )
 
-        export_stl = register_tools["export_stl"]
-        result = await export_stl(file_path="/tmp/fine.stl", mesh_tolerance=0.01)
-
-        assert result["success"] is True
-        mock_bridge.execute_python.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_export_3mf(self, register_tools, mock_bridge):
-        """export_3mf should export to 3MF format via execute_python."""
-        mock_bridge.execute_python = AsyncMock(
-            return_value=ExecutionResult(
-                success=True,
-                result={
-                    "success": True,
-                    "path": "/tmp/output.3mf",
-                    "object_count": 1,
-                },
-                stdout="",
-                stderr="",
-                execution_time_ms=40.0,
-            )
+        result = await register_tools["import"](
+            file_format=file_format,
+            file_path=f"/tmp/input.{file_format}",
+            doc_name="Target",
         )
 
-        export_3mf = register_tools["export_3mf"]
-        result = await export_3mf(file_path="/tmp/output.3mf")
-
-        assert result["success"] is True
-        mock_bridge.execute_python.assert_called_once()
+        code = mock_bridge.execute_python.call_args.args[0]
+        assert f"import {expected_module}" in code
+        assert f"{expected_module}.insert" in code
+        assert "before_count = len(doc.Objects)" in code
+        assert result["objects"] == ["Imported001", "Imported002"]
+        assert result["document"] == "Target"
 
     @pytest.mark.asyncio
-    async def test_export_obj(self, register_tools, mock_bridge):
-        """export_obj should export to OBJ format via execute_python."""
-        mock_bridge.execute_python = AsyncMock(
-            return_value=ExecutionResult(
-                success=True,
-                result={
-                    "success": True,
-                    "path": "/tmp/output.obj",
-                    "object_count": 1,
-                },
-                stdout="",
-                stderr="",
-                execution_time_ms=35.0,
+    async def test_import_rejects_unknown_format_before_bridge(
+        self, register_tools, mock_bridge
+    ):
+        """The import tool accepts only formats with implemented behavior."""
+        with pytest.raises(ValueError, match="Unsupported import format"):
+            await register_tools["import"](
+                file_format="obj", file_path="/tmp/input.obj"
             )
-        )
-
-        export_obj = register_tools["export_obj"]
-        result = await export_obj(file_path="/tmp/output.obj")
-
-        assert result["success"] is True
-        mock_bridge.execute_python.assert_called_once()
+        mock_bridge.execute_python.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_export_iges(self, register_tools, mock_bridge):
-        """export_iges should export to IGES format via execute_python."""
-        mock_bridge.execute_python = AsyncMock(
-            return_value=ExecutionResult(
-                success=True,
-                result={
-                    "success": True,
-                    "path": "/tmp/output.iges",
-                    "object_count": 1,
-                },
-                stdout="",
-                stderr="",
-                execution_time_ms=55.0,
-            )
-        )
-
-        export_iges = register_tools["export_iges"]
-        result = await export_iges(file_path="/tmp/output.iges")
-
-        assert result["success"] is True
-        mock_bridge.execute_python.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_import_step(self, register_tools, mock_bridge):
-        """import_step should import STEP files via execute_python."""
-        mock_bridge.execute_python = AsyncMock(
-            return_value=ExecutionResult(
-                success=True,
-                result={
-                    "success": True,
-                    "document": "Imported",
-                    "objects": ["Part", "Assembly"],
-                },
-                stdout="",
-                stderr="",
-                execution_time_ms=100.0,
-            )
-        )
-
-        import_step = register_tools["import_step"]
-        result = await import_step(file_path="/tmp/input.step")
-
-        assert result["success"] is True
-        assert result["document"] == "Imported"
-        assert len(result["objects"]) == 2
-        mock_bridge.execute_python.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_import_stl(self, register_tools, mock_bridge):
-        """import_stl should import STL files via execute_python."""
-        mock_bridge.execute_python = AsyncMock(
-            return_value=ExecutionResult(
-                success=True,
-                result={
-                    "success": True,
-                    "document": "Mesh",
-                    "object": "Mesh001",
-                },
-                stdout="",
-                stderr="",
-                execution_time_ms=80.0,
-            )
-        )
-
-        import_stl = register_tools["import_stl"]
-        result = await import_stl(file_path="/tmp/input.stl")
-
-        assert result["success"] is True
-        assert result["object"] == "Mesh001"
-        mock_bridge.execute_python.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_export_step_failure(self, register_tools, mock_bridge):
-        """export_step should raise ValueError on failure."""
+    async def test_export_propagates_bridge_failure(self, register_tools, mock_bridge):
+        """FreeCAD execution failures should remain visible to the agent."""
         mock_bridge.execute_python = AsyncMock(
             return_value=ExecutionResult(
                 success=False,
                 result=None,
                 stdout="",
-                stderr="FileNotFoundError: Directory does not exist",
+                stderr="permission denied",
                 execution_time_ms=5.0,
-                error_type="FileNotFoundError",
-                error_traceback="Traceback: FileNotFoundError: Directory does not exist",
+                error_type="PermissionError",
+                error_traceback="Traceback: PermissionError: permission denied",
             )
         )
 
-        export_step = register_tools["export_step"]
-        with pytest.raises(ValueError) as exc_info:
-            await export_step(file_path="/nonexistent/output.step")
-
-        assert "FileNotFoundError" in str(exc_info.value) or "Traceback" in str(
-            exc_info.value
-        )
-
-    @pytest.mark.asyncio
-    async def test_import_step_into_document(self, register_tools, mock_bridge):
-        """import_step should import into specified document."""
-        mock_bridge.execute_python = AsyncMock(
-            return_value=ExecutionResult(
-                success=True,
-                result={
-                    "success": True,
-                    "document": "MyDoc",
-                    "objects": ["ImportedPart"],
-                },
-                stdout="",
-                stderr="",
-                execution_time_ms=90.0,
+        with pytest.raises(ValueError, match="PermissionError"):
+            await register_tools["export"](
+                file_format="step", file_path="/protected/part.step"
             )
-        )
-
-        import_step = register_tools["import_step"]
-        result = await import_step(file_path="/tmp/part.step", doc_name="MyDoc")
-
-        assert result["success"] is True
-        assert result["document"] == "MyDoc"

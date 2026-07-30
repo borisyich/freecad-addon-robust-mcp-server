@@ -1,38 +1,44 @@
-"""Export tools for FreeCAD Robust MCP Server.
+"""Import and export tools for FreeCAD Robust MCP Server.
 
-This module provides tools for exporting FreeCAD documents and objects
-to various file formats: STEP, STL, 3MF, OBJ, IGES, and FreeCAD native.
+The public MCP surface intentionally exposes one ``export`` tool and one
+``import`` tool. The selected file format determines the FreeCAD operation.
 """
 
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Any, Literal
+
+ExportFormat = Literal["step", "stl", "3mf", "obj", "iges"]
+ImportFormat = Literal["step", "stl"]
+
+_EXPORT_FORMATS = {"step", "stl", "3mf", "obj", "iges"}
+_IMPORT_FORMATS = {"step", "stl"}
+_MESH_EXPORT_FORMATS = {"stl", "3mf", "obj"}
+
+
+def _normalise_format(file_format: str, supported: set[str], operation: str) -> str:
+    """Normalize and validate an import or export format."""
+    normalized = file_format.lower().lstrip(".")
+    if normalized not in supported:
+        supported_text = ", ".join(sorted(supported))
+        raise ValueError(
+            f"Unsupported {operation} format '{file_format}'. "
+            f"Supported formats: {supported_text}"
+        )
+    return normalized
 
 
 def _build_object_selection_code(object_names: list[str] | None) -> str:
-    """Generate Python code for GUI-aware object selection.
-
-    This helper eliminates code duplication across export functions by
-    generating the common object selection logic that handles both GUI
-    and headless modes appropriately.
-
-    Args:
-        object_names: Optional list of specific object names to select.
-
-    Returns:
-        Python code string for object selection logic.
-    """
+    """Generate Python code for GUI-aware object selection."""
     return f"""
 # Get objects to export
 if {object_names!r} is not None:
     objects = [doc.getObject(n) for n in {object_names!r}]
 elif FreeCAD.GuiUp:
-    # GUI mode: export visible objects with shapes
     objects = [
         obj for obj in doc.Objects
         if hasattr(obj, 'Shape') and obj.ViewObject and obj.ViewObject.Visibility
     ]
 else:
-    # Headless mode: export all objects with shapes
     objects = [obj for obj in doc.Objects if hasattr(obj, 'Shape')]
 objects = [obj for obj in objects if obj is not None and hasattr(obj, 'Shape')]
 
@@ -41,217 +47,46 @@ if not objects:
 """
 
 
-def register_export_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> None:
-    """Register export-related tools with the Robust MCP Server.
-
-    Args:
-        mcp: The FastMCP (Robust MCP Server) instance (Any due to lack of stubs).
-        get_bridge: Async function returning the active bridge connection.
-    """
-
-    @mcp.tool()
-    async def export_step(
-        file_path: str,
-        object_names: list[str] | None = None,
-        doc_name: str | None = None,
-    ) -> dict[str, Any]:
-        """Export objects to STEP format.
-
-        STEP (Standard for the Exchange of Product Data) is an ISO standard
-        for CAD data exchange, widely supported by CAD software.
-
-        Args:
-            file_path: Path for the output .step file.
-            object_names: List of object names to export. Exports all visible if None.
-            doc_name: Document to export from. Uses active document if None.
-
-        Returns:
-            Dictionary with export result:
-                - success: Whether export was successful
-                - path: Path to exported file
-                - object_count: Number of objects exported
-        """
-        bridge = await get_bridge()
-
-        code = f"""
+def _build_brep_export_code(
+    file_format: str,
+    file_path: str,
+    object_names: list[str] | None,
+    doc_name: str | None,
+) -> str:
+    """Build STEP or IGES export code."""
+    export_method = "exportStep" if file_format == "step" else "exportIges"
+    return f"""
 import Part
 
 doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
 if doc is None:
     raise ValueError("No document found")
 {_build_object_selection_code(object_names)}
-# Combine shapes
 if len(objects) == 1:
     shape = objects[0].Shape
 else:
     shape = Part.makeCompound([obj.Shape for obj in objects])
 
-shape.exportStep({file_path!r})
+shape.{export_method}({file_path!r})
 
 _result_ = {{
     "success": True,
+    "format": {file_format!r},
     "path": {file_path!r},
     "object_count": len(objects),
 }}
 """
-        result = await bridge.execute_python(code)
-        if result.success:
-            return result.result
-        raise ValueError(result.error_traceback or "STEP export failed")
 
-    @mcp.tool()
-    async def export_stl(
-        file_path: str,
-        object_names: list[str] | None = None,
-        doc_name: str | None = None,
-        mesh_tolerance: float = 0.1,
-    ) -> dict[str, Any]:
-        """Export objects to STL format.
 
-        STL (Stereolithography) is commonly used for 3D printing and
-        rapid prototyping. It represents surfaces as triangular meshes.
-
-        Args:
-            file_path: Path for the output .stl file.
-            object_names: List of object names to export. Exports all visible if None.
-            doc_name: Document to export from. Uses active document if None.
-            mesh_tolerance: Mesh approximation tolerance. Lower = finer mesh.
-
-        Returns:
-            Dictionary with export result:
-                - success: Whether export was successful
-                - path: Path to exported file
-                - object_count: Number of objects exported
-        """
-        bridge = await get_bridge()
-
-        code = f"""
-import Mesh
-import MeshPart
-import Part
-
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
-if doc is None:
-    raise ValueError("No document found")
-{_build_object_selection_code(object_names)}
-# Create mesh from shapes using MeshPart (more reliable than manual tessellation)
-meshes = []
-for obj in objects:
-    mesh = MeshPart.meshFromShape(obj.Shape, LinearDeflection={mesh_tolerance})
-    meshes.append(mesh)
-
-# Combine meshes
-if len(meshes) == 1:
-    final_mesh = meshes[0]
-else:
-    final_mesh = Mesh.Mesh()
-    for m in meshes:
-        final_mesh.addMesh(m)
-
-final_mesh.write({file_path!r})
-
-_result_ = {{
-    "success": True,
-    "path": {file_path!r},
-    "object_count": len(objects),
-}}
-"""
-        result = await bridge.execute_python(code)
-        if result.success:
-            return result.result
-        raise ValueError(result.error_traceback or "STL export failed")
-
-    @mcp.tool()
-    async def export_3mf(
-        file_path: str,
-        object_names: list[str] | None = None,
-        doc_name: str | None = None,
-        mesh_tolerance: float = 0.1,
-    ) -> dict[str, Any]:
-        """Export objects to 3MF format.
-
-        3MF (3D Manufacturing Format) is a modern 3D printing format that
-        supports richer data than STL, including colors, materials, and
-        print settings. It is increasingly preferred over STL for 3D printing.
-
-        Args:
-            file_path: Path for the output .3mf file.
-            object_names: List of object names to export. Exports all visible if None.
-            doc_name: Document to export from. Uses active document if None.
-            mesh_tolerance: Mesh approximation tolerance. Lower = finer mesh.
-
-        Returns:
-            Dictionary with export result:
-                - success: Whether export was successful
-                - path: Path to exported file
-                - object_count: Number of objects exported
-        """
-        bridge = await get_bridge()
-
-        code = f"""
-import Mesh
-import MeshPart
-import Part
-
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
-if doc is None:
-    raise ValueError("No document found")
-{_build_object_selection_code(object_names)}
-# Create mesh from shapes using MeshPart (more reliable than manual tessellation)
-meshes = []
-for obj in objects:
-    mesh = MeshPart.meshFromShape(obj.Shape, LinearDeflection={mesh_tolerance})
-    meshes.append(mesh)
-
-# Combine meshes
-if len(meshes) == 1:
-    final_mesh = meshes[0]
-else:
-    final_mesh = Mesh.Mesh()
-    for m in meshes:
-        final_mesh.addMesh(m)
-
-# Export to 3MF format
-final_mesh.write({file_path!r})
-
-_result_ = {{
-    "success": True,
-    "path": {file_path!r},
-    "object_count": len(objects),
-}}
-"""
-        result = await bridge.execute_python(code)
-        if result.success:
-            return result.result
-        raise ValueError(result.error_traceback or "3MF export failed")
-
-    @mcp.tool()
-    async def export_obj(
-        file_path: str,
-        object_names: list[str] | None = None,
-        doc_name: str | None = None,
-        mesh_tolerance: float = 0.1,
-    ) -> dict[str, Any]:
-        """Export objects to OBJ format.
-
-        OBJ (Wavefront) is a common 3D model format supported by many
-        3D graphics applications and game engines.
-
-        Args:
-            file_path: Path for the output .obj file.
-            object_names: List of object names to export. Exports all visible if None.
-            doc_name: Document to export from. Uses active document if None.
-            mesh_tolerance: Mesh approximation tolerance. Lower = finer mesh.
-
-        Returns:
-            Dictionary with export result:
-                - success: Whether export was successful
-                - path: Path to exported file
-                - object_count: Number of objects exported
-        """
-        bridge = await get_bridge()
-
-        code = f"""
+def _build_mesh_export_code(
+    file_format: str,
+    file_path: str,
+    object_names: list[str] | None,
+    doc_name: str | None,
+    mesh_tolerance: float,
+) -> str:
+    """Build STL, 3MF, or OBJ export code."""
+    return f"""
 import Mesh
 import MeshPart
 
@@ -259,104 +94,38 @@ doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({d
 if doc is None:
     raise ValueError("No document found")
 {_build_object_selection_code(object_names)}
-# Create mesh from shapes using MeshPart (more reliable than manual tessellation)
-meshes = []
-for obj in objects:
-    mesh = MeshPart.meshFromShape(obj.Shape, LinearDeflection={mesh_tolerance})
-    meshes.append(mesh)
+meshes = [
+    MeshPart.meshFromShape(obj.Shape, LinearDeflection={mesh_tolerance!r})
+    for obj in objects
+]
 
-# Combine meshes
 if len(meshes) == 1:
     final_mesh = meshes[0]
 else:
     final_mesh = Mesh.Mesh()
-    for m in meshes:
-        final_mesh.addMesh(m)
+    for mesh in meshes:
+        final_mesh.addMesh(mesh)
 
 final_mesh.write({file_path!r})
 
 _result_ = {{
     "success": True,
+    "format": {file_format!r},
     "path": {file_path!r},
     "object_count": len(objects),
 }}
 """
-        result = await bridge.execute_python(code)
-        if result.success:
-            return result.result
-        raise ValueError(result.error_traceback or "OBJ export failed")
 
-    @mcp.tool()
-    async def export_iges(
-        file_path: str,
-        object_names: list[str] | None = None,
-        doc_name: str | None = None,
-    ) -> dict[str, Any]:
-        """Export objects to IGES format.
 
-        IGES (Initial Graphics Exchange Specification) is an older but still
-        widely supported CAD data exchange format.
-
-        Args:
-            file_path: Path for the output .iges file.
-            object_names: List of object names to export. Exports all visible if None.
-            doc_name: Document to export from. Uses active document if None.
-
-        Returns:
-            Dictionary with export result:
-                - success: Whether export was successful
-                - path: Path to exported file
-                - object_count: Number of objects exported
-        """
-        bridge = await get_bridge()
-
-        code = f"""
-import Part
-
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
-if doc is None:
-    raise ValueError("No document found")
-{_build_object_selection_code(object_names)}
-# Combine shapes
-if len(objects) == 1:
-    shape = objects[0].Shape
-else:
-    shape = Part.makeCompound([obj.Shape for obj in objects])
-
-shape.exportIges({file_path!r})
-
-_result_ = {{
-    "success": True,
-    "path": {file_path!r},
-    "object_count": len(objects),
-}}
-"""
-        result = await bridge.execute_python(code)
-        if result.success:
-            return result.result
-        raise ValueError(result.error_traceback or "IGES export failed")
-
-    @mcp.tool()
-    async def import_step(
-        file_path: str,
-        doc_name: str | None = None,
-    ) -> dict[str, Any]:
-        """Import a STEP file into FreeCAD.
-
-        Args:
-            file_path: Path to the .step file to import.
-            doc_name: Document to import into. Creates new if None.
-
-        Returns:
-            Dictionary with import result:
-                - success: Whether import was successful
-                - document: Name of document containing imported objects
-                - objects: List of imported object names
-        """
-        bridge = await get_bridge()
-
-        code = f"""
-import Part
+def _build_import_code(
+    file_format: str,
+    file_path: str,
+    doc_name: str | None,
+) -> str:
+    """Build STEP or STL import code with a consistent result shape."""
+    module_name = "Part" if file_format == "step" else "Mesh"
+    return f"""
+import {module_name}
 import os
 
 if not os.path.exists({file_path!r}):
@@ -366,69 +135,106 @@ doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({d
 if doc is None:
     doc = FreeCAD.newDocument("Imported")
 
-# Get object count before import
 before_count = len(doc.Objects)
-
-Part.insert({file_path!r}, doc.Name)
+{module_name}.insert({file_path!r}, doc.Name)
 doc.recompute()
-
-# Get new objects
 new_objects = [obj.Name for obj in doc.Objects[before_count:]]
 
 _result_ = {{
     "success": True,
+    "format": {file_format!r},
     "document": doc.Name,
     "objects": new_objects,
 }}
 """
+
+
+def register_export_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> None:
+    """Register the consolidated import and export tools."""
+
+    @mcp.tool()
+    async def export(
+        file_format: ExportFormat,
+        file_path: str,
+        object_names: list[str] | None = None,
+        doc_name: str | None = None,
+        mesh_tolerance: float = 0.1,
+    ) -> dict[str, Any]:
+        """Export FreeCAD objects to STEP, IGES, STL, 3MF, or OBJ.
+
+        Args:
+            file_format: Target format: ``step``, ``iges``, ``stl``, ``3mf``, or
+                ``obj``.
+            file_path: Output file path.
+            object_names: Specific objects to export. When omitted, exports visible
+                shape objects in GUI mode or all shape objects in headless mode.
+            doc_name: Source document. Uses the active document when omitted.
+            mesh_tolerance: Linear deflection for mesh formats. Lower values create
+                finer meshes. Ignored for STEP and IGES.
+
+        Returns:
+            Export status, normalized format, output path, and object count.
+        """
+        normalized_format = _normalise_format(
+            file_format, _EXPORT_FORMATS, "export"
+        )
+        if normalized_format in _MESH_EXPORT_FORMATS and mesh_tolerance <= 0:
+            raise ValueError("mesh_tolerance must be positive for mesh exports")
+
+        if normalized_format in _MESH_EXPORT_FORMATS:
+            code = _build_mesh_export_code(
+                normalized_format,
+                file_path,
+                object_names,
+                doc_name,
+                mesh_tolerance,
+            )
+        else:
+            code = _build_brep_export_code(
+                normalized_format,
+                file_path,
+                object_names,
+                doc_name,
+            )
+
+        bridge = await get_bridge()
         result = await bridge.execute_python(code)
         if result.success:
             return result.result
-        raise ValueError(result.error_traceback or "STEP import failed")
+        raise ValueError(
+            result.error_traceback or f"{normalized_format.upper()} export failed"
+        )
 
-    @mcp.tool()
-    async def import_stl(
+    @mcp.tool(name="import")
+    async def import_file(
+        file_format: ImportFormat,
         file_path: str,
         doc_name: str | None = None,
     ) -> dict[str, Any]:
-        """Import an STL file into FreeCAD.
+        """Import a STEP or STL file into FreeCAD.
+
+        The MCP tool name is ``import``. The Python implementation uses the name
+        ``import_file`` because ``import`` is a Python keyword.
 
         Args:
-            file_path: Path to the .stl file to import.
-            doc_name: Document to import into. Creates new if None.
+            file_format: Source format: ``step`` or ``stl``.
+            file_path: Input file path.
+            doc_name: Existing target document. If omitted and no document is active,
+                creates a document named ``Imported``.
 
         Returns:
-            Dictionary with import result:
-                - success: Whether import was successful
-                - document: Name of document containing imported object
-                - object: Name of imported mesh object
+            Import status, normalized format, target document, and names of all
+            imported objects.
         """
+        normalized_format = _normalise_format(
+            file_format, _IMPORT_FORMATS, "import"
+        )
+        code = _build_import_code(normalized_format, file_path, doc_name)
+
         bridge = await get_bridge()
-
-        code = f"""
-import Mesh
-import os
-
-if not os.path.exists({file_path!r}):
-    raise FileNotFoundError(f"File not found: {file_path!r}")
-
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
-if doc is None:
-    doc = FreeCAD.newDocument("Imported")
-
-Mesh.insert({file_path!r}, doc.Name)
-doc.recompute()
-
-# Get the last added object (the imported mesh)
-mesh_obj = doc.Objects[-1]
-
-_result_ = {{
-    "success": True,
-    "document": doc.Name,
-    "object": mesh_obj.Name,
-}}
-"""
         result = await bridge.execute_python(code)
         if result.success:
             return result.result
-        raise ValueError(result.error_traceback or "STL import failed")
+        raise ValueError(
+            result.error_traceback or f"{normalized_format.upper()} import failed"
+        )

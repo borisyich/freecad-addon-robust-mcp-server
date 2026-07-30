@@ -218,138 +218,227 @@ class TestObjectTools:
         mock_bridge.delete_object.assert_called_once_with("Box", None)
 
     @pytest.mark.asyncio
-    async def test_create_box(self, register_tools, mock_bridge):
-        """create_box should create a box primitive via create_object."""
+    @pytest.mark.parametrize(
+        ("primitive", "expected_type", "expected_properties"),
+        [
+            (
+                {"kind": "box", "length": 20.0, "width": 10.0, "height": 5.0},
+                "Part::Box",
+                {"Length": 20.0, "Width": 10.0, "Height": 5.0},
+            ),
+            (
+                {"kind": "cylinder", "radius": 5.0, "height": 20.0, "angle": 180.0},
+                "Part::Cylinder",
+                {"Radius": 5.0, "Height": 20.0, "Angle": 180.0},
+            ),
+            (
+                {"kind": "sphere", "radius": 10.0},
+                "Part::Sphere",
+                {"Radius": 10.0},
+            ),
+            (
+                {"kind": "cone", "radius1": 10.0, "radius2": 0.0, "height": 20.0},
+                "Part::Cone",
+                {"Radius1": 10.0, "Radius2": 0.0, "Height": 20.0, "Angle": 360.0},
+            ),
+            (
+                {"kind": "torus", "radius1": 20.0, "radius2": 5.0},
+                "Part::Torus",
+                {
+                    "Radius1": 20.0,
+                    "Radius2": 5.0,
+                    "Angle1": -180.0,
+                    "Angle2": 180.0,
+                    "Angle3": 360.0,
+                },
+            ),
+            (
+                {"kind": "wedge", "xmax": 12.0, "ymax": 8.0, "zmax": 6.0},
+                "Part::Wedge",
+                {
+                    "Xmin": 0.0,
+                    "Ymin": 0.0,
+                    "Zmin": 0.0,
+                    "X2min": 2.0,
+                    "Z2min": 2.0,
+                    "Xmax": 12.0,
+                    "Ymax": 8.0,
+                    "Zmax": 6.0,
+                    "X2max": 8.0,
+                    "Z2max": 8.0,
+                },
+            ),
+            (
+                {
+                    "kind": "helix",
+                    "pitch": 5.0,
+                    "height": 20.0,
+                    "radius": 4.0,
+                    "angle": 2.0,
+                    "left_handed": True,
+                },
+                "Part::Helix",
+                {
+                    "Pitch": 5.0,
+                    "Height": 20.0,
+                    "Radius": 4.0,
+                    "Angle": 2.0,
+                    "LocalCoord": 1,
+                },
+            ),
+        ],
+    )
+    async def test_create_primitive_maps_each_kind_to_freecad(
+        self, register_tools, mock_bridge, primitive, expected_type, expected_properties
+    ):
+        """Each primitive kind should map to its exact FreeCAD object contract."""
         mock_object = ObjectInfo(
-            name="Box",
-            label="Box",
-            type_id="Part::Box",
+            name="Primitive",
+            label="Primitive",
+            type_id=expected_type,
             visibility=True,
             children=[],
             parents=[],
         )
         mock_bridge.create_object = AsyncMock(return_value=mock_object)
 
-        create_box = register_tools["create_box"]
-        result = await create_box(length=20.0, width=10.0, height=5.0)
+        result = await register_tools["create_primitive"](
+            primitive=primitive, name="Primitive", doc_name="PartDoc"
+        )
 
-        assert result["name"] == "Box"
-        assert result["volume"] == 20.0 * 10.0 * 5.0
-        mock_bridge.create_object.assert_called_once()
+        assert result["kind"] == primitive["kind"]
+        assert result["type_id"] == expected_type
+        mock_bridge.create_object.assert_awaited_once_with(
+            expected_type, "Primitive", expected_properties, "PartDoc"
+        )
 
     @pytest.mark.asyncio
-    async def test_create_cylinder(self, register_tools, mock_bridge):
-        """create_cylinder should create a cylinder primitive via create_object."""
-        mock_object = ObjectInfo(
-            name="Cylinder",
-            label="Cylinder",
-            type_id="Part::Cylinder",
-            visibility=True,
-            children=[],
-            parents=[],
+    @pytest.mark.parametrize(
+        ("kind", "expected_type", "expected_properties"),
+        [
+            (
+                "cone",
+                "Part::Cone",
+                {"Radius1": 5.0, "Radius2": 0.0, "Height": 10.0, "Angle": 360.0},
+            ),
+            (
+                "helix",
+                "Part::Helix",
+                {
+                    "Pitch": 5.0,
+                    "Height": 20.0,
+                    "Radius": 5.0,
+                    "Angle": 0.0,
+                    "LocalCoord": 0,
+                },
+            ),
+        ],
+    )
+    async def test_create_primitive_preserves_legacy_kind_defaults(
+        self, register_tools, mock_bridge, kind, expected_type, expected_properties
+    ):
+        """Consolidation must not silently change existing primitive defaults."""
+        mock_bridge.create_object = AsyncMock(
+            return_value=ObjectInfo(
+                name="Primitive",
+                label="Primitive",
+                type_id=expected_type,
+                visibility=True,
+                children=[],
+                parents=[],
+            )
         )
-        mock_bridge.create_object = AsyncMock(return_value=mock_object)
 
-        create_cylinder = register_tools["create_cylinder"]
-        result = await create_cylinder(radius=5.0, height=20.0)
+        await register_tools["create_primitive"](primitive={"kind": kind})
 
-        assert result["name"] == "Cylinder"
-        mock_bridge.create_object.assert_called_once()
+        mock_bridge.create_object.assert_awaited_once_with(
+            expected_type, None, expected_properties, None
+        )
+
+    def test_primitive_schema_is_discriminated_by_kind(self):
+        """The tool schema should expose one strict parameter shape per primitive."""
+        from pydantic import TypeAdapter
+
+        from freecad_mcp.tools.objects import PrimitiveSpec
+
+        schema = TypeAdapter(PrimitiveSpec).json_schema()
+        assert schema["discriminator"]["propertyName"] == "kind"
+        assert set(schema["discriminator"]["mapping"]) == {
+            "box",
+            "cylinder",
+            "sphere",
+            "cone",
+            "torus",
+            "wedge",
+            "helix",
+        }
+        assert len(schema["oneOf"]) == 7
 
     @pytest.mark.asyncio
-    async def test_create_sphere(self, register_tools, mock_bridge):
-        """create_sphere should create a sphere primitive via create_object."""
-        mock_object = ObjectInfo(
-            name="Sphere",
-            label="Sphere",
-            type_id="Part::Sphere",
-            visibility=True,
-            children=[],
-            parents=[],
-        )
-        mock_bridge.create_object = AsyncMock(return_value=mock_object)
-
-        create_sphere = register_tools["create_sphere"]
-        result = await create_sphere(radius=10.0)
-
-        assert result["name"] == "Sphere"
-        mock_bridge.create_object.assert_called_once()
+    async def test_create_primitive_rejects_fields_from_another_kind(
+        self, register_tools, mock_bridge
+    ):
+        """A consolidated tool must not silently ignore another kind's fields."""
+        with pytest.raises(ValueError):
+            await register_tools["create_primitive"](
+                primitive={"kind": "box", "radius": 5.0}
+            )
+        mock_bridge.create_object.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_create_cone(self, register_tools, mock_bridge):
-        """create_cone should create a cone primitive via create_object."""
-        mock_object = ObjectInfo(
-            name="Cone",
-            label="Cone",
-            type_id="Part::Cone",
-            visibility=True,
-            children=[],
-            parents=[],
+    async def test_create_primitive_reports_box_volume(
+        self, register_tools, mock_bridge
+    ):
+        """The consolidated tool should retain useful box-specific output."""
+        mock_bridge.create_object = AsyncMock(
+            return_value=ObjectInfo(
+                name="Box",
+                label="Box",
+                type_id="Part::Box",
+                visibility=True,
+                children=[],
+                parents=[],
+            )
         )
-        mock_bridge.create_object = AsyncMock(return_value=mock_object)
 
-        create_cone = register_tools["create_cone"]
-        result = await create_cone(radius1=10.0, radius2=0.0, height=20.0)
+        result = await register_tools["create_primitive"](
+            primitive={"kind": "box", "length": 4.0, "width": 5.0, "height": 6.0}
+        )
 
-        assert result["name"] == "Cone"
-        mock_bridge.create_object.assert_called_once()
+        assert result["volume"] == 120.0
 
     @pytest.mark.asyncio
-    async def test_create_torus(self, register_tools, mock_bridge):
-        """create_torus should create a torus primitive via create_object."""
-        mock_object = ObjectInfo(
-            name="Torus",
-            label="Torus",
-            type_id="Part::Torus",
-            visibility=True,
-            children=[],
-            parents=[],
-        )
-        mock_bridge.create_object = AsyncMock(return_value=mock_object)
+    @pytest.mark.parametrize(
+        "primitive",
+        [
+            {"kind": "box", "length": 0},
+            {"kind": "cylinder", "radius": -1},
+            {"kind": "cone", "radius1": 0, "radius2": 0},
+            {"kind": "helix", "pitch": 0},
+            {"kind": "wedge", "xmin": 5, "xmax": 5},
+        ],
+    )
+    async def test_create_primitive_rejects_invalid_geometry_before_bridge(
+        self, register_tools, mock_bridge, primitive
+    ):
+        """Invalid primitive dimensions must not create FreeCAD objects."""
+        with pytest.raises(ValueError):
+            await register_tools["create_primitive"](primitive=primitive)
+        mock_bridge.create_object.assert_not_awaited()
 
-        create_torus = register_tools["create_torus"]
-        result = await create_torus(radius1=20.0, radius2=5.0)
-
-        assert result["name"] == "Torus"
-        mock_bridge.create_object.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_create_wedge(self, register_tools, mock_bridge):
-        """create_wedge should create a wedge primitive via create_object."""
-        mock_object = ObjectInfo(
-            name="Wedge",
-            label="Wedge",
-            type_id="Part::Wedge",
-            visibility=True,
-            children=[],
-            parents=[],
-        )
-        mock_bridge.create_object = AsyncMock(return_value=mock_object)
-
-        create_wedge = register_tools["create_wedge"]
-        result = await create_wedge()
-
-        assert result["name"] == "Wedge"
-        mock_bridge.create_object.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_create_helix(self, register_tools, mock_bridge):
-        """create_helix should create a helix primitive via create_object."""
-        mock_object = ObjectInfo(
-            name="Helix",
-            label="Helix",
-            type_id="Part::Helix",
-            visibility=True,
-            children=[],
-            parents=[],
-        )
-        mock_bridge.create_object = AsyncMock(return_value=mock_object)
-
-        create_helix = register_tools["create_helix"]
-        result = await create_helix(pitch=5.0, height=20.0)
-
-        assert result["name"] == "Helix"
-        mock_bridge.create_object.assert_called_once()
+    def test_legacy_primitive_tools_are_not_registered(self, register_tools):
+        """Removed primitive aliases must not remain in tools/list."""
+        legacy_tools = {
+            "create_box",
+            "create_cylinder",
+            "create_sphere",
+            "create_cone",
+            "create_torus",
+            "create_wedge",
+            "create_helix",
+        }
+        assert "create_primitive" in register_tools
+        assert legacy_tools.isdisjoint(register_tools)
 
     # Tests for execute_python based tools
 

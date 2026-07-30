@@ -1,6 +1,6 @@
 # FreeCAD Robust MCP Server Tools Reference
 
-This document provides detailed signatures and examples for core MCP tools. It is not the exact inventory of all registered tools. Use [Tools Overview](guide/tools.md) or the MCP client's discovered tool list for the authoritative 122-tool inventory.
+This document provides detailed signatures and examples for core MCP tools. It is not the exact inventory of all registered tools. Use [Tools Overview](guide/tools.md) or the MCP client's discovered tool list for the authoritative 111-tool inventory.
 
 ---
 
@@ -14,7 +14,7 @@ The exact generated inventory is grouped as follows:
 | --- | ---: |
 | Execution | 5 |
 | Documents | 7 |
-| Objects / Part | 38 |
+| Objects / Part | 32 |
 | PartDesign / Sketcher | 25 |
 | Spreadsheet | 10 |
 | Draft | 6 |
@@ -22,9 +22,9 @@ The exact generated inventory is grouped as follows:
 | Checkpoints | 1 |
 | View / GUI / History | 9 |
 | Validation | 5 |
-| Export / Import | 7 |
+| Export / Import | 2 |
 | Macros | 6 |
-| **Total** | **122** |
+| **Total** | **111** |
 
 The sections below retain deeper examples for commonly used tools; they do not repeat every generated entry.
 
@@ -188,107 +188,35 @@ Tools for creating and manipulating FreeCAD objects.
 
 ### Primitive Creation
 
-#### create_box
+#### create_primitive
 
-Create a parametric box.
+Create one supported Part primitive through a single typed entry point.
 
 ```python
-create_box(
-    length: float = 10.0,
-    width: float = 10.0,
-    height: float = 10.0,
+create_primitive(
+    primitive: PrimitiveSpec,
     name: str | None = None,
     doc_name: str | None = None
 ) -> dict
 ```
 
-#### create_cylinder
-
-Create a parametric cylinder.
-
-```python
-create_cylinder(
-    radius: float = 5.0,
-    height: float = 10.0,
-    angle: float = 360.0,  # For partial cylinders
-    name: str | None = None,
-    doc_name: str | None = None
-) -> dict
-```
-
-#### create_sphere
-
-Create a parametric sphere.
+`PrimitiveSpec.kind` accepts `box`, `cylinder`, `sphere`, `cone`, `torus`,
+`wedge`, or `helix`. Each kind has its own strict parameter schema; dimensions
+from another primitive kind are rejected instead of being silently ignored.
 
 ```python
-create_sphere(
-    radius: float = 5.0,
-    name: str | None = None,
-    doc_name: str | None = None
-) -> dict
+create_primitive(
+    primitive={
+        "kind": "box",
+        "length": 20.0,
+        "width": 10.0,
+        "height": 5.0
+    },
+    name="Base"
+)
 ```
 
-#### create_cone
-
-Create a parametric cone.
-
-```python
-create_cone(
-    radius1: float = 5.0,   # Bottom radius
-    radius2: float = 0.0,   # Top radius (0 = pointed)
-    height: float = 10.0,
-    angle: float = 360.0,
-    name: str | None = None,
-    doc_name: str | None = None
-) -> dict
-```
-
-#### create_torus
-
-Create a torus (donut shape).
-
-```python
-create_torus(
-    radius1: float = 10.0,  # Major radius
-    radius2: float = 2.0,   # Minor radius
-    angle1: float = -180.0,
-    angle2: float = 180.0,
-    angle3: float = 360.0,
-    name: str | None = None,
-    doc_name: str | None = None
-) -> dict
-```
-
-#### create_wedge
-
-Create a tapered wedge shape.
-
-```python
-create_wedge(
-    xmin: float = 0.0, ymin: float = 0.0, zmin: float = 0.0,
-    x2min: float = 2.0, z2min: float = 2.0,
-    xmax: float = 10.0, ymax: float = 10.0, zmax: float = 10.0,
-    x2max: float = 8.0, z2max: float = 8.0,
-    name: str | None = None,
-    doc_name: str | None = None
-) -> dict
-```
-
-#### create_helix
-
-Create a helix curve (for threads, springs).
-
-```python
-create_helix(
-    pitch: float = 5.0,
-    height: float = 20.0,
-    radius: float = 5.0,
-    angle: float = 0.0,
-    left_handed: bool = False,
-    name: str | None = None,
-    doc_name: str | None = None
-) -> dict
-```
+The tool validates relevant dimensions before creating the FreeCAD object.
 
 ### Object Management
 
@@ -772,28 +700,17 @@ mirrored_feature(
 
 ---
 
-## Export Tools
+## Export / Import Tools
 
-Tools for importing and exporting CAD files.
+Two tools cover all supported exchange formats.
 
-### export_step
+### export
 
-Export objects to STEP format.
-
-```python
-export_step(
-    file_path: str,
-    object_names: list[str] | None = None,  # None = all visible
-    doc_name: str | None = None
-) -> dict
-```
-
-### export_stl
-
-Export objects to STL format (for 3D printing).
+Export objects to STEP, IGES, STL, 3MF, or OBJ.
 
 ```python
-export_stl(
+export(
+    file_format: Literal["step", "iges", "stl", "3mf", "obj"],
     file_path: str,
     object_names: list[str] | None = None,
     doc_name: str | None = None,
@@ -801,66 +718,24 @@ export_stl(
 ) -> dict
 ```
 
-### export_3mf
+`mesh_tolerance` is used only for STL, 3MF, and OBJ. STEP and IGES preserve
+BREP geometry.
 
-Export objects to 3MF format (modern 3D printing format).
+### import
 
-3MF (3D Manufacturing Format) supports richer data than STL, including colors, materials, and print settings. It is increasingly preferred over STL for 3D printing.
+Import STEP or STL. `import` is the MCP tool name; it is not a Python function
+identifier.
 
-```python
-export_3mf(
-    file_path: str,
-    object_names: list[str] | None = None,
-    doc_name: str | None = None,
-    mesh_tolerance: float = 0.1
-) -> dict
+```text
+Tool: import
+Arguments:
+  file_format: "step" | "stl"
+  file_path: string
+  doc_name: string | null
 ```
 
-### export_obj
-
-Export objects to OBJ format.
-
-```python
-export_obj(
-    file_path: str,
-    object_names: list[str] | None = None,
-    doc_name: str | None = None
-) -> dict
-```
-
-### export_iges
-
-Export objects to IGES format.
-
-```python
-export_iges(
-    file_path: str,
-    object_names: list[str] | None = None,
-    doc_name: str | None = None
-) -> dict
-```
-
-### import_step
-
-Import a STEP file.
-
-```python
-import_step(
-    file_path: str,
-    doc_name: str | None = None
-) -> dict
-```
-
-### import_stl
-
-Import an STL file.
-
-```python
-import_stl(
-    file_path: str,
-    doc_name: str | None = None
-) -> dict
-```
+Both formats return a consistent `objects` list containing every newly imported
+object.
 
 ---
 

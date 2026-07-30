@@ -83,7 +83,7 @@ An [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server that 
 
 ## Features
 
-- **150+ MCP Tools**: Comprehensive CAD operations including primitives, PartDesign, booleans, export
+- **111 MCP Tools**: Comprehensive CAD operations including primitives, PartDesign, booleans, export
 - **Multiple Connection Modes**: XML-RPC (recommended), JSON-RPC socket, or embedded
 - **GUI & Headless Support**: Full modeling in headless mode, plus screenshots/colors in GUI mode
 - **Macro Development**: Create, edit, run, and template FreeCAD macros via MCP
@@ -347,7 +347,7 @@ FREECAD_MODE=embedded freecad-mcp
 
 ### Available Tools
 
-The server currently registers **122 MCP tools**. The tables below list common tools rather than duplicating the exact inventory. See the generated [Tools Overview](docs/guide/tools.md) or the MCP client's discovered tool list for the authoritative inventory; [MCP Tools Reference](docs/MCP_TOOLS_REFERENCE.md) provides detailed examples for core tools, while `freecad://capabilities` is a curated runtime overview. Tools marked with **GUI** require FreeCAD to be running in GUI mode; they return a structured error in headless mode.
+The server currently registers **111 MCP tools**. The tables below list common tools rather than duplicating the exact inventory. See the generated [Tools Overview](docs/guide/tools.md) or the MCP client's discovered tool list for the authoritative inventory; [MCP Tools Reference](docs/MCP_TOOLS_REFERENCE.md) provides detailed examples for core tools, while `freecad://capabilities` is a curated runtime overview. Tools marked with **GUI** require FreeCAD to be running in GUI mode; they return a structured error in headless mode.
 
 #### Execution & Debugging (5 tools)
 
@@ -371,18 +371,12 @@ The server currently registers **122 MCP tools**. The tables below list common t
 | `close_document`      | Close a document (with optional save)     | All  |
 | `recompute_document`  | Force recomputation of all objects        | All  |
 
-#### Object Creation - Primitives (8 tools)
+#### Object Creation - Primitives (2 tools)
 
-| Tool              | Description                                        | Mode |
-| ----------------- | -------------------------------------------------- | ---- |
-| `create_object`   | Create a generic FreeCAD object by type ID         | All  |
-| `create_box`      | Create a Part::Box with length, width, height      | All  |
-| `create_cylinder` | Create a Part::Cylinder with radius, height, angle | All  |
-| `create_sphere`   | Create a Part::Sphere with radius                  | All  |
-| `create_cone`     | Create a Part::Cone with two radii and height      | All  |
-| `create_torus`    | Create a Part::Torus (donut) with radii and angles | All  |
-| `create_wedge`    | Create a Part::Wedge (tapered box)                 | All  |
-| `create_helix`    | Create a Part::Helix curve for sweeps and threads  | All  |
+| Tool               | Description                                                     | Mode |
+| ------------------ | --------------------------------------------------------------- | ---- |
+| `create_object`    | Create a generic FreeCAD object by type ID                      | All  |
+| `create_primitive` | Create a Box, Cylinder, Sphere, Cone, Torus, Wedge, or Helix    | All  |
 
 #### Object Management (11 common tools)
 
@@ -481,17 +475,12 @@ informative and does not by itself prove drawing correspondence.
 | --------- | --------------------------------------------- | ---- |
 | `history` | Undo, redo, or inspect available history steps | All  |
 
-#### Export/Import (7 tools)
+#### Export/Import (2 tools)
 
-| Tool          | Description                                | Mode |
-| ------------- | ------------------------------------------ | ---- |
-| `export_step` | Export to STEP format (ISO CAD exchange)   | All  |
-| `export_stl`  | Export to STL format (3D printing)         | All  |
-| `export_3mf`  | Export to 3MF format (modern 3D printing)  | All  |
-| `export_obj`  | Export to OBJ format (Wavefront)           | All  |
-| `export_iges` | Export to IGES format (older CAD exchange) | All  |
-| `import_step` | Import a STEP file                         | All  |
-| `import_stl`  | Import an STL file as mesh                 | All  |
+| Tool     | Description                                      | Mode |
+| -------- | ------------------------------------------------ | ---- |
+| `export` | Export to STEP, IGES, STL, 3MF, or OBJ          | All  |
+| `import` | Import STEP or STL into a FreeCAD document      | All  |
 
 #### Macro Management (6 tools)
 

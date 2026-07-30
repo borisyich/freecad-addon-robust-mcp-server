@@ -49,7 +49,8 @@ This document describes the architecture for a Model Context Protocol (MCP) serv
       - [`boolean_operation`](#boolean_operation)
     - [Export/Import Tools](#exportimport-tools)
       - [`export_mesh`](#export_mesh)
-      - [`export_step`](#export_step)
+      - [`export`](#export)
+      - [`import`](#import)
     - [Debugging Tools](#debugging-tools)
       - [`inspect_object`](#inspect_object)
       - [`validate_model`](#validate_model)
@@ -142,14 +143,14 @@ The [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) is a standa
 
 ```text
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                           Claude Code                                    │
+│                           Claude Code                                   │
 │  ┌─────────────────────────────────────────────────────────────────┐    │
 │  │  User Request: "Create a parametric gear with 20 teeth"         │    │
 │  └─────────────────────────────────────────────────────────────────┘    │
-│                                │                                         │
-│                                ▼                                         │
+│                                │                                        │
+│                                ▼                                        │
 │  ┌─────────────────────────────────────────────────────────────────┐    │
-│  │               MCP Client (Claude Code, GPT, etc.)                │    │
+│  │               MCP Client (Claude Code, GPT, etc.)               │    │
 │  └─────────────────────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────────────────────┘
                                  │
@@ -157,14 +158,14 @@ The [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) is a standa
                                  │
                                  ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                      FreeCAD Robust MCP Server                                  │
+│                      FreeCAD Robust MCP Server                          │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                   │
 │  │    Tools     │  │  Resources   │  │   Prompts    │                   │
 │  │ - execute_py │  │ - documents  │  │ - modeling   │                   │
 │  │ - create_obj │  │ - objects    │  │ - debugging  │                   │
 │  │ - export     │  │ - console    │  │ - macros     │                   │
 │  └──────────────┘  └──────────────┘  └──────────────┘                   │
-│                                │                                         │
+│                                │                                        │
 │                    ┌───────────┴───────────┐                            │
 │                    ▼                       ▼                            │
 │         ┌──────────────────┐    ┌──────────────────┐                    │
@@ -174,12 +175,12 @@ The [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) is a standa
 └─────────────────────────────────────────────────────────────────────────┘
                                  │
                                  ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                         FreeCAD Instance                                 │
+┌────────────────────────────────────────────────────────────────────────┐
+│                         FreeCAD Instance                               │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐    │
 │  │  Documents  │  │   Objects   │  │ Workbenches │  │   Macros    │    │
 │  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘    │
-└─────────────────────────────────────────────────────────────────────────┘
+└────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -210,24 +211,24 @@ The [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) is a standa
 ### Architecture Pattern: Bridge with Adapter
 
 ```text
-┌─────────────────────────────────────────────────────────────────────────┐
-│                         MCP Server Layer                                 │
-│                                                                          │
-│  ┌────────────────────────────────────────────────────────────────────┐ │
-│  │                     FastMCP Application                             │ │
+┌────────────────────────────────────────────────────────────────────────┐
+│                         MCP Server Layer                               │
+│                                                                        │
+│  ┌───────────────────────────────────────────────────────────────────┐ │
+│  │                     FastMCP Application                           │ │
 │  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐           │ │
 │  │  │ Tool     │  │ Resource │  │ Prompt   │  │ Lifecycle│           │ │
 │  │  │ Registry │  │ Registry │  │ Registry │  │ Manager  │           │ │
 │  │  └──────────┘  └──────────┘  └──────────┘  └──────────┘           │ │
-│  └────────────────────────────────────────────────────────────────────┘ │
-│                                    │                                     │
-│                                    ▼                                     │
-│  ┌────────────────────────────────────────────────────────────────────┐ │
-│  │                    FreeCAD Bridge Interface                         │ │
-│  │                    (Abstract Base Class)                            │ │
-│  └────────────────────────────────────────────────────────────────────┘ │
-│                    ╱                               ╲                     │
-│                   ╱                                 ╲                    │
+│  └───────────────────────────────────────────────────────────────────┘ │
+│                                    │                                   │
+│                                    ▼                                   │
+│  ┌───────────────────────────────────────────────────────────────────┐ │
+│  │                    FreeCAD Bridge Interface                       │ │
+│  │                    (Abstract Base Class)                          │ │
+│  └───────────────────────────────────────────────────────────────────┘ │
+│                    ╱                             ╲                     │
+│                   ╱                               ╲                    │
 │  ┌─────────────────────────────┐  ┌─────────────────────────────┐      │
 │  │   EmbeddedBridge            │  │   SocketBridge              │      │
 │  │   (In-process FreeCAD)      │  │   (Remote FreeCAD)          │      │
@@ -236,7 +237,7 @@ The [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) is a standa
 │  │ - Headless mode only        │  │ - GUI or headless mode      │      │
 │  │ - Fastest execution         │  │ - Process isolation         │      │
 │  └─────────────────────────────┘  └─────────────────────────────┘      │
-└─────────────────────────────────────────────────────────────────────────┘
+└────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Module Structure
@@ -255,19 +256,19 @@ freecad_mcp/
 │   ├── xmlrpc.py            # XML-RPC bridge (recommended)
 │   └── protocol.py          # Wire protocol for socket communication
 │
-├── tools/                    # MCP tool implementations (150+ tools)
+├── tools/                    # MCP tool implementations (111 tools)
 │   ├── __init__.py
 │   ├── execution.py         # Python execution & debugging (5 tools)
 │   ├── documents.py         # Document management (7 tools)
-│   ├── objects.py           # Part/CSG object operations (40 tools)
-│   ├── partdesign.py        # PartDesign/Sketcher modeling (50 tools)
+│   ├── objects.py           # Part/CSG object operations (32 tools)
+│   ├── partdesign.py        # PartDesign/Sketcher modeling (25 tools)
 │   ├── spreadsheet.py       # Spreadsheet parameters (10 tools)
 │   ├── draft.py             # Draft ShapeString/text tools (6 tools)
 │   ├── images.py            # Local image delivery/comparison (3 tools)
 │   ├── checkpoints.py       # Optional discrepancy assessment (1 tool)
-│   ├── view.py              # View, camera, display (18 tools)
+│   ├── view.py              # View, camera, display (9 tools)
 │   ├── validation.py        # Geometry/parametric diagnostics (5 tools)
-│   ├── export.py            # Export/import operations (7 tools)
+│   ├── export.py            # Export/import operations (2 tools)
 │   └── macros.py            # Macro management (6 tools)
 │
 ├── resources/                # MCP resource implementations
@@ -1176,25 +1177,34 @@ async def export_mesh(
     pass
 ```
 
-#### `export_step`
+#### `export`
 
 ```python
 @mcp.tool()
-async def export_step(
-    objects: list[str],
-    path: str,
+async def export(
+    file_format: Literal["step", "iges", "stl", "3mf", "obj"],
+    file_path: str,
+    object_names: list[str] | None = None,
+    doc_name: str | None = None,
+    mesh_tolerance: float = 0.1,
+) -> dict:
+    """Route all supported export formats through one MCP tool."""
+    pass
+```
+
+#### `import`
+
+The MCP tool name is `import`; the internal Python implementation is named
+`import_file` because `import` is a Python keyword.
+
+```python
+@mcp.tool(name="import")
+async def import_file(
+    file_format: Literal["step", "stl"],
+    file_path: str,
     doc_name: str | None = None,
 ) -> dict:
-    """Export objects as STEP file.
-
-    Args:
-        objects: List of object names to export
-        path: Output file path (.step or .stp)
-        doc_name: Document name
-
-    Returns:
-        Export status
-    """
+    """Route STEP and STL imports through one MCP tool."""
     pass
 ```
 

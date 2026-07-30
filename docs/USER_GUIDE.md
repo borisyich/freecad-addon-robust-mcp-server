@@ -338,7 +338,7 @@ pocket_sketch(sketch_name="SlotSketch", length=5, type="ThroughAll")
 fillet_edges(object_name="...", radius=3)
 
 # 7. Export
-export_step(file_path="/path/to/bracket.step")
+export(file_format="step", file_path="/path/to/bracket.step")
 ```
 
 #### Step 3: View the result (GUI mode)

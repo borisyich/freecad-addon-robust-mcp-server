@@ -76,14 +76,14 @@ Try these example prompts with your AI assistant:
 
 ## Step 4: Explore Available Tools
 
-The MCP server provides 122 tools organized into categories:
+The MCP server provides 111 tools organized into categories:
 
 | Category   | Examples                                             |
 | ---------- | ---------------------------------------------------- |
-| Primitives | `create_box`, `create_cylinder`, `create_sphere`     |
+| Primitives | `create_primitive`                                   |
 | PartDesign | `create_sketch`, `pad_sketch`, `pocket_sketch`       |
 | Operations | `boolean_operation`, `fillet_edges`, `chamfer_edges` |
-| Export     | `export_stl`, `export_step`, `export_3mf`            |
+| Export     | `export`, `import`                                    |
 | View (GUI) | `get_screenshot`, `set_visual_properties`                 |
 
 See the [Tools Reference](../guide/tools.md) for the complete list.
