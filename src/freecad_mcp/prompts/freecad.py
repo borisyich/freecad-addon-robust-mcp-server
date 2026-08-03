@@ -238,11 +238,12 @@ validate_object(object_name="Pad")
 ```
 
 ## Features
-- Additive: `pad_sketch`, `revolution_sketch`, `loft_sketches`, `sweep_sketch`.
-- Subtractive: `pocket_sketch`, `groove_sketch`, `create_hole`,
+- Additive: `pad_sketch`, `revolution_sketch`, `thread_helix(operation="additive")`, `loft_sketches`, `sweep_sketch`.
+- Subtractive: `pocket_sketch`, `groove_sketch`, `thread_helix(operation="subtractive")`, `create_hole`,
   `create_cylindrical_cut`, `subtractive_loft`, `subtractive_pipe`.
 - Modifiers: `fillet_edges`, `chamfer_edges`, `draft_feature`, `thickness_feature`.
-- Patterns: `linear_pattern`, `polar_pattern`, `mirrored_feature`.
+- Patterns: `linear_pattern`, `polar_pattern`, `multi_transform_pattern`, `mirrored_feature`.
+  Do not chain one pattern directly onto another; use `multi_transform_pattern`.
 - Datums: `create_datum_plane`, `create_datum_line`, `create_datum_point`.
 
 ## Sketch Editing
@@ -270,7 +271,7 @@ significant findings.""",
 ## Geometry Operations
 `edit_sketch_geometry(sketch_name, operations)` supports:
   `add_rectangle`, `add_circle`, `add_line`, `add_arc`, `add_point`,
-  `add_ellipse`, `add_polygon`, `add_slot`, `add_bspline`;
+  `add_ellipse`, `add_regular_polygon`, `add_polyline`, `add_slot`, `add_bspline`;
   `add_external_geometry`, `delete_geometry`, `toggle_construction`.
 
 Example:
@@ -548,7 +549,10 @@ Create the base 3D shape:
 
 ### 5. Add Features
 Add additional features as needed:
-- `pocket_sketch` for cuts/holes
+- `pocket_sketch` for cuts/holes; 
+  set `direction` explicitly, 
+  use `base_feature_name` when Body history is ambiguous, 
+  and pass `up_to_face="Feature.FaceN"` for `UpToFace`
 - `fillet_edges` for rounded edges
 - `chamfer_edges` for beveled edges
 

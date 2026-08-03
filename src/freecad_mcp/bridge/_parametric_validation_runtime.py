@@ -50,11 +50,16 @@ def _state_values(obj):
         try:
             values = getter()
             if values:
+                if isinstance(values, str):
+                    return [values]
                 return [str(item) for item in values]
         except Exception:
             pass
     try:
-        return [str(item) for item in obj.State]
+        values = obj.State
+        if isinstance(values, str):
+            return [values] if values else []
+        return [str(item) for item in values]
     except Exception:
         return []
 
@@ -75,8 +80,17 @@ def _visibility(obj):
 
 def _shape_summary(obj):
     shape = getattr(obj, "Shape", None)
+    type_id = getattr(obj, "TypeId", "")
+    is_reference_geometry = type_id in {
+        "PartDesign::Plane",
+        "PartDesign::Line",
+        "PartDesign::Point",
+        "PartDesign::CoordinateSystem",
+    }
     result = {
         "present": shape is not None,
+        "metrics_applicable": not is_reference_geometry,
+        "reference_geometry": is_reference_geometry,
         "is_null": None,
         "valid": None,
         "shape_type": None,
@@ -89,6 +103,8 @@ def _shape_summary(obj):
         "area": None,
         "bounding_box": None,
     }
+    if is_reference_geometry:
+        return result
     if shape is None:
         return result
 

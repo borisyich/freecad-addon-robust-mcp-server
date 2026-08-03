@@ -338,7 +338,10 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
 
         Args:
             object_name: Name of the object to edit.
-            properties: Dictionary of property names and new values.
+            properties: Dictionary of property names and new values. For
+                ``App::PropertyLink`` properties, a string object name is
+                resolved with ``doc.getObject``. Link lists and simple
+                ``Object.SubElement`` references are resolved likewise.
             doc_name: Document containing the object. Uses active document if None.
 
         Returns:

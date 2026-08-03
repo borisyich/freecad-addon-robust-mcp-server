@@ -255,13 +255,13 @@ freecad_mcp/
 │   ├── xmlrpc.py            # XML-RPC bridge (recommended)
 │   └── protocol.py          # Wire protocol for socket communication
 │
-├── tools/                    # MCP tool implementations (111 tools)
+├── tools/                    # MCP tool implementations (115 tools)
 │   ├── __init__.py
 │   ├── execution.py         # Python execution & debugging (5 tools)
 │   ├── documents.py         # Document management (7 tools)
 │   ├── objects.py           # Part/CSG object operations (32 tools)
-│   ├── partdesign.py        # PartDesign/Sketcher modeling (25 tools)
-│   ├── spreadsheet.py       # Spreadsheet parameters (10 tools)
+│   ├── partdesign.py        # PartDesign/Sketcher modeling (28 tools)
+│   ├── spreadsheet.py       # Spreadsheet parameters (11 tools)
 │   ├── draft.py             # Draft ShapeString/text tools (6 tools)
 │   ├── images.py            # Local image delivery/comparison (3 tools)
 │   ├── checkpoints.py       # Optional discrepancy assessment (1 tool)

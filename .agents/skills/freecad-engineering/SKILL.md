@@ -356,13 +356,17 @@ After a major feature or any suspicious result, use the smallest relevant check:
 - `validate_object` for one feature;
 - `validate_document` for overall geometric health;
 - `inspect_object` for placement, bounds, volume, expressions, and dependencies;
+- feature responses for `base_volume`, `result_volume`, retained/change ratios, and resolved Body Tip/base;
 - screenshots/crops for visual correspondence;
 - `evaluate_model_checkpoint` only when a formal discrepancy ledger is useful.
 
-Do not continue blindly after an invalid shape, ineffective cut, wrong Body Tip,
-unexpected solid count, disconnected additive feature, or clearly wrong view.
+Do not continue blindly after an invalid shape, implausible before/after volume ratio, ineffective cut, wrong Body Tip, unexpected solid count, disconnected additive feature, or clearly wrong view.
 Undo or repair the most recent causal feature rather than rebuilding in a new
 hidden document.
+
+### Pattern reliability
+
+Use `linear_pattern` and `polar_pattern` only on a non-pattern seed. For combined linear and polar repetition, use `multi_transform_pattern`; do not chain a Pattern feature directly into another Pattern. After every pattern, require successful `material_change_diagnostics`, then verify Shape, Body Tip, one-solid topology, before/after volume evidence, and instance layout in an equivalent view.
 
 ## 8. Completion criteria
 

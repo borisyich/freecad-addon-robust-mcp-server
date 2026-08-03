@@ -121,13 +121,15 @@ async def test_sketch_geometry_and_constraint_operation_catalog(live_tools: dict
         {"op": "add_point", "x": 30, "y": 30},
         {"op": "add_ellipse", "center_x": 40, "center_y": 0,
          "major_radius": 6, "minor_radius": 3},
-        {"op": "add_polygon", "center_x": 40, "center_y": 20,
+        {"op": "add_regular_polygon", "center_x": 40, "center_y": 20,
          "radius": 5, "sides": 5},
         {"op": "add_slot", "center1_x": -5, "center1_y": 30,
          "center2_x": 10, "center2_y": 30, "radius": 3},
         {"op": "add_bspline", "points": [[20, 30], [25, 35], [30, 28], [35, 32]]},
         {"op": "toggle_construction", "geometry_index": 8},
         {"op": "delete_geometry", "geometry_index": 8},
+        {"op": "add_polyline", "points": [[50, 30], [55, 35], [60, 30]],
+         "closed": False},
     ]
     result = await _call(tools, "edit_sketch_geometry", sketch_name="Geometry",
                          operations=operations, doc_name=doc)

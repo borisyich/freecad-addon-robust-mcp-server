@@ -7,6 +7,39 @@ parametric design through cell values that can drive model dimensions.
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+class SpreadsheetCellUpdate(BaseModel):
+    """One cell value update for ``spreadsheet_apply_batch``."""
+
+    model_config = ConfigDict(extra="forbid")
+    cell: str = Field(pattern=r"^[A-Za-z]+[1-9]\d*$")
+    value: str | int | float
+
+
+class SpreadsheetAliasUpdate(BaseModel):
+    """One cell alias update for ``spreadsheet_apply_batch``."""
+
+    model_config = ConfigDict(extra="forbid")
+    cell: str = Field(pattern=r"^[A-Za-z]+[1-9]\d*$")
+    alias: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_alias(self) -> "SpreadsheetAliasUpdate":
+        if not self.alias.isidentifier():
+            raise ValueError("alias must be a valid Python identifier")
+        return self
+
+
+class SpreadsheetPropertyBinding(BaseModel):
+    """One property expression binding for ``spreadsheet_apply_batch``."""
+
+    model_config = ConfigDict(extra="forbid")
+    alias: str = Field(min_length=1)
+    target_object: str = Field(min_length=1)
+    target_property: str = Field(min_length=1)
+
 
 def register_spreadsheet_tools(
     mcp: Any, get_bridge: Callable[[], Awaitable[Any]]
@@ -583,6 +616,139 @@ except Exception:
         if result.success and result.result:
             return result.result
         raise ValueError(result.error_traceback or "Failed to bind property")
+
+    @mcp.tool()
+    async def spreadsheet_apply_batch(
+        spreadsheet_name: str,
+        cells: list[SpreadsheetCellUpdate] | None = None,
+        aliases: list[SpreadsheetAliasUpdate] | None = None,
+        bindings: list[SpreadsheetPropertyBinding] | None = None,
+        doc_name: str | None = None,
+    ) -> dict[str, Any]:
+        """Apply cell values, aliases and property bindings atomically.
+
+        All changes use one FreeCAD transaction and one final recompute. This is
+        the preferred tool when building a parameter table because it avoids one
+        MCP round trip and one recompute per individual operation.
+
+        Args:
+            spreadsheet_name: Existing Spreadsheet object.
+            cells: Cell/value updates.
+            aliases: Cell/alias assignments.
+            bindings: Object-property bindings to spreadsheet aliases.
+            doc_name: Document containing the objects. Uses active if None.
+
+        Returns:
+            Applied counts, computed cell values and created expressions.
+        """
+        normalized_cells = [
+            (
+                item
+                if isinstance(item, SpreadsheetCellUpdate)
+                else SpreadsheetCellUpdate.model_validate(item)
+            ).model_dump()
+            for item in (cells or [])
+        ]
+        normalized_aliases = [
+            (
+                item
+                if isinstance(item, SpreadsheetAliasUpdate)
+                else SpreadsheetAliasUpdate.model_validate(item)
+            ).model_dump()
+            for item in (aliases or [])
+        ]
+        normalized_bindings = [
+            (
+                item
+                if isinstance(item, SpreadsheetPropertyBinding)
+                else SpreadsheetPropertyBinding.model_validate(item)
+            ).model_dump()
+            for item in (bindings or [])
+        ]
+        if not (normalized_cells or normalized_aliases or normalized_bindings):
+            raise ValueError("Batch must contain cells, aliases, or bindings")
+
+        bridge = await get_bridge()
+        code = f"""
+cells = {normalized_cells!r}
+aliases = {normalized_aliases!r}
+bindings = {normalized_bindings!r}
+doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
+if doc is None:
+    raise ValueError("No document found")
+sheet = doc.getObject({spreadsheet_name!r})
+if sheet is None or not hasattr(sheet, "set") or not hasattr(sheet, "setAlias"):
+    raise ValueError(f"Spreadsheet not found: {spreadsheet_name!r}")
+
+# Validate binding targets and aliases before mutating the document.
+pending_aliases = {{item["alias"] for item in aliases}}
+resolved_bindings = []
+for item in bindings:
+    target = doc.getObject(item["target_object"])
+    if target is None:
+        raise ValueError(f"Target object not found: {{item['target_object']!r}}")
+    if not hasattr(target, item["target_property"]):
+        raise ValueError(
+            f"Property not found on target {{target.Name!r}}: "
+            f"{{item['target_property']!r}}"
+        )
+    if item["alias"] not in pending_aliases:
+        try:
+            existing_cell = sheet.getCellFromAlias(item["alias"])
+        except Exception:
+            existing_cell = None
+        if not existing_cell:
+            raise ValueError(f"Alias not found: {{item['alias']!r}}")
+    resolved_bindings.append((item, target))
+
+doc.openTransaction("Apply Spreadsheet Batch")
+try:
+    for item in cells:
+        sheet.set(item["cell"], str(item["value"]))
+    for item in aliases:
+        sheet.setAlias(item["cell"], item["alias"])
+
+    expression_results = []
+    for item, target in resolved_bindings:
+        expression = f"{{sheet.Name}}.{{item['alias']}}"
+        target.setExpression(item["target_property"], expression)
+        expression_results.append({{
+            "target_object": target.Name,
+            "target_property": item["target_property"],
+            "expression": expression,
+        }})
+
+    doc.recompute()
+    computed_cells = []
+    for item in cells:
+        try:
+            computed = sheet.get(item["cell"])
+        except Exception:
+            computed = item["value"]
+        computed_cells.append({{
+            "cell": item["cell"],
+            "value": item["value"],
+            "computed": computed,
+        }})
+    doc.commitTransaction()
+except Exception:
+    doc.abortTransaction()
+    raise
+
+_result_ = {{
+    "success": True,
+    "spreadsheet": sheet.Name,
+    "cells_applied": len(cells),
+    "aliases_applied": len(aliases),
+    "bindings_applied": len(bindings),
+    "cells": computed_cells,
+    "bindings": expression_results,
+}}
+"""
+        result = await bridge.execute_python(code)
+        if result.success and result.result:
+            return result.result
+        raise ValueError(result.error_traceback or "Failed to apply spreadsheet batch")
 
     @mcp.tool()
     async def spreadsheet_get_cell_range(

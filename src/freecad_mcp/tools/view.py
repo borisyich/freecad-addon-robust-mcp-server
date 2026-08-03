@@ -541,52 +541,116 @@ _result_ = parts
 import os
 import Part
 
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
+requested_doc_name = {doc_name!r}
+documents = FreeCAD.listDocuments()
+doc = (
+    FreeCAD.ActiveDocument
+    if requested_doc_name is None
+    else documents.get(requested_doc_name)
+)
 if doc is None:
     doc = FreeCAD.newDocument("Unnamed")
 
+target_doc_name = doc.Name
 part_path = {part_path!r}
 if not os.path.exists(part_path):
     raise FileNotFoundError(f"Part file not found: {{part_path}}")
 
+
+def _normalized_path(value):
+    if not value:
+        return None
+    return os.path.normcase(os.path.realpath(os.path.abspath(value)))
+
+
 ext = os.path.splitext(part_path)[1].lower()
 part_name = {name!r} or os.path.splitext(os.path.basename(part_path))[0]
+source_path = _normalized_path(part_path)
+target_path = _normalized_path(getattr(doc, "FileName", ""))
+source_shape = None
+source_object_name = None
+opened_source_doc_name = None
+source_document_name = None
 
-# Wrap in transaction for undo support
-doc.openTransaction("Insert Part from Library")
 try:
-    new_obj = None
     if ext == ".fcstd":
-        # Import FreeCAD document
-        src_doc = FreeCAD.openDocument(part_path)
+        # Reuse an already open document. In particular, do not call
+        # openDocument() for the target document's own FileName: FreeCAD may
+        # replace the live document and invalidate both `doc` and its objects.
+        src_doc = doc if target_path and source_path == target_path else None
+        if src_doc is None:
+            for candidate in FreeCAD.listDocuments().values():
+                candidate_path = _normalized_path(getattr(candidate, "FileName", ""))
+                if candidate_path and candidate_path == source_path:
+                    src_doc = candidate
+                    break
+
+        if src_doc is None:
+            src_doc = FreeCAD.openDocument(part_path)
+            if src_doc.Name != target_doc_name:
+                opened_source_doc_name = src_doc.Name
+
+        source_document_name = src_doc.Name
         for obj in src_doc.Objects:
-            if hasattr(obj, "Shape"):
-                new_obj = doc.addObject("Part::Feature", part_name)
-                new_obj.Shape = obj.Shape.copy()
+            shape = getattr(obj, "Shape", None)
+            if shape is not None and not shape.isNull():
+                source_shape = shape.copy()
+                source_object_name = obj.Name
                 break
-        FreeCAD.closeDocument(src_doc.Name)
     else:
-        # Import STEP/IGES
-        shape = Part.read(part_path)
-        new_obj = doc.addObject("Part::Feature", part_name)
-        new_obj.Shape = shape
+        source_shape = Part.read(part_path)
 
-    if new_obj is None:
+    if source_shape is None or source_shape.isNull():
         raise ValueError(f"No importable shape found in {{part_path}}")
+finally:
+    # Only close a source document that this tool opened. Never close the
+    # target document or another document that was already open.
+    if (
+        opened_source_doc_name is not None
+        and opened_source_doc_name in FreeCAD.listDocuments()
+    ):
+        FreeCAD.closeDocument(opened_source_doc_name)
+    if target_doc_name in FreeCAD.listDocuments():
+        FreeCAD.setActiveDocument(target_doc_name)
 
-    # Set position
+# Reacquire the target after source loading. Opening an FCStd file can change
+# the active document and some FreeCAD builds can replace document wrappers.
+doc = FreeCAD.listDocuments().get(target_doc_name)
+if doc is None:
+    raise RuntimeError(
+        f"Target document was closed while reading the source file: {{target_doc_name}}"
+    )
+
+transaction_open = False
+try:
+    doc.openTransaction("Insert Part from Library")
+    transaction_open = True
+
+    new_obj = doc.addObject("Part::Feature", part_name)
+    new_obj.Shape = source_shape
     new_obj.Placement.Base = {pos_str}
 
     doc.recompute()
     doc.commitTransaction()
+    transaction_open = False
 
     _result_ = {{
         "name": new_obj.Name,
         "label": new_obj.Label,
         "type_id": new_obj.TypeId,
+        "source_document": source_document_name,
+        "source_object": source_object_name,
     }}
 except Exception:
-    doc.abortTransaction()
+    # Do not call methods through a stale document wrapper. Reacquire the live
+    # target document first, and preserve the original exception if rollback
+    # itself is no longer possible.
+    rollback_doc = FreeCAD.listDocuments().get(target_doc_name)
+    if transaction_open and rollback_doc is not None:
+        try:
+            rollback_doc.abortTransaction()
+        except Exception:
+            pass
     raise
 """
         result = await bridge.execute_python(code)

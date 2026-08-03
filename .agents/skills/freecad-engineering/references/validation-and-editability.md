@@ -42,6 +42,16 @@ Not every warning is an error. Imported references, master geometry, or delibera
 construction solids may exist outside the main Body. They should be named,
 hidden when appropriate, and explained.
 
+## Valid Shape is not sufficient evidence
+
+A feature can expose one valid OpenCASCADE solid and still remove or add the wrong amount of material. For Pocket and helix operations, compare the reported `base_volume`, `result_volume`, absolute change, and retained/change ratios with the expected feature. Pattern tools additionally return `material_change_diagnostics`, which compares the effective transformed `AddSubShape` with the actual Body volume delta and rolls the feature back when those two disagree. The remaining ratios are diagnostic evidence, not a universal numeric threshold.
+
+Datum planes, lines, points, and coordinate systems are reference geometry. Their synthetic or infinite Shape bounds/volume are not meaningful solid metrics and must not be interpreted as model dimensions.
+
+## Repeated and combined transformations
+
+Use `linear_pattern` or `polar_pattern` only for one transformation of a non-pattern seed. Do not apply one pattern directly to another. Use `multi_transform_pattern` with the original seed and ordered linear/polar stages, then verify Shape, Body Tip, solid count, volume change, and the expected instance layout.
+
 ## Final report pattern
 
 Report the validator output in engineering terms:

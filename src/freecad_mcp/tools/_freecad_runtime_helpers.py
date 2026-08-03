@@ -94,20 +94,101 @@ BODY_RUNTIME_HELPERS = _runtime_code(
             ) from exc
 
         for candidate in reversed(group[:target_index]):
-            shape = getattr(candidate, "Shape", None)
-            if shape is None:
-                continue
-            try:
-                if (
-                    not shape.isNull()
-                    and shape.isValid()
-                    and len(shape.Solids) == 1
-                    and float(shape.Volume) > 0
-                ):
-                    return candidate
-            except Exception:
-                continue
+            if _is_valid_single_solid_feature(candidate):
+                return candidate
         return None
+
+
+    def _is_valid_single_solid_feature(candidate):
+        """Return whether ``candidate`` owns one valid positive-volume solid."""
+        shape = getattr(candidate, "Shape", None)
+        if shape is None:
+            return False
+        try:
+            return bool(
+                not shape.isNull()
+                and shape.isValid()
+                and len(shape.Solids) == 1
+                and float(shape.Volume) > 0
+            )
+        except Exception:
+            return False
+
+
+    def _resolve_partdesign_base_feature(
+        doc,
+        body,
+        target,
+        explicit_name=None,
+    ):
+        """Resolve an explicit or nearby single-solid base feature.
+
+        Explicit selection is authoritative.  Without it, prefer the current
+        Body Tip when it is a valid predecessor of ``target``; otherwise use
+        the nearest valid single-solid feature before ``target`` in Body.Group.
+        """
+        group = list(getattr(body, "Group", []) or [])
+        try:
+            target_index = group.index(target)
+        except ValueError as exc:
+            raise ValueError(
+                f"Object {getattr(target, 'Name', '<unknown>')!r} is not "
+                f"present in Body {getattr(body, 'Name', '<unknown>')!r}"
+            ) from exc
+
+        if explicit_name:
+            candidate = doc.getObject(explicit_name)
+            if candidate is None:
+                raise ValueError(f"Base feature not found: {explicit_name!r}")
+            if candidate not in group:
+                raise ValueError(
+                    f"Base feature {explicit_name!r} is not in Body "
+                    f"{getattr(body, 'Name', '<unknown>')!r}"
+                )
+            if group.index(candidate) >= target_index:
+                raise ValueError(
+                    f"Base feature {explicit_name!r} must precede "
+                    f"{getattr(target, 'Name', '<unknown>')!r} in Body history"
+                )
+            if not _is_valid_single_solid_feature(candidate):
+                raise ValueError(
+                    f"Base feature {explicit_name!r} is not one valid solid"
+                )
+            return candidate, "explicit"
+
+        current_tip = getattr(body, "Tip", None)
+        if (
+            current_tip in group
+            and group.index(current_tip) < target_index
+            and _is_valid_single_solid_feature(current_tip)
+        ):
+            return current_tip, "body_tip"
+
+        candidate = _find_preceding_single_solid_feature(body, target)
+        if candidate is None:
+            raise ValueError(
+                "No valid single-solid base feature exists before "
+                f"{getattr(target, 'Name', '<unknown>')!r}"
+            )
+        return candidate, "nearest_predecessor"
+
+
+    def _reject_nested_partdesign_pattern(feature):
+        """Route chained pattern requests through a native MultiTransform."""
+        pattern_types = {
+            "PartDesign::LinearPattern",
+            "PartDesign::PolarPattern",
+            "PartDesign::Mirrored",
+            "PartDesign::MultiTransform",
+            "PartDesign::Scaled",
+        }
+        if getattr(feature, "TypeId", "") in pattern_types:
+            raise ValueError(
+                "Direct pattern-on-pattern input is intentionally rejected by "
+                "this tool. Use multi_transform_pattern with the original seed "
+                "feature so FreeCAD stores the chained transformations in one "
+                "PartDesign::MultiTransform."
+            )
     '''
 )
 
@@ -169,12 +250,187 @@ FEATURE_VALIDATION_RUNTIME_HELPERS = _runtime_code(
     def _feature_status_strings(feature):
         """Return FreeCAD feature status entries as plain strings."""
         try:
-            return [str(item) for item in feature.getStatusString()]
+            values = feature.getStatusString()
         except Exception:
             try:
-                return [str(item) for item in feature.State]
+                values = feature.State
             except Exception:
                 return []
+        if values is None:
+            return []
+        if isinstance(values, str):
+            return [values] if values else []
+        try:
+            return [str(item) for item in values]
+        except TypeError:
+            return [str(values)]
+
+
+    def _configure_feature_transform_mode(feature):
+        """Keep a transformed feature in FreeCAD's feature-transform mode.
+
+        ``TransformMode`` is an ``App::PropertyEnumeration``.  Its displayed
+        labels differ between FreeCAD versions and downstream builds, so a
+        hard-coded string such as ``"Features"`` is not portable.  FreeCAD
+        stores feature-transform mode as the first enumeration entry and uses
+        it as the constructor default.  Preserve that default, or restore the
+        first advertised entry when a caller changed it.
+        """
+        diagnostics = {
+            "available": False,
+            "value": None,
+            "options": [],
+            "changed": False,
+        }
+        if not hasattr(feature, "TransformMode"):
+            return diagnostics
+
+        diagnostics["available"] = True
+        try:
+            options = list(feature.getEnumerationsOfProperty("TransformMode"))
+        except Exception:
+            options = []
+        diagnostics["options"] = [str(item) for item in options]
+
+        try:
+            current = str(feature.TransformMode)
+        except Exception:
+            current = None
+
+        if options and current != str(options[0]):
+            feature.TransformMode = options[0]
+            diagnostics["changed"] = True
+            current = str(feature.TransformMode)
+
+        diagnostics["value"] = current
+        return diagnostics
+
+
+    def _volume_diagnostics(base_volume, result_volume):
+        """Return neutral before/after diagnostics without judging intent."""
+        change = None
+        change_ratio = None
+        retained_ratio = None
+        if base_volume is not None and result_volume is not None:
+            change = float(result_volume) - float(base_volume)
+            if abs(float(base_volume)) > 1e-12:
+                change_ratio = change / float(base_volume)
+                retained_ratio = float(result_volume) / float(base_volume)
+        return {
+            "base_volume": base_volume,
+            "result_volume": result_volume,
+            "volume_change": change,
+            "volume_change_ratio": change_ratio,
+            "retained_volume_ratio": retained_ratio,
+            "note": (
+                "Shape/Tip validity proves topological health, not that the "
+                "operation changed the intended amount of material. Compare "
+                "the before/after volume diagnostics with the expected feature."
+            ),
+        }
+
+
+    def _pattern_material_change_diagnostics(
+        pattern,
+        base_shape,
+        result_volume,
+        relative_tolerance=1e-3,
+    ):
+        """Compare a pattern result with its effective transformed tool shape.
+
+        ``Shape.isValid()`` and a matching Body Tip only prove topological
+        health.  A transformed PartDesign feature also exposes ``AddSubShape``;
+        intersecting that tool with the pre-pattern Body provides causal
+        evidence for the amount of material that should be added or removed.
+
+        If FreeCAD does not expose a usable tool shape, the check is reported
+        as unavailable and callers may fall back to neutral volume diagnostics.
+        """
+        diagnostics = {
+            "available": False,
+            "consistent": None,
+            "operation": None,
+            "expected_material_change": None,
+            "actual_material_change": None,
+            "absolute_error": None,
+            "tolerance": None,
+            "reason": None,
+        }
+
+        try:
+            base_volume = float(base_shape.Volume)
+            result_volume = float(result_volume)
+        except Exception as exc:
+            diagnostics["reason"] = f"volume data unavailable: {exc}"
+            return diagnostics
+
+        tool_shape = getattr(pattern, "AddSubShape", None)
+        try:
+            if tool_shape is None or tool_shape.isNull():
+                diagnostics["reason"] = "pattern AddSubShape is unavailable"
+                return diagnostics
+            if not tool_shape.isValid():
+                diagnostics["reason"] = "pattern AddSubShape is invalid"
+                return diagnostics
+        except Exception as exc:
+            diagnostics["reason"] = f"could not inspect AddSubShape: {exc}"
+            return diagnostics
+
+        actual_signed = result_volume - base_volume
+        try:
+            if actual_signed < 0.0:
+                operation = "subtractive"
+                expected = float(base_shape.common(tool_shape).Volume)
+                actual = -actual_signed
+            elif actual_signed > 0.0:
+                operation = "additive"
+                expected = float(tool_shape.cut(base_shape).Volume)
+                actual = actual_signed
+            else:
+                # The sign cannot identify the feature intent.  Compute both
+                # effective tool volumes and use the larger one as evidence.
+                removed = float(base_shape.common(tool_shape).Volume)
+                added = float(tool_shape.cut(base_shape).Volume)
+                if removed >= added:
+                    operation = "subtractive"
+                    expected = removed
+                else:
+                    operation = "additive"
+                    expected = added
+                actual = 0.0
+        except Exception as exc:
+            diagnostics["reason"] = (
+                f"could not evaluate pattern material change: {exc}"
+            )
+            return diagnostics
+
+        body_scale = max(abs(base_volume), abs(result_volume), 1.0)
+        tolerance = max(
+            1e-7,
+            body_scale * 1e-12,
+            abs(expected) * float(relative_tolerance),
+        )
+        absolute_error = abs(actual - expected)
+        consistent = absolute_error <= tolerance
+
+        diagnostics.update({
+            "available": True,
+            "consistent": consistent,
+            "operation": operation,
+            "expected_material_change": expected,
+            "actual_material_change": actual,
+            "absolute_error": absolute_error,
+            "tolerance": tolerance,
+            "reason": (
+                None
+                if consistent
+                else (
+                    "Pattern result volume is inconsistent with the effective "
+                    "AddSubShape material change"
+                )
+            ),
+        })
+        return diagnostics
 
 
     def _validate_single_solid_feature(feature, body=None, require_body_tip=True):
@@ -209,7 +465,8 @@ FEATURE_VALIDATION_RUNTIME_HELPERS = _runtime_code(
             except Exception as exc:
                 reasons.append(f"could not inspect result shape: {exc}")
 
-        if require_body_tip and body is not None and body.Tip is not feature:
+        tip_matches = bool(body is None or body.Tip is feature)
+        if require_body_tip and not tip_matches:
             reasons.append(
                 f"Body Tip is {getattr(body.Tip, 'Name', None)!r}, "
                 f"not {getattr(feature, 'Name', '<unknown>')!r}"
@@ -230,6 +487,7 @@ FEATURE_VALIDATION_RUNTIME_HELPERS = _runtime_code(
             "shape_valid": shape_valid,
             "solid_count": solid_count,
             "result_volume": result_volume,
+            "tip_matches": tip_matches,
         }
 
 
@@ -241,6 +499,35 @@ FEATURE_VALIDATION_RUNTIME_HELPERS = _runtime_code(
     ):
         """Remove a feature left behind by an aborted FreeCAD transaction."""
         if feature_name:
+            leftover = doc.getObject(feature_name)
+            if leftover is not None:
+                try:
+                    doc.removeObject(feature_name)
+                except Exception:
+                    pass
+        if original_tip_name:
+            try:
+                original_tip = doc.getObject(original_tip_name)
+                if original_tip is not None:
+                    body.Tip = original_tip
+            except Exception:
+                pass
+        try:
+            doc.recompute()
+        except Exception:
+            pass
+
+
+    def _cleanup_failed_partdesign_features(
+        doc,
+        body,
+        feature_names,
+        original_tip_name=None,
+    ):
+        """Remove several transaction leftovers in reverse dependency order."""
+        for feature_name in reversed(list(feature_names or [])):
+            if not feature_name:
+                continue
             leftover = doc.getObject(feature_name)
             if leftover is not None:
                 try:

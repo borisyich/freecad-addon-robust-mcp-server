@@ -32,7 +32,8 @@ class SketchGeometryOperation(BaseModel):
         "add_arc",
         "add_point",
         "add_ellipse",
-        "add_polygon",
+        "add_regular_polygon",
+        "add_polyline",
         "add_slot",
         "add_bspline",
         "add_external_geometry",
@@ -87,7 +88,8 @@ class SketchGeometryOperation(BaseModel):
                 "major_radius",
                 "minor_radius",
             ),
-            "add_polygon": ("center_x", "center_y", "radius"),
+            "add_regular_polygon": ("center_x", "center_y", "radius"),
+            "add_polyline": ("points",),
             "add_slot": (
                 "center1_x",
                 "center1_y",
@@ -111,7 +113,7 @@ class SketchGeometryOperation(BaseModel):
             "add_circle": ("radius",),
             "add_arc": ("radius",),
             "add_ellipse": ("major_radius", "minor_radius"),
-            "add_polygon": ("radius",),
+            "add_regular_polygon": ("radius",),
             "add_slot": ("radius",),
         }
         for field in positive_fields.get(self.op, ()):
@@ -119,8 +121,25 @@ class SketchGeometryOperation(BaseModel):
             if value is not None and value <= 0:
                 raise ValueError(f"{field} must be positive")
 
-        if self.op == "add_polygon" and self.sides < 3:
-            raise ValueError("add_polygon requires sides >= 3")
+        if self.op == "add_regular_polygon" and self.sides < 3:
+            raise ValueError("add_regular_polygon requires sides >= 3")
+        if self.op == "add_polyline":
+            points = self.points or []
+            minimum = 3 if self.closed else 2
+            if len(points) < minimum or any(len(point) != 2 for point in points):
+                raise ValueError(
+                    f"add_polyline requires at least {minimum} [x, y] points"
+                )
+            if any(
+                points[index] == points[index + 1]
+                for index in range(len(points) - 1)
+            ):
+                raise ValueError("add_polyline contains consecutive duplicate points")
+            if self.closed and points[0] == points[-1]:
+                raise ValueError(
+                    "For a closed polyline, omit the repeated final point; "
+                    "closed=true creates the closing segment"
+                )
         if self.op == "add_bspline":
             points = self.points or []
             if len(points) < 2 or any(len(point) != 2 for point in points):
@@ -128,6 +147,33 @@ class SketchGeometryOperation(BaseModel):
         if self.geometry_index is not None and self.geometry_index < 0:
             raise ValueError("geometry_index must be non-negative")
         return self
+
+
+class LinearMultiTransform(BaseModel):
+    """One linear stage inside a PartDesign MultiTransform."""
+
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["linear"]
+    direction: Literal["X", "Y", "Z"] = "X"
+    length: float = Field(gt=0)
+    occurrences: int = Field(ge=2)
+
+
+class PolarMultiTransform(BaseModel):
+    """One polar stage inside a PartDesign MultiTransform."""
+
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["polar"]
+    axis: Literal["X", "Y", "Z"] = "Z"
+    angle: float = Field(gt=0, le=360)
+    occurrences: int = Field(ge=2)
+
+
+MultiTransformStage = Annotated[
+    LinearMultiTransform | PolarMultiTransform,
+    Field(discriminator="kind"),
+]
+_MULTI_TRANSFORM_STAGE_ADAPTER = TypeAdapter(MultiTransformStage)
 
 
 class OriginPlaneSketchSupport(BaseModel):
@@ -383,6 +429,89 @@ def register_partdesign_tools(
         }
 
     @mcp.tool()
+    async def set_body_tip(
+        body_name: str,
+        feature_name: str,
+        doc_name: str | None = None,
+    ) -> dict[str, Any]:
+        """Set a PartDesign Body Tip to an existing valid single-solid feature.
+
+        This is the safe, typed alternative to assigning ``Body.Tip`` through
+        ``edit_object``. The feature must belong to the Body and own one valid
+        positive-volume solid.
+
+        Args:
+            body_name: PartDesign Body to update.
+            feature_name: Existing feature in that Body to make current Tip.
+            doc_name: Document containing both objects. Uses active if None.
+
+        Returns:
+            Previous and current Tip names plus shape diagnostics.
+        """
+        bridge = await get_bridge()
+        code = f"""
+{BODY_RUNTIME_HELPERS}
+
+{FEATURE_VALIDATION_RUNTIME_HELPERS}
+
+doc = (
+    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None
+    else FreeCAD.ActiveDocument
+)
+if doc is None:
+    raise ValueError("No document found")
+body = doc.getObject({body_name!r})
+if body is None or getattr(body, "TypeId", "") != "PartDesign::Body":
+    raise ValueError(f"PartDesign Body not found: {body_name!r}")
+feature = doc.getObject({feature_name!r})
+if feature is None:
+    raise ValueError(f"Feature not found: {feature_name!r}")
+if feature not in (getattr(body, "Group", []) or []):
+    raise ValueError(
+        f"Feature {feature_name!r} does not belong to Body {body_name!r}"
+    )
+if not _is_valid_single_solid_feature(feature):
+    raise ValueError(
+        f"Feature {feature_name!r} is not one valid positive-volume solid"
+    )
+
+previous_tip = getattr(body, "Tip", None)
+previous_tip_name = getattr(previous_tip, "Name", None)
+doc.openTransaction("Set Body Tip")
+try:
+    body.Tip = feature
+    doc.recompute()
+    validation = _validate_single_solid_feature(feature, body)
+    if not validation["ok"]:
+        raise ValueError("Set Body Tip failed: " + "; ".join(validation["reasons"]))
+    doc.commitTransaction()
+except Exception:
+    try:
+        doc.abortTransaction()
+    finally:
+        if previous_tip is not None:
+            try:
+                body.Tip = previous_tip
+                doc.recompute()
+            except Exception:
+                pass
+    raise
+
+_result_ = {{
+    "body": body.Name,
+    "previous_tip": previous_tip_name,
+    "tip": feature.Name,
+    "shape_valid": validation["shape_valid"],
+    "solid_count": validation["solid_count"],
+    "volume": validation["result_volume"],
+}}
+"""
+        result = await bridge.execute_python(code)
+        if result.success and result.result:
+            return result.result
+        raise ValueError(result.error_traceback or "Failed to set Body Tip")
+
+    @mcp.tool()
     async def create_sketch(
         body_name: str | None = None,
         support: SketchSupport | None = None,
@@ -599,10 +728,13 @@ _result_ = {{
         """Apply geometry edits to one sketch in a single transaction.
 
         Supported operations are ``add_rectangle``, ``add_circle``, ``add_line``,
-        ``add_arc``, ``add_point``, ``add_ellipse``, ``add_polygon``, ``add_slot``,
-        ``add_bspline``, ``add_external_geometry``, ``delete_geometry``, and
-        ``toggle_construction``. Operations are applied sequentially, so later
-        operations may reference geometry created earlier in the same request.
+        ``add_arc``, ``add_point``, ``add_ellipse``, ``add_regular_polygon``,
+        ``add_polyline``, ``add_slot``, ``add_bspline``,
+        ``add_external_geometry``, ``delete_geometry``, and
+        ``toggle_construction``. ``add_regular_polygon`` is center/radius based;
+        ``add_polyline`` uses explicit vertices and can be open or closed.
+        Operations are applied sequentially, so later operations may reference
+        geometry created earlier in the same request.
 
         Args:
             sketch_name: Name of the sketch to edit.
@@ -712,7 +844,7 @@ try:
             idx = sketch.addGeometry(ellipse, False)
             operation_results.append({{"op": op, "geometry_index": idx}})
 
-        elif op == "add_polygon":
+        elif op == "add_regular_polygon":
             first_idx = sketch.GeometryCount
             center = FreeCAD.Vector(operation["center_x"], operation["center_y"], 0)
             sides = operation["sides"]
@@ -729,7 +861,7 @@ try:
             for index in range(sides):
                 sketch.addGeometry(
                     Part.LineSegment(vertices[index], vertices[(index + 1) % sides]),
-                    False,
+                    bool(operation["construction"]),
                 )
             for index in range(sides):
                 sketch.addConstraint(
@@ -742,6 +874,41 @@ try:
                     )
                 )
             operation_results.append({{"op": op, "geometry_indices": list(range(first_idx, first_idx + sides))}})
+
+        elif op == "add_polyline":
+            points = [FreeCAD.Vector(point[0], point[1], 0) for point in operation["points"]]
+            first_idx = sketch.GeometryCount
+            segment_count = len(points) if operation["closed"] else len(points) - 1
+            for index in range(segment_count):
+                sketch.addGeometry(
+                    Part.LineSegment(points[index], points[(index + 1) % len(points)]),
+                    bool(operation["construction"]),
+                )
+            for index in range(segment_count - 1):
+                sketch.addConstraint(
+                    Sketcher.Constraint(
+                        "Coincident",
+                        first_idx + index,
+                        2,
+                        first_idx + index + 1,
+                        1,
+                    )
+                )
+            if operation["closed"]:
+                sketch.addConstraint(
+                    Sketcher.Constraint(
+                        "Coincident",
+                        first_idx + segment_count - 1,
+                        2,
+                        first_idx,
+                        1,
+                    )
+                )
+            operation_results.append({{
+                "op": op,
+                "geometry_indices": list(range(first_idx, first_idx + segment_count)),
+                "closed": bool(operation["closed"]),
+            }})
 
         elif op == "add_slot":
             center1 = FreeCAD.Vector(operation["center1_x"], operation["center1_y"], 0)
@@ -1153,15 +1320,29 @@ _result_ = {{
         sketch_name: str,
         length: float,
         type: Literal["Length", "ThroughAll", "UpToFirst", "UpToFace"] = "Length",
+        direction: Literal["normal", "reversed"] = "normal",
+        base_feature_name: str | None = None,
+        up_to_face: str | None = None,
         name: str | None = None,
         doc_name: str | None = None,
     ) -> dict[str, Any]:
-        """Create a Pocket (cut extrusion) from a sketch.
+        """Create a validated Pocket (cut extrusion) from a sketch.
+
+        The cutting direction is explicit and independent from GUI selection.
+        The base can be named directly. When omitted, the tool prefers a valid
+        current Body Tip that precedes the sketch, then falls back to the nearest
+        valid single-solid predecessor in the Body history.
 
         Args:
             sketch_name: Name of the sketch to pocket.
             length: Pocket depth.
             type: Pocket type: "Length", "ThroughAll", "UpToFirst", "UpToFace".
+            direction: Cut along the sketch normal or the reversed normal.
+            base_feature_name: Optional explicit single-solid feature before the
+                sketch. Avoids relying on Body history when the intended base is
+                not the current Tip.
+            up_to_face: Required only for ``type="UpToFace"``. Explicit face
+                reference in ``Feature.FaceN`` form.
             name: Pocket feature name. Auto-generated if None.
             doc_name: Document containing the sketch. Uses active document if None.
 
@@ -1172,7 +1353,31 @@ _result_ = {{
                 - type_id: Object type
                 - validated: Check if the result has a valid shape
                 - removed_volume: Removed volume of the body
+                - base_feature: Feature used as the Pocket base
+                - base_selection: How the base was resolved
+                - effective_direction: Global cut direction vector
+                - up_to_face: Resolved face reference, when used
+                - volume_diagnostics: Neutral before/after volume evidence
         """
+        if length <= 0:
+            raise ValueError("Pocket length must be greater than zero")
+        if type == "UpToFace":
+            if not up_to_face or "." not in up_to_face:
+                raise ValueError(
+                    'type="UpToFace" requires up_to_face="Feature.FaceN"'
+                )
+            object_name, face_name = up_to_face.rsplit(".", 1)
+            if (
+                not object_name
+                or not face_name.startswith("Face")
+                or not face_name[4:].isdigit()
+                or int(face_name[4:]) < 1
+            ):
+                raise ValueError(
+                    'up_to_face must use the form "Feature.FaceN"'
+                )
+        elif up_to_face is not None:
+            raise ValueError('up_to_face is valid only for type="UpToFace"')
         bridge = await get_bridge()
 
         code = f"""
@@ -1194,19 +1399,64 @@ body = _find_body_containing_object(doc, sketch)
 if body is None:
     raise ValueError("Sketch must be inside a PartDesign Body for Pocket operation")
 
-base_feature = _find_preceding_single_solid_feature(body, sketch)
-if base_feature is None:
-    raise ValueError("Pocket requires a valid single-solid feature before the sketch")
+base_feature, base_selection = _resolve_partdesign_base_feature(
+    doc,
+    body,
+    sketch,
+    {base_feature_name!r},
+)
 base_shape = base_feature.Shape.copy()
+up_to_face_reference = None
+if {type!r} == "UpToFace":
+    up_to_object_name, up_to_element = {up_to_face!r}.rsplit(".", 1)
+    up_to_object = doc.getObject(up_to_object_name)
+    if up_to_object is None:
+        raise ValueError(f"Up-to-face object not found: {{up_to_object_name!r}}")
+    up_to_shape = getattr(up_to_object, "Shape", None)
+    face_index = int(up_to_element[4:])
+    if (
+        up_to_shape is None
+        or up_to_shape.isNull()
+        or face_index > len(up_to_shape.Faces)
+    ):
+        available = (
+            0
+            if up_to_shape is None or up_to_shape.isNull()
+            else len(up_to_shape.Faces)
+        )
+        raise ValueError(
+            f"Face not found: {{up_to_object_name}}.{{up_to_element}}. "
+            f"Available faces: Face1..Face{{available}}"
+        )
+    up_to_face_reference = (up_to_object, [up_to_element])
+
+original_tip = getattr(body, "Tip", None)
+original_tip_name = getattr(original_tip, "Name", None)
+created_pocket_name = None
 
 # Wrap in transaction for undo support
 doc.openTransaction("Pocket Sketch")
 try:
+    body.Tip = base_feature
     pocket_name = {name!r} or "Pocket"
     pocket = body.newObject("PartDesign::Pocket", pocket_name)
+    created_pocket_name = pocket.Name
     pocket.Profile = sketch
     pocket.Length = {length}
     pocket.Type = {type!r}
+    pocket.Reversed = {direction!r} == "reversed"
+    if up_to_face_reference is not None:
+        pocket.UpToFace = up_to_face_reference
+
+    try:
+        sketch_rotation = sketch.getGlobalPlacement().Rotation
+    except Exception:
+        sketch_rotation = sketch.Placement.Rotation
+    sketch_normal = sketch_rotation.multVec(FreeCAD.Vector(0, 0, 1))
+    effective_direction_vec = (
+        sketch_normal * -1.0 if pocket.Reversed else sketch_normal
+    )
+    body.Tip = pocket
 
     doc.recompute()
     validation = _validate_subtractive_feature(pocket, body, base_shape)
@@ -1214,20 +1464,45 @@ try:
         raise ValueError("Pocket failed: " + "; ".join(validation["reasons"]))
     doc.commitTransaction()
 except Exception:
-    doc.abortTransaction()
+    try:
+        doc.abortTransaction()
+    finally:
+        _cleanup_failed_partdesign_feature(
+            doc, body, created_pocket_name, original_tip_name
+        )
     raise
+
+volume_diagnostics = _volume_diagnostics(
+    float(base_shape.Volume),
+    validation["result_volume"],
+)
 
 _result_ = {{
     "name": pocket.Name,
     "label": pocket.Label,
     "type_id": pocket.TypeId,
     "validated": validation["ok"],
+    "shape_valid": validation["shape_valid"],
+    "solid_count": validation["solid_count"],
+    "tip_matches": validation["tip_matches"],
     "removed_volume": validation["removed_volume"],
+    "base_volume": float(base_shape.Volume),
+    "result_volume": validation["result_volume"],
+    "base_feature": base_feature.Name,
+    "base_selection": base_selection,
+    "direction": {direction!r},
+    "up_to_face": {up_to_face!r},
+    "effective_direction": [
+        float(effective_direction_vec.x),
+        float(effective_direction_vec.y),
+        float(effective_direction_vec.z),
+    ],
+    "volume_diagnostics": volume_diagnostics,
 }}
 """
         result = await bridge.execute_python(code)
         if result.success:
-            return result.result
+            return require_subtractive_result(result.result, "Pocket")
         raise ValueError(result.error_traceback or "Pocket failed")
 
     @mcp.tool()
@@ -1629,6 +1904,152 @@ _result_ = {{
         if result.success:
             return result.result
         raise ValueError(result.error_traceback or "Groove failed")
+
+    @mcp.tool()
+    async def thread_helix(
+        sketch_name: str,
+        pitch: float,
+        height: float,
+        operation: Literal["additive", "subtractive"] = "additive",
+        axis: Literal[
+            "Base_X", "Base_Y", "Base_Z", "Sketch_V", "Sketch_H"
+        ] = "Sketch_H",
+        left_handed: bool = False,
+        reversed: bool = False,
+        base_feature_name: str | None = None,
+        name: str | None = None,
+        doc_name: str | None = None,
+    ) -> dict[str, Any]:
+        """Create editable helical thread geometry from a closed profile sketch.
+
+        ``additive`` creates ``PartDesign::AdditiveHelix`` for an external thread;
+        ``subtractive`` creates ``PartDesign::SubtractiveHelix`` for an internal
+        thread or helical groove. The profile sketch remains editable and the
+        result is validated as a single Body solid.
+
+        Args:
+            sketch_name: Closed thread-profile sketch inside a PartDesign Body.
+            pitch: Axial distance per turn.
+            height: Total axial helix height.
+            operation: Add material or subtract material.
+            axis: Body origin or sketch axis lying in the sketch plane.
+            left_handed: Create a left-handed helix.
+            reversed: Reverse the axial helix direction.
+            base_feature_name: Optional explicit single-solid base before sketch.
+            name: Feature name. Auto-generated if None.
+            doc_name: Document containing the sketch. Uses active if None.
+
+        Returns:
+            Created helix information, resolved base/axis and volume diagnostics.
+        """
+        if pitch <= 0:
+            raise ValueError("Thread pitch must be greater than zero")
+        if height <= 0:
+            raise ValueError("Thread height must be greater than zero")
+        bridge = await get_bridge()
+        code = f"""
+{REVOLUTION_AXIS_RUNTIME_HELPERS}
+
+{FEATURE_VALIDATION_RUNTIME_HELPERS}
+
+doc = (
+    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None
+    else FreeCAD.ActiveDocument
+)
+if doc is None:
+    raise ValueError("No document found")
+sketch = doc.getObject({sketch_name!r})
+if sketch is None:
+    raise ValueError(f"Sketch not found: {sketch_name!r}")
+if getattr(sketch, "TypeId", "") != "Sketcher::SketchObject":
+    raise ValueError(f"Object is not a sketch: {sketch_name!r}")
+body = _find_body_containing_object(doc, sketch)
+if body is None:
+    raise ValueError("Thread profile sketch must belong to a PartDesign Body")
+
+base_feature, base_selection = _resolve_partdesign_base_feature(
+    doc, body, sketch, {base_feature_name!r}
+)
+base_shape = base_feature.Shape.copy()
+original_tip_name = getattr(getattr(body, "Tip", None), "Name", None)
+created_helix_name = None
+
+doc.openTransaction("Create Thread Helix")
+try:
+    body.Tip = base_feature
+    operation_name = {operation!r}
+    feature_type = (
+        "PartDesign::AdditiveHelix"
+        if operation_name == "additive"
+        else "PartDesign::SubtractiveHelix"
+    )
+    default_name = "AdditiveHelix" if operation_name == "additive" else "SubtractiveHelix"
+    helix = body.newObject(feature_type, {name!r} or default_name)
+    created_helix_name = helix.Name
+    helix.Profile = sketch
+    helix.ReferenceAxis, resolved_axis_name = _resolve_revolution_axis(
+        body, sketch, {axis!r}, "Thread helix"
+    )
+    helix.Mode = 0
+    helix.Pitch = {pitch}
+    helix.Height = {height}
+    helix.Angle = 0.0
+    helix.Growth = 0.0
+    helix.LeftHanded = {left_handed}
+    helix.Reversed = {reversed}
+    body.Tip = helix
+
+    doc.recompute()
+    validation = (
+        _validate_additive_feature(helix, body, base_shape)
+        if operation_name == "additive"
+        else _validate_subtractive_feature(helix, body, base_shape)
+    )
+    if not validation["ok"]:
+        raise ValueError(
+            "Thread helix failed: " + "; ".join(validation["reasons"])
+        )
+    doc.commitTransaction()
+except Exception:
+    try:
+        doc.abortTransaction()
+    finally:
+        _cleanup_failed_partdesign_feature(
+            doc, body, created_helix_name, original_tip_name
+        )
+    raise
+
+base_volume = float(base_shape.Volume)
+result_volume = validation["result_volume"]
+volume_diagnostics = _volume_diagnostics(base_volume, result_volume)
+_result_ = {{
+    "name": helix.Name,
+    "label": helix.Label,
+    "type_id": helix.TypeId,
+    "operation": operation_name,
+    "validated": validation["ok"],
+    "shape_valid": validation["shape_valid"],
+    "solid_count": validation["solid_count"],
+    "tip_matches": validation["tip_matches"],
+    "base_feature": base_feature.Name,
+    "base_selection": base_selection,
+    "axis": resolved_axis_name,
+    "pitch": float(helix.Pitch),
+    "height": float(helix.Height),
+    "turns": float(helix.Height) / float(helix.Pitch),
+    "base_volume": base_volume,
+    "result_volume": result_volume,
+    "added_volume": validation.get("added_volume"),
+    "removed_volume": validation.get("removed_volume"),
+    "volume_diagnostics": volume_diagnostics,
+}}
+"""
+        result = await bridge.execute_python(code)
+        if not result.success:
+            raise ValueError(result.error_traceback or "Thread helix failed")
+        if operation == "additive":
+            return require_additive_result(result.result, "Thread helix")
+        return require_subtractive_result(result.result, "Thread helix")
 
     @mcp.tool()
     async def create_hole(
@@ -2292,11 +2713,20 @@ _result_ = {{
                 - name: Pattern name
                 - label: Pattern label
                 - type_id: Object type
+                - validated: Shape and Body Tip validation result
+                - volume_diagnostics: Neutral before/after volume evidence
+                - material_change_diagnostics: AddSubShape-based causal check
         """
+        if length <= 0:
+            raise ValueError("Linear pattern length must be greater than zero")
+        if occurrences < 2:
+            raise ValueError("Linear pattern occurrences must be at least 2")
         bridge = await get_bridge()
 
         code = f"""
 {BODY_RUNTIME_HELPERS}
+
+{FEATURE_VALIDATION_RUNTIME_HELPERS}
 
 doc = (
     FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None
@@ -2311,12 +2741,22 @@ body = _find_body_containing_object(doc, feature)
 
 if body is None:
     raise ValueError("Feature must be inside a PartDesign Body")
+_reject_nested_partdesign_pattern(feature)
+if not _is_valid_single_solid_feature(feature):
+    raise ValueError("Pattern source must be one valid positive-volume solid")
+
+base_shape = feature.Shape.copy()
+original_tip_name = getattr(getattr(body, "Tip", None), "Name", None)
+created_pattern_name = None
 
 # Wrap in transaction for undo support
 doc.openTransaction("Linear Pattern")
 try:
+    body.Tip = feature
     pattern_name = {name!r} or "LinearPattern"
     pattern = body.newObject("PartDesign::LinearPattern", pattern_name)
+    created_pattern_name = pattern.Name
+    transform_mode = _configure_feature_transform_mode(pattern)
     pattern.Originals = [feature]
     pattern.Length = {length}
     pattern.Occurrences = {occurrences}
@@ -2327,17 +2767,56 @@ try:
         raise ValueError(f"Invalid pattern direction: {{dir_name!r}}")
     axis_obj = _resolve_body_origin_feature(body, f"{{dir_name}}_Axis")
     pattern.Direction = (axis_obj, [""])
+    body.Tip = pattern
 
     doc.recompute()
+    validation = _validate_single_solid_feature(pattern, body)
+    if not validation["ok"]:
+        raise ValueError(
+            "Linear pattern failed: " + "; ".join(validation["reasons"])
+        )
+    material_change = _pattern_material_change_diagnostics(
+        pattern, base_shape, validation["result_volume"]
+    )
+    if material_change["available"] and not material_change["consistent"]:
+        raise ValueError(
+            "Linear pattern failed causal material-change validation: "
+            + material_change["reason"]
+            + f"; expected={{material_change['expected_material_change']}}, "
+            + f"actual={{material_change['actual_material_change']}}, "
+            + f"tolerance={{material_change['tolerance']}}"
+        )
     doc.commitTransaction()
 except Exception:
-    doc.abortTransaction()
+    try:
+        doc.abortTransaction()
+    finally:
+        _cleanup_failed_partdesign_feature(
+            doc, body, created_pattern_name, original_tip_name
+        )
     raise
+
+base_volume = float(base_shape.Volume)
+volume_diagnostics = _volume_diagnostics(
+    base_volume, validation["result_volume"]
+)
 
 _result_ = {{
     "name": pattern.Name,
     "label": pattern.Label,
     "type_id": pattern.TypeId,
+    "validated": validation["ok"],
+    "shape_valid": validation["shape_valid"],
+    "solid_count": validation["solid_count"],
+    "tip_matches": validation["tip_matches"],
+    "tip": getattr(body.Tip, "Name", None),
+    "source_feature": feature.Name,
+    "transform_mode": transform_mode["value"],
+    "transform_mode_options": transform_mode["options"],
+    "base_volume": base_volume,
+    "result_volume": validation["result_volume"],
+    "volume_diagnostics": volume_diagnostics,
+    "material_change_diagnostics": material_change,
 }}
 """
         result = await bridge.execute_python(code)
@@ -2371,11 +2850,20 @@ _result_ = {{
                 - name: Pattern name
                 - label: Pattern label
                 - type_id: Object type
+                - validated: Shape and Body Tip validation result
+                - volume_diagnostics: Neutral before/after volume evidence
+                - material_change_diagnostics: AddSubShape-based causal check
         """
+        if angle <= 0 or angle > 360:
+            raise ValueError("Polar pattern angle must be in the range (0, 360]")
+        if occurrences < 2:
+            raise ValueError("Polar pattern occurrences must be at least 2")
         bridge = await get_bridge()
 
         code = f"""
 {BODY_RUNTIME_HELPERS}
+
+{FEATURE_VALIDATION_RUNTIME_HELPERS}
 
 doc = (
     FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
@@ -2390,12 +2878,22 @@ body = _find_body_containing_object(doc, feature)
 
 if body is None:
     raise ValueError("Feature must be inside a PartDesign Body")
+_reject_nested_partdesign_pattern(feature)
+if not _is_valid_single_solid_feature(feature):
+    raise ValueError("Pattern source must be one valid positive-volume solid")
+
+base_shape = feature.Shape.copy()
+original_tip_name = getattr(getattr(body, "Tip", None), "Name", None)
+created_pattern_name = None
 
 # Wrap in transaction for undo support
 doc.openTransaction("Polar Pattern")
 try:
+    body.Tip = feature
     pattern_name = {name!r} or "PolarPattern"
     pattern = body.newObject("PartDesign::PolarPattern", pattern_name)
+    created_pattern_name = pattern.Name
+    transform_mode = _configure_feature_transform_mode(pattern)
     pattern.Originals = [feature]
     pattern.Angle = {angle}
     pattern.Occurrences = {occurrences}
@@ -2406,23 +2904,240 @@ try:
         raise ValueError(f"Invalid pattern axis: {{axis_name!r}}")
     axis_obj = _resolve_body_origin_feature(body, f"{{axis_name}}_Axis")
     pattern.Axis = (axis_obj, [""])
+    body.Tip = pattern
 
     doc.recompute()
+    validation = _validate_single_solid_feature(pattern, body)
+    if not validation["ok"]:
+        raise ValueError(
+            "Polar pattern failed: " + "; ".join(validation["reasons"])
+        )
+    material_change = _pattern_material_change_diagnostics(
+        pattern, base_shape, validation["result_volume"]
+    )
+    if material_change["available"] and not material_change["consistent"]:
+        raise ValueError(
+            "Polar pattern failed causal material-change validation: "
+            + material_change["reason"]
+            + f"; expected={{material_change['expected_material_change']}}, "
+            + f"actual={{material_change['actual_material_change']}}, "
+            + f"tolerance={{material_change['tolerance']}}"
+        )
     doc.commitTransaction()
 except Exception:
-    doc.abortTransaction()
+    try:
+        doc.abortTransaction()
+    finally:
+        _cleanup_failed_partdesign_feature(
+            doc, body, created_pattern_name, original_tip_name
+        )
     raise
+
+base_volume = float(base_shape.Volume)
+volume_diagnostics = _volume_diagnostics(
+    base_volume, validation["result_volume"]
+)
 
 _result_ = {{
     "name": pattern.Name,
     "label": pattern.Label,
     "type_id": pattern.TypeId,
+    "validated": validation["ok"],
+    "shape_valid": validation["shape_valid"],
+    "solid_count": validation["solid_count"],
+    "tip_matches": validation["tip_matches"],
+    "tip": getattr(body.Tip, "Name", None),
+    "source_feature": feature.Name,
+    "transform_mode": transform_mode["value"],
+    "transform_mode_options": transform_mode["options"],
+    "base_volume": base_volume,
+    "result_volume": validation["result_volume"],
+    "volume_diagnostics": volume_diagnostics,
+    "material_change_diagnostics": material_change,
 }}
 """
         result = await bridge.execute_python(code)
         if result.success:
             return result.result
         raise ValueError(result.error_traceback or "Polar pattern failed")
+
+    @mcp.tool()
+    async def multi_transform_pattern(
+        feature_name: str,
+        transformations: list[MultiTransformStage],
+        name: str | None = None,
+        doc_name: str | None = None,
+    ) -> dict[str, Any]:
+        """Apply multiple linear/polar transforms to one original feature.
+
+        Use this instead of applying ``linear_pattern`` or ``polar_pattern``
+        directly to another pattern. FreeCAD represents chained transforms as a
+        single ``PartDesign::MultiTransform`` with internal transformation stages.
+
+        Args:
+            feature_name: Original non-pattern PartDesign feature to transform.
+            transformations: Ordered linear and polar transformation stages.
+                At least two stages are required.
+            name: MultiTransform feature name. Auto-generated if None.
+            doc_name: Document containing the source feature. Uses active if None.
+
+        Returns:
+            MultiTransform and stage information with Shape/Tip, neutral volume
+            evidence, and an AddSubShape-based causal material-change check.
+        """
+        if len(transformations) < 2:
+            raise ValueError(
+                "multi_transform_pattern requires at least two transformation stages"
+            )
+        normalized_transformations = [
+            (
+                stage
+                if isinstance(stage, (LinearMultiTransform, PolarMultiTransform))
+                else _MULTI_TRANSFORM_STAGE_ADAPTER.validate_python(stage)
+            ).model_dump()
+            for stage in transformations
+        ]
+        bridge = await get_bridge()
+        code = f"""
+{BODY_RUNTIME_HELPERS}
+
+{FEATURE_VALIDATION_RUNTIME_HELPERS}
+
+transformations = {normalized_transformations!r}
+doc = (
+    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None
+    else FreeCAD.ActiveDocument
+)
+if doc is None:
+    raise ValueError("No document found")
+feature = doc.getObject({feature_name!r})
+if feature is None:
+    raise ValueError(f"Feature not found: {feature_name!r}")
+body = _find_body_containing_object(doc, feature)
+if body is None:
+    raise ValueError("Feature must be inside a PartDesign Body")
+_reject_nested_partdesign_pattern(feature)
+if not _is_valid_single_solid_feature(feature):
+    raise ValueError("MultiTransform source must be one valid positive-volume solid")
+
+base_shape = feature.Shape.copy()
+original_tip_name = getattr(getattr(body, "Tip", None), "Name", None)
+created_names = []
+stage_objects = []
+stage_results = []
+
+doc.openTransaction("Multi Transform Pattern")
+try:
+    body.Tip = feature
+    multi = body.newObject(
+        "PartDesign::MultiTransform", {name!r} or "MultiTransform"
+    )
+    created_names.append(multi.Name)
+    transform_mode = _configure_feature_transform_mode(multi)
+    multi.Originals = [feature]
+
+    for index, stage in enumerate(transformations, start=1):
+        if stage["kind"] == "linear":
+            stage_obj = body.newObject(
+                "PartDesign::LinearPattern",
+                f"{{multi.Name}}_Linear{{index}}",
+            )
+            stage_transform_mode = _configure_feature_transform_mode(stage_obj)
+            stage_obj.Originals = []
+            stage_obj.Length = stage["length"]
+            stage_obj.Occurrences = stage["occurrences"]
+            axis_obj = _resolve_body_origin_feature(
+                body, f"{{stage['direction']}}_Axis"
+            )
+            stage_obj.Direction = (axis_obj, [""])
+            stage_results.append({{
+                "name": stage_obj.Name,
+                "kind": "linear",
+                "direction": stage["direction"],
+                "length": stage["length"],
+                "occurrences": stage["occurrences"],
+                "transform_mode": stage_transform_mode["value"],
+            }})
+        else:
+            stage_obj = body.newObject(
+                "PartDesign::PolarPattern",
+                f"{{multi.Name}}_Polar{{index}}",
+            )
+            stage_transform_mode = _configure_feature_transform_mode(stage_obj)
+            stage_obj.Originals = []
+            stage_obj.Angle = stage["angle"]
+            stage_obj.Occurrences = stage["occurrences"]
+            axis_obj = _resolve_body_origin_feature(
+                body, f"{{stage['axis']}}_Axis"
+            )
+            stage_obj.Axis = (axis_obj, [""])
+            stage_results.append({{
+                "name": stage_obj.Name,
+                "kind": "polar",
+                "axis": stage["axis"],
+                "angle": stage["angle"],
+                "occurrences": stage["occurrences"],
+                "transform_mode": stage_transform_mode["value"],
+            }})
+        created_names.append(stage_obj.Name)
+        stage_objects.append(stage_obj)
+
+    multi.Transformations = stage_objects
+    body.Tip = multi
+    doc.recompute()
+    validation = _validate_single_solid_feature(multi, body)
+    if not validation["ok"]:
+        raise ValueError(
+            "MultiTransform failed: " + "; ".join(validation["reasons"])
+        )
+    material_change = _pattern_material_change_diagnostics(
+        multi, base_shape, validation["result_volume"]
+    )
+    if material_change["available"] and not material_change["consistent"]:
+        raise ValueError(
+            "MultiTransform failed causal material-change validation: "
+            + material_change["reason"]
+            + f"; expected={{material_change['expected_material_change']}}, "
+            + f"actual={{material_change['actual_material_change']}}, "
+            + f"tolerance={{material_change['tolerance']}}"
+        )
+    doc.commitTransaction()
+except Exception:
+    try:
+        doc.abortTransaction()
+    finally:
+        _cleanup_failed_partdesign_features(
+            doc, body, created_names, original_tip_name
+        )
+    raise
+
+base_volume = float(base_shape.Volume)
+volume_diagnostics = _volume_diagnostics(
+    base_volume, validation["result_volume"]
+)
+_result_ = {{
+    "name": multi.Name,
+    "label": multi.Label,
+    "type_id": multi.TypeId,
+    "validated": validation["ok"],
+    "shape_valid": validation["shape_valid"],
+    "solid_count": validation["solid_count"],
+    "tip_matches": validation["tip_matches"],
+    "tip": getattr(body.Tip, "Name", None),
+    "source_feature": feature.Name,
+    "transform_mode": transform_mode["value"],
+    "transform_mode_options": transform_mode["options"],
+    "transformations": stage_results,
+    "base_volume": base_volume,
+    "result_volume": validation["result_volume"],
+    "volume_diagnostics": volume_diagnostics,
+    "material_change_diagnostics": material_change,
+}}
+"""
+        result = await bridge.execute_python(code)
+        if result.success and result.result:
+            return result.result
+        raise ValueError(result.error_traceback or "MultiTransform failed")
 
     @mcp.tool()
     async def mirrored_feature(

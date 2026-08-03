@@ -1,6 +1,6 @@
 # Tools Reference
 
-The server currently registers **111 MCP tools**. This page is generated from the actual `@mcp.tool()` definitions in `src/freecad_mcp/tools` and is the exact inventory.
+The server currently registers **115 MCP tools**. This page is generated from the actual `@mcp.tool()` definitions in `src/freecad_mcp/tools` and is the exact inventory.
 
 Geometry-changing operations are transaction-backed where applicable. Use `history(action="undo")` for explicit recovery, `get_console_output` for console diagnostics, and `recompute_document` for document recomputation.
 
@@ -11,8 +11,8 @@ Geometry-changing operations are transaction-backed where applicable. Use `histo
 | [Execution](#execution) | `src/freecad_mcp/tools/execution.py` | 5 |
 | [Documents](#documents) | `src/freecad_mcp/tools/documents.py` | 7 |
 | [Objects / Part](#objects-part) | `src/freecad_mcp/tools/objects.py` | 32 |
-| [PartDesign / Sketcher](#partdesign-sketcher) | `src/freecad_mcp/tools/partdesign.py` | 25 |
-| [Spreadsheet](#spreadsheet) | `src/freecad_mcp/tools/spreadsheet.py` | 10 |
+| [PartDesign / Sketcher](#partdesign-sketcher) | `src/freecad_mcp/tools/partdesign.py` | 28 |
+| [Spreadsheet](#spreadsheet) | `src/freecad_mcp/tools/spreadsheet.py` | 11 |
 | [Draft](#draft) | `src/freecad_mcp/tools/draft.py` | 6 |
 | [Images](#images) | `src/freecad_mcp/tools/images.py` | 3 |
 | [Checkpoints](#checkpoints) | `src/freecad_mcp/tools/checkpoints.py` | 1 |
@@ -20,7 +20,7 @@ Geometry-changing operations are transaction-backed where applicable. Use `histo
 | [Validation](#validation) | `src/freecad_mcp/tools/validation.py` | 5 |
 | [Export / Import](#export-import) | `src/freecad_mcp/tools/export.py` | 2 |
 | [Macros](#macros) | `src/freecad_mcp/tools/macros.py` | 6 |
-| **Total** |  | **111** |
+| **Total** |  | **115** |
 
 ## Execution
 
@@ -52,7 +52,7 @@ Geometry-changing operations are transaction-backed where applicable. Use `histo
 | `inspect_object` | Get detailed information about a FreeCAD object. |
 | `create_object` | Create a new FreeCAD object. |
 | `create_primitive` | Create a Box, Cylinder, Sphere, Cone, Torus, Wedge, or Helix. |
-| `edit_object` | Edit properties of an existing FreeCAD object. |
+| `edit_object` | Edit object properties; string names are resolved for FreeCAD link properties. |
 | `delete_object` | Delete an object from a FreeCAD document. |
 | `boolean_operation` | Perform a boolean operation on two FreeCAD objects. |
 | `set_placement` | Set the placement (position and rotation) of a FreeCAD object. |
@@ -81,24 +81,29 @@ Geometry-changing operations are transaction-backed where applicable. Use `histo
 | `part_loft` | Create a loft (transition shape) between multiple profiles. |
 | `part_sweep` | Sweep a profile along a spine path. |
 
+`create_regular_polygon` and `make_wire` create standalone Part objects. For geometry inside an existing Sketcher sketch, use `edit_sketch_geometry` with `add_regular_polygon` or `add_polyline`; these are sketch operations, not duplicate MCP tools.
+
 ## PartDesign / Sketcher
 
 | Tool | Description |
 |---|---|
 | `create_partdesign_body` | Create a new PartDesign Body. |
+| `set_body_tip` | Set and validate the active Tip of a PartDesign Body. |
 | `create_sketch` | Create a Sketch using a typed `support` selector for an origin plane, Body Tip face, explicit feature face, or datum plane. |
 | `edit_sketch_geometry` | Apply geometry edits to one sketch in a single transaction. |
 | `edit_sketch_constraints` | Apply constraint edits to one sketch in a single transaction. |
 | `pad_sketch` | Create a Pad (extrusion) from a sketch. |
-| `pocket_sketch` | Create a Pocket (cut extrusion) from a sketch. |
+| `pocket_sketch` | Create a validated Pocket with explicit direction and optional base feature. |
 | `fillet_edges` | Add fillet (rounded edges) to an object. |
 | `chamfer_edges` | Add chamfer (beveled edges) to an object. |
 | `revolution_sketch` | Create a Revolution (rotational extrusion) from a sketch. |
 | `groove_sketch` | Create a Groove (subtractive revolution) from a sketch. |
+| `thread_helix` | Create additive or subtractive editable helical thread geometry. |
 | `create_hole` | Create a validated Hole feature from a face- or origin-plane sketch. |
 | `create_cylindrical_cut` | Create a validated cylindrical cut with an explicit world-space axis. |
 | `linear_pattern` | Create a Linear Pattern from a PartDesign feature. |
-| `polar_pattern` | Create a Polar (circular) Pattern from a PartDesign feature. |
+| `polar_pattern` | Create and validate a Polar Pattern from one non-pattern feature. |
+| `multi_transform_pattern` | Combine linear and polar stages in one native PartDesign MultiTransform. |
 | `mirrored_feature` | Create a Mirrored feature from a PartDesign feature. |
 | `loft_sketches` | Create a Loft (additive) through multiple sketches. |
 | `sweep_sketch` | Create a Sweep (additive) along a spine path. |
@@ -117,6 +122,7 @@ Geometry-changing operations are transaction-backed where applicable. Use `histo
 |---|---|
 | `spreadsheet_create` | Create a new Spreadsheet object. |
 | `spreadsheet_set_cell` | Set the value of a cell in a spreadsheet. |
+| `spreadsheet_apply_batch` | Apply cells, aliases, and property bindings in one transaction and recompute. |
 | `spreadsheet_get_cell` | Get the value of a cell in a spreadsheet. |
 | `spreadsheet_set_alias` | Set an alias for a cell in a spreadsheet. |
 | `spreadsheet_get_aliases` | Get all aliases defined in a spreadsheet. |

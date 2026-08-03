@@ -1949,6 +1949,7 @@ The MCP server provides a `freecad://capabilities` resource with a curated JSON 
 | ------------------ | ------------------------------------------ |
 | `linear_pattern`   | Create linear pattern of features.         |
 | `polar_pattern`    | Create polar/circular pattern of features. |
+| `multi_transform_pattern` | Combine linear and polar stages in a native MultiTransform. |
 | `mirrored_feature` | Mirror a feature across a plane.           |
 
 ### Sketcher Batch Tools
@@ -1960,7 +1961,7 @@ The MCP server provides a `freecad://capabilities` resource with a curated JSON 
 | `get_sketch_info`         | Inspect geometry, constraints, closure, and solver status. |
 
 `edit_sketch_geometry` supports `add_rectangle`, `add_circle`, `add_line`,
-`add_arc`, `add_point`, `add_ellipse`, `add_polygon`, `add_slot`, `add_bspline`,
+`add_arc`, `add_point`, `add_ellipse`, `add_regular_polygon`, `add_polyline`, `add_slot`, `add_bspline`,
 `add_external_geometry`, `delete_geometry`, and `toggle_construction`.
 
 `edit_sketch_constraints` supports `horizontal`, `vertical`, `coincident`,
@@ -1982,6 +1983,7 @@ The MCP server provides a `freecad://capabilities` resource with a curated JSON 
 | `spreadsheet_get_cell_range` | Get values from a range of cells.                        |
 | `spreadsheet_import_csv`     | Import data from CSV file into spreadsheet.              |
 | `spreadsheet_export_csv`     | Export spreadsheet data to CSV file.                     |
+| `spreadsheet_apply_batch`    | Apply cells, aliases, and bindings in one transaction.    |
 
 ### Draft Tools (3D Text/ShapeString)
 

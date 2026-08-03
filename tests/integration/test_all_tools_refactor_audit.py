@@ -73,6 +73,7 @@ TOOL_SCENARIOS: dict[str, str] = {
     "part_sweep": "objects",
     # PartDesign and Sketcher.
     "create_partdesign_body": "partdesign",
+    "set_body_tip": "partdesign",
     "create_sketch": "partdesign",
     "edit_sketch_geometry": "partdesign",
     "edit_sketch_constraints": "partdesign",
@@ -82,10 +83,12 @@ TOOL_SCENARIOS: dict[str, str] = {
     "chamfer_edges": "partdesign",
     "revolution_sketch": "partdesign",
     "groove_sketch": "partdesign",
+    "thread_helix": "partdesign",
     "create_hole": "partdesign",
     "create_cylindrical_cut": "partdesign",
     "linear_pattern": "partdesign",
     "polar_pattern": "partdesign",
+    "multi_transform_pattern": "partdesign",
     "mirrored_feature": "partdesign",
     "loft_sketches": "partdesign",
     "sweep_sketch": "partdesign",
@@ -100,6 +103,7 @@ TOOL_SCENARIOS: dict[str, str] = {
     # Spreadsheet, Draft, files, macros and GUI.
     "spreadsheet_create": "io_gui",
     "spreadsheet_set_cell": "io_gui",
+    "spreadsheet_apply_batch": "io_gui",
     "spreadsheet_get_cell": "io_gui",
     "spreadsheet_set_alias": "io_gui",
     "spreadsheet_get_aliases": "io_gui",
@@ -158,7 +162,7 @@ DOCUMENTED_CHOICES: dict[tuple[str, str], tuple[str, ...]] = {
     ),
     ("edit_sketch_geometry", "operations[].op"): (
         "add_rectangle", "add_circle", "add_line", "add_arc", "add_point",
-        "add_ellipse", "add_polygon", "add_slot", "add_bspline",
+        "add_ellipse", "add_regular_polygon", "add_polyline", "add_slot", "add_bspline",
         "add_external_geometry", "delete_geometry", "toggle_construction",
     ),
     ("edit_sketch_constraints", "operations[].op"): (
@@ -167,7 +171,12 @@ DOCUMENTED_CHOICES: dict[tuple[str, str], tuple[str, ...]] = {
         "distance_y", "radius", "angle", "fix", "delete_constraint",
     ),
     ("pocket_sketch", "type"): ("Length", "ThroughAll", "UpToFirst", "UpToFace"),
+    ("pocket_sketch", "direction"): ("normal", "reversed"),
     ("revolution_sketch", "axis"): (
+        "Base_X", "Base_Y", "Base_Z", "Sketch_V", "Sketch_H",
+    ),
+    ("thread_helix", "operation"): ("additive", "subtractive"),
+    ("thread_helix", "axis"): (
         "Base_X", "Base_Y", "Base_Z", "Sketch_V", "Sketch_H",
     ),
     ("groove_sketch", "axis"): (
@@ -261,12 +270,12 @@ _result_ = True
     )
 
 
-def test_runtime_registry_has_explicit_111_tool_coverage() -> None:
+def test_runtime_registry_has_explicit_115_tool_coverage() -> None:
     async def registered() -> set[str]:
         return {tool.name for tool in await production_mcp.list_tools()}
 
     actual = asyncio.run(registered())
-    assert len(actual) == 111
+    assert len(actual) == 115
     assert set(TOOL_SCENARIOS) == actual
 
 
@@ -495,20 +504,12 @@ async def test_spreadsheet_macro_export_image_gui_and_validation_workflow(
     await _call(tools, "compare_images", reference_path=str(image_a),
                 candidate_path=str(image_b), output_path=str(tmp_path / "comparison.png"),
                 view_context="Front / XZ / normal Y")
-    # Work around the independently tested draft_shapestring/doc_name defect so
-    # this broad scenario can continue auditing all downstream Draft/GUI tools.
-    await _call(tools, "execute_python", code=f"""
-FreeCAD.setActiveDocument({doc!r})
-_result_ = True
-""")
     fonts = await _call(tools, "draft_list_fonts")
     font_path = fonts["fonts"][0]["path"] if isinstance(fonts, dict) and fonts.get("fonts") else None
     shape = await _call(tools, "draft_shapestring", text="MCP", font_path=font_path,
                         size=5, position=[0, 0, 10], name="Text", doc_name=doc)
-    draft_objects = await _call(tools, "list_objects", doc_name=doc)
-    shape_name = next(
-        item["name"] for item in draft_objects if item["label"] == shape["name"]
-    )
+    await _call(tools, "list_objects", doc_name=doc)
+    shape_name = shape["name"]
     await _call(tools, "draft_shapestring_to_face", shapestring_name=shape_name,
                 name="TextFace", doc_name=doc)
     await _call(tools, "draft_extrude_shapestring", shapestring_name=shape_name,
@@ -519,7 +520,7 @@ _result_ = True
     for operation in ("engrave", "emboss"):
         await _call(tools, "draft_text_on_surface", text="A", target_face="Face6",
                     target_object="Box", depth=0.5, font_path=font_path, size=3,
-                    position=[3, 3, 10], operation=operation,
+                    position=[3, 3], operation=operation,
                     name=f"SurfaceText{operation}", doc_name=doc)
     for view in ("Isometric", "Front", "Back", "Top", "Bottom", "Left", "Right", "FitAll"):
         await _call(tools, "set_view_angle", view_angle=view, doc_name=doc)

@@ -198,5 +198,5 @@ Error: Execution timed out after 30000ms
 
 ## Next Steps
 
-- [Tools Overview](tools.md) - Exact generated inventory of all 111 tools
+- [Tools Overview](tools.md) - Exact generated inventory of all tools
 - [MCP Resources](resources.md) - Query FreeCAD state via MCP resources

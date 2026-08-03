@@ -1,5 +1,7 @@
 """Tests for view and GUI tools module."""
 
+import sys
+import types
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -544,6 +546,133 @@ class TestViewTools:
         assert result["name"] == "Bolt"
         mock_bridge.execute_python.assert_called_once()
 
+    @pytest.mark.asyncio
+    async def test_insert_part_from_library_reuses_open_source_document(
+        self, register_tools, mock_bridge, tmp_path, monkeypatch
+    ):
+        """FCStd import must not reopen or close the target document itself."""
+        mock_bridge.execute_python = AsyncMock(
+            return_value=ExecutionResult(
+                success=True,
+                result={
+                    "name": "InsertedPart",
+                    "label": "InsertedPart",
+                    "type_id": "Part::Feature",
+                },
+                stdout="",
+                stderr="",
+                execution_time_ms=100.0,
+            )
+        )
+        part_path = tmp_path / "target.FCStd"
+        part_path.write_bytes(b"placeholder")
 
+        insert_part = register_tools["insert_part_from_library"]
+        await insert_part(
+            part_path=str(part_path),
+            name="InsertedPart",
+            position=[50.0, 0.0, 0.0],
+            doc_name="TargetDoc",
+        )
+        code = mock_bridge.execute_python.call_args.args[0]
+
+        class FakeShape:
+            def isNull(self):
+                return False
+
+            def copy(self):
+                return FakeShape()
+
+        class FakePlacement:
+            def __init__(self):
+                self.Base = None
+
+        class FakeObject:
+            def __init__(self, name, shape=None):
+                self.Name = name
+                self.Label = name
+                self.TypeId = "Part::Feature"
+                self.Shape = shape or FakeShape()
+                self.Placement = FakePlacement()
+
+        class FakeDocument:
+            def __init__(self):
+                self.Name = "TargetDoc"
+                self.FileName = str(part_path)
+                self.Objects = [FakeObject("Box")]
+                self.events = []
+
+            def openTransaction(self, name):
+                self.events.append(("open", name))
+
+            def commitTransaction(self):
+                self.events.append(("commit",))
+
+            def abortTransaction(self):
+                self.events.append(("abort",))
+
+            def addObject(self, type_id, name):
+                obj = FakeObject(name)
+                obj.TypeId = type_id
+                self.Objects.append(obj)
+                return obj
+
+            def recompute(self):
+                self.events.append(("recompute",))
+
+        class FakeFreeCAD:
+            def __init__(self, document):
+                self.ActiveDocument = document
+                self.documents = {document.Name: document}
+                self.open_calls = []
+                self.close_calls = []
+
+            def listDocuments(self):
+                return self.documents
+
+            def openDocument(self, path):
+                self.open_calls.append(path)
+                raise AssertionError("The target FCStd file must not be reopened")
+
+            def closeDocument(self, name):
+                self.close_calls.append(name)
+                self.documents.pop(name, None)
+
+            def setActiveDocument(self, name):
+                self.ActiveDocument = self.documents[name]
+
+            def newDocument(self, name):
+                raise AssertionError(f"Unexpected new document: {name}")
+
+            @staticmethod
+            def Vector(x, y, z):
+                return (x, y, z)
+
+        document = FakeDocument()
+        freecad = FakeFreeCAD(document)
+        part_module = types.ModuleType("Part")
+
+        def read_shape(_path):
+            return FakeShape()
+
+        part_module.read = read_shape
+        monkeypatch.setitem(sys.modules, "Part", part_module)
+
+        namespace = {"FreeCAD": freecad}
+        exec(  # noqa: S102 - execute the generated FreeCAD script against fakes
+            compile(code, "<insert_part_from_library>", "exec"), namespace
+        )
+
+        assert freecad.open_calls == []
+        assert freecad.close_calls == []
+        assert document.Objects[-1].Name == "InsertedPart"
+        assert document.Objects[-1].Placement.Base == (50.0, 0.0, 0.0)
+        assert document.events == [
+            ("open", "Insert Part from Library"),
+            ("recompute",),
+            ("commit",),
+        ]
+        assert namespace["_result_"]["source_document"] == "TargetDoc"
+        assert namespace["_result_"]["source_object"] == "Box"
 
 

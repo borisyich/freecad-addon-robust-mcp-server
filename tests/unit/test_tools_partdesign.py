@@ -240,7 +240,7 @@ class TestPartDesignTools:
                 success=True,
                 result={
                     "name": "Sketch",
-                    "operations_applied": 12,
+                    "operations_applied": 13,
                     "operation_results": [],
                     "sketch_status": {},
                 },
@@ -269,7 +269,17 @@ class TestPartDesignTools:
                 "major_radius": 3,
                 "minor_radius": 2,
             },
-            {"op": "add_polygon", "center_x": 0, "center_y": 0, "radius": 3},
+            {
+                "op": "add_regular_polygon",
+                "center_x": 0,
+                "center_y": 0,
+                "radius": 3,
+            },
+            {
+                "op": "add_polyline",
+                "points": [[0, 0], [3, 0], [3, 2]],
+                "closed": True,
+            },
             {
                 "op": "add_slot",
                 "center1_x": 0,
@@ -614,6 +624,12 @@ class TestPartDesignTools:
                     "name": "Pocket",
                     "label": "Pocket",
                     "type_id": "PartDesign::Pocket",
+                    "validated": True,
+                    "shape_valid": True,
+                    "solid_count": 1,
+                    "base_volume": 100.0,
+                    "result_volume": 90.0,
+                    "removed_volume": 10.0,
                 },
                 stdout="",
                 stderr="",
@@ -1330,3 +1346,251 @@ class TestOriginFeatureResolver:
         assert resolve(body, "Z_Axis").Name == "Z_Axis001"
         assert resolve(body, "XZ_Plane").Name == "XZ_Plane001"
         assert resolve(body, "Point").Name == "Point001"
+
+
+def test_sketch_geometry_operation_separates_regular_polygon_and_polyline() -> None:
+    """Regular polygons and explicit polylines must have distinct contracts."""
+    from pydantic import ValidationError
+
+    from freecad_mcp.tools.partdesign import SketchGeometryOperation
+
+    regular = SketchGeometryOperation.model_validate(
+        {
+            "op": "add_regular_polygon",
+            "center_x": 0,
+            "center_y": 0,
+            "radius": 5,
+            "sides": 6,
+        }
+    )
+    polyline = SketchGeometryOperation.model_validate(
+        {
+            "op": "add_polyline",
+            "points": [[0, 0], [4, 0], [4, 2]],
+            "closed": True,
+        }
+    )
+
+    assert regular.op == "add_regular_polygon"
+    assert polyline.op == "add_polyline"
+    with pytest.raises(ValidationError):
+        SketchGeometryOperation.model_validate(
+            {"op": "add_polygon", "center_x": 0, "center_y": 0, "radius": 5}
+        )
+
+
+@pytest.mark.asyncio
+async def test_pocket_sketch_exposes_direction_and_explicit_base() -> None:
+    """Pocket code should set Reversed and resolve an explicit base safely."""
+    from freecad_mcp.tools.partdesign import register_partdesign_tools
+
+    mcp = MagicMock()
+    registered = {}
+    mcp.tool = lambda: lambda fn: registered.setdefault(fn.__name__, fn) or fn
+    bridge = AsyncMock()
+    bridge.execute_python = AsyncMock(
+        return_value=ExecutionResult(
+            success=True,
+            result={
+                "name": "Pocket",
+                "validated": True,
+                "shape_valid": True,
+                "solid_count": 1,
+                "base_volume": 100.0,
+                "result_volume": 80.0,
+                "removed_volume": 20.0,
+            },
+            stdout="",
+            stderr="",
+            execution_time_ms=1.0,
+        )
+    )
+
+    async def get_bridge():
+        return bridge
+
+    register_partdesign_tools(mcp, get_bridge)
+    await registered["pocket_sketch"](
+        "PocketSketch",
+        12,
+        direction="reversed",
+        base_feature_name="LinearPatternBands",
+    )
+    code = bridge.execute_python.await_args.args[0]
+    assert "_resolve_partdesign_base_feature" in code
+    assert "'LinearPatternBands'" in code
+    assert 'pocket.Reversed = \'reversed\' == "reversed"' in code
+    assert '"volume_diagnostics"' in code
+
+    await registered["pocket_sketch"](
+        "PocketSketch",
+        12,
+        type="UpToFace",
+        up_to_face="Pad.Face3",
+    )
+    up_to_face_code = bridge.execute_python.await_args.args[0]
+    assert (
+        "up_to_object_name, up_to_element = 'Pad.Face3'.rsplit(\".\", 1)"
+        in up_to_face_code
+    )
+    assert "pocket.UpToFace = up_to_face_reference" in up_to_face_code
+
+    with pytest.raises(ValueError, match="requires up_to_face"):
+        await registered["pocket_sketch"](
+            "PocketSketch", 12, type="UpToFace"
+        )
+    with pytest.raises(ValueError, match="valid only"):
+        await registered["pocket_sketch"](
+            "PocketSketch", 12, up_to_face="Pad.Face3"
+        )
+
+
+@pytest.mark.asyncio
+async def test_pattern_tools_validate_shape_tip_and_reject_nested_patterns() -> None:
+    """Pattern code should validate its result and direct agents to MultiTransform."""
+    from freecad_mcp.tools.partdesign import register_partdesign_tools
+
+    mcp = MagicMock()
+    registered = {}
+    mcp.tool = lambda: lambda fn: registered.setdefault(fn.__name__, fn) or fn
+    bridge = AsyncMock()
+    bridge.execute_python = AsyncMock(
+        return_value=ExecutionResult(
+            success=True,
+            result={"name": "Pattern", "validated": True},
+            stdout="",
+            stderr="",
+            execution_time_ms=1.0,
+        )
+    )
+
+    async def get_bridge():
+        return bridge
+
+    register_partdesign_tools(mcp, get_bridge)
+    await registered["linear_pattern"]("Pocket", length=20, occurrences=3)
+    linear_code = bridge.execute_python.await_args.args[0]
+    assert "_reject_nested_partdesign_pattern(feature)" in linear_code
+    assert "_validate_single_solid_feature(pattern, body)" in linear_code
+    assert "_configure_feature_transform_mode(pattern)" in linear_code
+    assert 'pattern.TransformMode = "Features"' not in linear_code
+    assert "_pattern_material_change_diagnostics" in linear_code
+    assert "material_change[\"consistent\"]" in linear_code
+    assert "_cleanup_failed_partdesign_feature" in linear_code
+    assert '"volume_diagnostics"' in linear_code
+    assert '"material_change_diagnostics"' in linear_code
+
+    await registered["polar_pattern"]("Pocket", angle=360, occurrences=12)
+    polar_code = bridge.execute_python.await_args.args[0]
+    assert "_reject_nested_partdesign_pattern(feature)" in polar_code
+    assert "_validate_single_solid_feature(pattern, body)" in polar_code
+    assert "_configure_feature_transform_mode(pattern)" in polar_code
+    assert 'pattern.TransformMode = "Features"' not in polar_code
+    assert "_pattern_material_change_diagnostics" in polar_code
+    assert '"material_change_diagnostics"' in polar_code
+    assert "body.Tip = feature" in polar_code
+
+
+@pytest.mark.asyncio
+async def test_multi_transform_pattern_uses_internal_empty_original_stages() -> None:
+    """Chained patterns should be represented by a native MultiTransform."""
+    from freecad_mcp.tools.partdesign import register_partdesign_tools
+
+    mcp = MagicMock()
+    registered = {}
+    mcp.tool = lambda: lambda fn: registered.setdefault(fn.__name__, fn) or fn
+    bridge = AsyncMock()
+    bridge.execute_python = AsyncMock(
+        return_value=ExecutionResult(
+            success=True,
+            result={"name": "MultiTransform", "validated": True},
+            stdout="",
+            stderr="",
+            execution_time_ms=1.0,
+        )
+    )
+
+    async def get_bridge():
+        return bridge
+
+    register_partdesign_tools(mcp, get_bridge)
+    await registered["multi_transform_pattern"](
+        "PocketSeed",
+        [
+            {"kind": "polar", "axis": "X", "angle": 360, "occurrences": 12},
+            {"kind": "linear", "direction": "X", "length": 40, "occurrences": 3},
+        ],
+    )
+    code = bridge.execute_python.await_args.args[0]
+    assert 'body.newObject(\n        "PartDesign::MultiTransform"' in code
+    assert "_configure_feature_transform_mode(multi)" in code
+    assert "_configure_feature_transform_mode(stage_obj)" in code
+    assert 'TransformMode = "Features"' not in code
+    assert "stage_obj.Originals = []" in code
+    assert "multi.Transformations = stage_objects" in code
+    assert "_pattern_material_change_diagnostics" in code
+    assert '"material_change_diagnostics"' in code
+    assert "body.Tip = multi" in code
+
+
+@pytest.mark.asyncio
+async def test_thread_helix_and_set_body_tip_are_registered_and_validated() -> None:
+    """Thread and Tip operations should be native typed tools."""
+    from freecad_mcp.tools.partdesign import register_partdesign_tools
+
+    mcp = MagicMock()
+    registered = {}
+    mcp.tool = lambda: lambda fn: registered.setdefault(fn.__name__, fn) or fn
+    bridge = AsyncMock()
+    bridge.execute_python = AsyncMock(
+        side_effect=[
+            ExecutionResult(
+                success=True,
+                result={
+                    "name": "AdditiveHelix",
+                    "validated": True,
+                    "shape_valid": True,
+                    "solid_count": 1,
+                    "base_volume": 100.0,
+                    "result_volume": 110.0,
+                    "added_volume": 10.0,
+                },
+                stdout="",
+                stderr="",
+                execution_time_ms=1.0,
+            ),
+            ExecutionResult(
+                success=True,
+                result={
+                    "body": "Body",
+                    "previous_tip": "Pocket",
+                    "tip": "Pad",
+                    "shape_valid": True,
+                    "solid_count": 1,
+                    "volume": 100.0,
+                },
+                stdout="",
+                stderr="",
+                execution_time_ms=1.0,
+            ),
+        ]
+    )
+
+    async def get_bridge():
+        return bridge
+
+    register_partdesign_tools(mcp, get_bridge)
+    thread = await registered["thread_helix"](
+        "ThreadProfile", pitch=1.5, height=12, axis="Base_X"
+    )
+    helix_code = bridge.execute_python.await_args_list[0].args[0]
+    assert thread["validated"] is True
+    assert '"PartDesign::AdditiveHelix"' in helix_code
+    assert "helix.Pitch = 1.5" in helix_code
+    assert "_validate_additive_feature" in helix_code
+
+    tip = await registered["set_body_tip"]("Body", "Pad")
+    tip_code = bridge.execute_python.await_args_list[1].args[0]
+    assert tip["tip"] == "Pad"
+    assert "_is_valid_single_solid_feature(feature)" in tip_code
+    assert "body.Tip = feature" in tip_code

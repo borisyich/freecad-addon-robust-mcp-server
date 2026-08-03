@@ -83,7 +83,7 @@ An [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server that 
 
 ## Features
 
-- **111 MCP Tools**: Comprehensive CAD operations including primitives, PartDesign, booleans, export
+- **115 MCP Tools**: Comprehensive CAD operations including primitives, PartDesign, booleans, export
 - **Multiple Connection Modes**: XML-RPC (recommended), JSON-RPC socket, or embedded
 - **GUI & Headless Support**: Full modeling in headless mode, plus screenshots/colors in GUI mode
 - **Macro Development**: Create, edit, run, and template FreeCAD macros via MCP
@@ -347,7 +347,7 @@ FREECAD_MODE=embedded freecad-mcp
 
 ### Available Tools
 
-The server currently registers **111 MCP tools**. The tables below list common tools rather than duplicating the exact inventory. See the generated [Tools Overview](docs/guide/tools.md) or the MCP client's discovered tool list for the authoritative inventory; [MCP Tools Reference](docs/MCP_TOOLS_REFERENCE.md) provides detailed examples for core tools, while `freecad://capabilities` is a curated runtime overview. Tools marked with **GUI** require FreeCAD to be running in GUI mode; they return a structured error in headless mode.
+The server currently registers **115 MCP tools**. The tables below list common tools rather than duplicating the exact inventory. See the generated [Tools Overview](docs/guide/tools.md) or the MCP client's discovered tool list for the authoritative inventory; [MCP Tools Reference](docs/MCP_TOOLS_REFERENCE.md) provides detailed examples for core tools, while `freecad://capabilities` is a curated runtime overview. Tools marked with **GUI** require FreeCAD to be running in GUI mode; they return a structured error in headless mode.
 
 #### Execution & Debugging (5 tools)
 
@@ -384,7 +384,7 @@ The server currently registers **111 MCP tools**. The tables below list common t
 | ------------------- | -------------------------------------------------- | ---- |
 | `list_objects`      | List all objects in a document                     | All  |
 | `inspect_object`    | Get detailed object info (properties, shape, etc.) | All  |
-| `edit_object`       | Modify properties of an existing object            | All  |
+| `edit_object`       | Modify properties; resolve names for link properties | All  |
 | `delete_object`     | Delete an object from a document                   | All  |
 | `set_placement`     | Set object position and rotation                   | All  |
 | `scale_object`      | Scale an object uniformly or non-uniformly         | All  |
@@ -394,11 +394,12 @@ The server currently registers **111 MCP tools**. The tables below list common t
 | `boolean_operation` | Fuse, cut, or intersect objects                    | All  |
 | `selection`         | Get, set, or clear the GUI selection               | GUI  |
 
-#### PartDesign - Sketching and Core Features (12 common tools)
+#### PartDesign - Sketching and Core Features (14 common tools)
 
 | Tool                       | Description                                                | Mode |
 | -------------------------- | ---------------------------------------------------------- | ---- |
 | `create_partdesign_body`   | Create a PartDesign::Body container                        | All  |
+| `set_body_tip`             | Set and validate the active Body Tip                       | All  |
 | `create_sketch`            | Create a sketch with a typed plane/face/datum support      | All  |
 | `edit_sketch_geometry`     | Apply an ordered batch of sketch geometry edits            | All  |
 | `edit_sketch_constraints`  | Apply an ordered batch of Sketcher constraint edits        | All  |
@@ -406,17 +407,19 @@ The server currently registers **111 MCP tools**. The tables below list common t
 | `pocket_sketch`            | Cut into solid using a sketch (subtractive)                | All  |
 | `revolution_sketch`        | Revolve a sketch around an axis (additive)                 | All  |
 | `groove_sketch`            | Revolve a sketch around an axis (subtractive)              | All  |
+| `thread_helix`             | Create additive/subtractive editable helical thread        | All  |
 | `create_hole`              | Create validated holes from a supported sketch             | All  |
 | `create_cylindrical_cut`   | Create radial/off-face cylindrical cuts                    | All  |
 | `loft_sketches`            | Create a loft through multiple sketches                    | All  |
 | `sweep_sketch`             | Sweep a profile along a spine path                         | All  |
 
-#### PartDesign - Patterns & Edges (5 tools)
+#### PartDesign - Patterns & Edges (6 common tools)
 
 | Tool               | Description                                | Mode |
 | ------------------ | ------------------------------------------ | ---- |
 | `linear_pattern`   | Create linear pattern of a feature         | All  |
-| `polar_pattern`    | Create polar/circular pattern of a feature | All  |
+| `polar_pattern`    | Create validated polar pattern of one feature    | All  |
+| `multi_transform_pattern` | Combine linear/polar stages natively | All |
 | `mirrored_feature` | Mirror a feature across a plane            | All  |
 | `fillet_edges`     | Add fillets (rounded edges)                | All  |
 | `chamfer_edges`    | Add chamfers (beveled edges)               | All  |

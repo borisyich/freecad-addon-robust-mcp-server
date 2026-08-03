@@ -1042,6 +1042,7 @@ class TestSpreadsheetTools:
             "spreadsheet_get_aliases",
             "spreadsheet_clear_cell",
             "spreadsheet_bind_property",
+            "spreadsheet_apply_batch",
             "spreadsheet_get_cell_range",
             "spreadsheet_import_csv",
             "spreadsheet_export_csv",
@@ -1049,3 +1050,75 @@ class TestSpreadsheetTools:
 
         for tool_name in expected_tools:
             assert tool_name in register_tools, f"Tool {tool_name} not registered"
+
+
+@pytest.mark.asyncio
+async def test_spreadsheet_apply_batch_uses_one_transaction_and_recompute() -> None:
+    """Batch updates should cross the bridge once and recompute once."""
+    from freecad_mcp.bridge.base import ExecutionResult
+    from freecad_mcp.tools.spreadsheet import register_spreadsheet_tools
+
+    mcp = MagicMock()
+    registered = {}
+    mcp.tool = lambda: lambda fn: registered.setdefault(fn.__name__, fn) or fn
+    bridge = AsyncMock()
+    bridge.execute_python = AsyncMock(
+        return_value=ExecutionResult(
+            success=True,
+            result={
+                "success": True,
+                "spreadsheet": "Params",
+                "cells_applied": 2,
+                "aliases_applied": 2,
+                "bindings_applied": 1,
+                "cells": [],
+                "bindings": [],
+            },
+            stdout="",
+            stderr="",
+            execution_time_ms=1.0,
+        )
+    )
+
+    async def get_bridge():
+        return bridge
+
+    register_spreadsheet_tools(mcp, get_bridge)
+    result = await registered["spreadsheet_apply_batch"](
+        "Params",
+        cells=[{"cell": "A1", "value": 10}, {"cell": "A2", "value": 20}],
+        aliases=[
+            {"cell": "A1", "alias": "Length"},
+            {"cell": "A2", "alias": "Width"},
+        ],
+        bindings=[
+            {
+                "alias": "Length",
+                "target_object": "Pad",
+                "target_property": "Length",
+            }
+        ],
+    )
+
+    assert result["cells_applied"] == 2
+    bridge.execute_python.assert_awaited_once()
+    code = bridge.execute_python.await_args.args[0]
+    assert 'doc.openTransaction("Apply Spreadsheet Batch")' in code
+    assert code.count("doc.recompute()") == 1
+    assert "pending_aliases" in code
+    assert "target.setExpression" in code
+
+
+def test_spreadsheet_batch_models_reject_bad_cells_and_aliases() -> None:
+    """Batch input validation should fail before a FreeCAD call."""
+    from pydantic import ValidationError
+
+    from freecad_mcp.tools.spreadsheet import (
+        SpreadsheetAliasUpdate,
+        SpreadsheetCellUpdate,
+    )
+
+    with pytest.raises(ValidationError):
+        SpreadsheetCellUpdate(cell="1A", value=10)
+    with pytest.raises(ValidationError):
+        SpreadsheetAliasUpdate(cell="A1", alias="bad alias")

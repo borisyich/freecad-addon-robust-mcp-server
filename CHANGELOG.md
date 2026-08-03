@@ -77,6 +77,11 @@
 - Consolidated file exchange into `export` and `import`, with explicit format routing and consistent import results.
 - Consolidated Box, Cylinder, Sphere, Cone, Torus, Wedge, and Helix creation into the typed `create_primitive` tool.
 - Expanded the engineering Skill with flat-pattern recognition, panel-and-bend graphs, neutral-axis/developed-length rules, formed/unfolded validation, and a FreeCAD fallback strategy for stamped and bent sheet-metal parts.
+- Split the ambiguous sketch `add_polygon` operation into `add_regular_polygon` and `add_polyline`.
+- Hardened PartDesign pattern tools with Shape/Body Tip checks, rollback, before/after volume diagnostics, causal `AddSubShape` material-change checks, and a native `multi_transform_pattern` for combined linear/polar repetition.
+- Added explicit Pocket direction/base selection, validated `Feature.FaceN` support for `UpToFace`, `set_body_tip`, and additive/subtractive `thread_helix`.
+- Added link-property name resolution to `edit_object` and atomic `spreadsheet_apply_batch`.
+- Fixed parametric-validator State serialization and excluded datum reference geometry from solid volume/bounds metrics.
 
 This project uses **component-specific versioning**. Each component has its own
 release notes and version history.

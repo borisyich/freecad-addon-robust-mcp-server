@@ -1,6 +1,6 @@
 # FreeCAD Robust MCP Server Tools Reference
 
-This document provides detailed signatures and examples for core MCP tools. It is not the exact inventory of all registered tools. Use [Tools Overview](guide/tools.md) or the MCP client's discovered tool list for the authoritative 111-tool inventory.
+This document provides detailed signatures and examples for core MCP tools. It is not the exact inventory of all registered tools. Use [Tools Overview](guide/tools.md) or the MCP client's discovered tool list for the authoritative 115-tool inventory.
 
 ---
 
@@ -15,8 +15,8 @@ The exact generated inventory is grouped as follows:
 | Execution | 5 |
 | Documents | 7 |
 | Objects / Part | 32 |
-| PartDesign / Sketcher | 25 |
-| Spreadsheet | 10 |
+| PartDesign / Sketcher | 28 |
+| Spreadsheet | 11 |
 | Draft | 6 |
 | Images | 3 |
 | Checkpoints | 1 |
@@ -24,7 +24,7 @@ The exact generated inventory is grouped as follows:
 | Validation | 5 |
 | Export / Import | 2 |
 | Macros | 6 |
-| **Total** | **111** |
+| **Total** | **115** |
 
 The sections below retain deeper examples for commonly used tools; they do not repeat every generated entry.
 
@@ -256,7 +256,7 @@ create_object(
 
 #### edit_object
 
-Modify object properties.
+Modify object properties. For `App::PropertyLink`, `LinkList`, `LinkSub`, and `LinkSubList` properties, string object names such as `"Pad"` or `"Pad.Face3"` are resolved through the selected document before assignment. Non-link string properties remain unchanged.
 
 ```python
 edit_object(
@@ -265,6 +265,8 @@ edit_object(
     doc_name: str | None = None
 ) -> dict
 ```
+
+For `Body.Tip`, prefer `set_body_tip`: it verifies Body membership, one valid solid, positive volume, recompute state, and the final Tip link. `edit_object` provides flexible type-aware assignment but does not replace feature-specific validation.
 
 #### delete_object
 
@@ -430,6 +432,18 @@ If `support` is omitted, the sketch defaults to the `XY_Plane` origin support.
 The result includes the resolved FreeCAD `support` reference and
 `support_kind`.
 
+#### set_body_tip
+
+Set the active result of a Body to an existing single-solid feature. The tool validates Body membership, Shape validity, one-solid topology, and the final Tip assignment; it restores the previous Tip on failure.
+
+```python
+set_body_tip(
+    body_name: str,
+    feature_name: str,
+    doc_name: str | None = None,
+) -> dict
+```
+
 ### Sketch Geometry and Constraints
 
 #### edit_sketch_geometry
@@ -438,7 +452,7 @@ Apply an ordered batch of sketch geometry edits in one FreeCAD transaction and
 one recompute. Supported `op` values are:
 
 - `add_rectangle`, `add_circle`, `add_line`, `add_arc`, `add_point`;
-- `add_ellipse`, `add_polygon`, `add_slot`, `add_bspline`;
+- `add_ellipse`, `add_regular_polygon`, `add_polyline`, `add_slot`, `add_bspline`;
 - `add_external_geometry`, `delete_geometry`, `toggle_construction`.
 
 ```python
@@ -458,9 +472,15 @@ edit_sketch_geometry(
         {"op": "add_rectangle", "x": 0, "y": 0, "width": 80, "height": 60},
         {"op": "add_circle", "center_x": 15, "center_y": 30, "radius": 3},
         {"op": "add_circle", "center_x": 65, "center_y": 30, "radius": 3},
+        {"op": "add_regular_polygon", "center_x": 40, "center_y": 30, "radius": 8, "sides": 6},
+        {"op": "add_polyline", "points": [[0, 0], [10, 0], [10, 5]], "closed": False},
     ],
 )
 ```
+
+`add_regular_polygon` creates a center/radius-based regular polygon inside an existing Sketcher sketch. `add_polyline` creates an explicit open or closed chain of Sketcher line segments. They are intentionally separate operations; the former does not accept arbitrary vertices.
+
+These do not duplicate the standalone Part tools: `create_regular_polygon` creates a `Part::RegularPolygon` document object, while `make_wire` creates a 3D `Part::Feature` wire from `[x, y, z]` points. Use the sketch operations for PartDesign profiles and the standalone tools for Part workbench geometry.
 
 The result contains one entry per operation and the final sketch solver/profile
 status. Invalid operation payloads are rejected before FreeCAD is modified.
@@ -573,10 +593,15 @@ pocket_sketch(
     sketch_name: str,
     length: float,
     type: str = "Length",  # "Length", "ThroughAll", "UpToFirst", "UpToFace"
+    direction: str = "normal",  # "normal" or "reversed"
+    base_feature_name: str | None = None,
+    up_to_face: str | None = None,  # required for UpToFace: "Pad.Face3"
     name: str | None = None,
-    doc_name: str | None = None
+    doc_name: str | None = None,
 ) -> dict
 ```
+
+`direction` is relative to the sketch normal and does not depend on GUI selection. `base_feature_name` is authoritative when supplied. Without it, the tool uses a valid preceding Body Tip when possible, then the nearest valid preceding single-solid feature. `type="UpToFace"` requires an explicit and prevalidated `up_to_face="Feature.FaceN"`; supplying that parameter for another type is rejected. The response reports `base_feature`, `base_selection`, global `effective_direction`, Shape/Tip evidence, and before/after volume diagnostics.
 
 #### groove_sketch
 
@@ -593,6 +618,27 @@ groove_sketch(
     doc_name: str | None = None
 ) -> dict
 ```
+
+#### thread_helix
+
+Create native editable helical thread geometry from a closed profile sketch. Use `additive` for an external thread and `subtractive` for an internal thread or groove. This tool creates geometry; it does not infer a standard thread profile or tolerance class.
+
+```python
+thread_helix(
+    sketch_name: str,
+    pitch: float,
+    height: float,
+    operation: str = "additive",  # "additive" or "subtractive"
+    axis: str = "Sketch_H",       # Base_X/Y/Z or Sketch_V/H
+    left_handed: bool = False,
+    reversed: bool = False,
+    base_feature_name: str | None = None,
+    name: str | None = None,
+    doc_name: str | None = None,
+) -> dict
+```
+
+The response includes the resolved base, axis, turn count, Shape/Tip status, and volume diagnostics.
 
 #### create_hole
 
@@ -670,7 +716,7 @@ chamfer_edges(
 
 #### linear_pattern
 
-Repeat a feature in a linear direction.
+Repeat one non-pattern feature in a linear direction. The result is rolled back when Shape is null/invalid, does not contain exactly one solid, or is not the Body Tip.
 
 ```python
 linear_pattern(
@@ -685,7 +731,7 @@ linear_pattern(
 
 #### polar_pattern
 
-Repeat a feature around an axis.
+Repeat one non-pattern feature around an axis. The result is rolled back when Shape is null/invalid, does not contain exactly one solid, or is not the Body Tip.
 
 ```python
 polar_pattern(
@@ -697,6 +743,29 @@ polar_pattern(
     doc_name: str | None = None
 ) -> dict
 ```
+
+Both single-pattern tools use the first `TransformMode` enumeration entry advertised by the running FreeCAD build. This is the feature-transform mode, but its displayed label differs between FreeCAD versions (for example, `Features` or `Transform tool shapes`). The API contract still treats `feature_name` as an additive/subtractive seed rather than the whole Body. Responses keep `transform_mode` as the selected string and add `transform_mode_options` for diagnostics. They return `base_volume`, `result_volume`, and `volume_diagnostics`. They also compare the actual volume delta with the effective transformed `AddSubShape` and return `material_change_diagnostics`. When that causal check is available and inconsistent, the feature is rolled back even if OpenCASCADE reports a formally valid solid. The neutral retained/change ratios remain evidence for the agent rather than a general proof of design intent. Applying a pattern directly to another pattern is rejected with guidance to use `multi_transform_pattern`.
+
+#### multi_transform_pattern
+
+Combine two or more linear/polar stages in one native `PartDesign::MultiTransform`. This is the supported replacement for `linear_pattern(polar_pattern(...))` or the reverse chain.
+
+```python
+multi_transform_pattern(
+    feature_name: str,
+    transformations: list[dict],
+    name: str | None = None,
+    doc_name: str | None = None,
+) -> dict
+
+# Example stages
+[
+    {"kind": "linear", "direction": "X", "length": 52, "occurrences": 3},
+    {"kind": "polar", "axis": "X", "angle": 360, "occurrences": 12},
+]
+```
+
+Internal transformation stages are owned by the MultiTransform and intentionally have no separate `Originals`; the original seed is assigned once to the parent feature. The final MultiTransform receives the same Shape, Body Tip, volume-ratio, and causal `AddSubShape` checks as the single-pattern tools.
 
 #### mirrored_feature
 
@@ -710,6 +779,26 @@ mirrored_feature(
     doc_name: str | None = None
 ) -> dict
 ```
+
+---
+
+## Spreadsheet Tools
+
+### spreadsheet_apply_batch
+
+Apply cell values, aliases, and object-property bindings to an existing Spreadsheet in one transaction and one final recompute. Use this instead of dozens of independent setter calls when creating a parameter table. Binding targets, properties, and aliases are validated before mutation.
+
+```python
+spreadsheet_apply_batch(
+    spreadsheet_name: str,
+    cells: list[dict] | None = None,       # {"cell": "B2", "value": "42 mm"}
+    aliases: list[dict] | None = None,     # {"cell": "B2", "alias": "Length"}
+    bindings: list[dict] | None = None,    # {"alias": "Length", "target_object": "Pad", "target_property": "Length"}
+    doc_name: str | None = None,
+) -> dict
+```
+
+At least one non-empty list is required. Aliases created in the same batch may immediately be used by bindings.
 
 ---
 
@@ -1003,6 +1092,10 @@ insert_part_from_library(
 ) -> dict
 ```
 
+For FCStd sources, an already open document with the same normalized file path is
+reused and is never closed by the tool. This also supports copying a Shape from
+the target document's own saved FCStd file without invalidating the live document.
+
 ### Utility
 
 Console diagnostics and document recomputation use the canonical tools documented
@@ -1029,6 +1122,8 @@ The report includes:
 
 - document metadata and counts;
 - each `PartDesign::Body`, shape validity, current Tip, and ordered history;
+- status strings serialized as complete entries (for example `["Valid"]`, not one character per entry);
+- datum planes/lines/points marked as reference geometry, with non-applicable volume and bounding-box metrics omitted;
 - sketches with solver state (`fully_constrained`, `under_constrained`,
   `over_constrained`, `conflicting`, `redundant`, or `solver_error`), remaining
   degrees of freedom, solver-reported conflicting/redundant constraint indices,
@@ -1036,7 +1131,8 @@ The report includes:
 - standalone sketches, Spreadsheets, and solid objects outside Bodies;
 - findings with `error` or `warning` severity;
 - limitations: it does not prove drawing correspondence, manufacturing process,
-  tolerances, or design intent.
+  tolerances, design intent, or that a valid feature changed the expected amount
+  of material. Use feature-level before/after volume diagnostics and visual checks.
 
 Set `include_sketch_constraints=True` only when individual constraint details are
 needed; it can make the response large.

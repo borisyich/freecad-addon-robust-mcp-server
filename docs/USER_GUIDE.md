@@ -248,7 +248,7 @@ Create a plate with a row of 6 holes spaced 15mm apart.
 
 1. Creates the base plate
 1. Creates one hole feature
-1. Uses `linear_pattern()` to repeat the hole
+1. Uses `linear_pattern()` to repeat the hole. For combined linear and circular repetition, uses `multi_transform_pattern()` instead of chaining one Pattern onto another.
 
 ---
 
@@ -332,7 +332,21 @@ oil_hole = create_cylindrical_cut(
 # 5. Add slot (as pocket)
 create_sketch(body_name="Body", support={"kind": "body_tip_face", "face": "Face1"}, name="SlotSketch")
 edit_sketch_geometry(sketch_name="SlotSketch", operations=[{"op": "add_rectangle", "x": 0, "y": 0, "width": 10, "height": 20}])
-pocket_sketch(sketch_name="SlotSketch", length=5, type="ThroughAll")
+pocket_sketch(
+    sketch_name="SlotSketch",
+    length=5,
+    type="ThroughAll",
+    direction="reversed",
+    base_feature_name="Pad",
+)
+
+# For an up-to-face pocket, name the target explicitly:
+# pocket_sketch(
+#     sketch_name="SlotSketch",
+#     length=5,
+#     type="UpToFace",
+#     up_to_face="Pad.Face6",
+# )
 
 # 6. Add fillets
 fillet_edges(object_name="...", radius=3)
@@ -367,6 +381,15 @@ principal target views that exist—front, matching side, top, then isometric.
 metric; use formal checkpoints only when the task benefits from them.
 
 ---
+
+## Reliable PartDesign Feature Selection
+
+- `pocket_sketch` accepts `direction="normal"|"reversed"` and an optional explicit `base_feature_name`. Without an explicit base it prefers a valid preceding Body Tip, then the nearest valid preceding solid.
+- `set_body_tip` changes the active Body result without using `edit_object` or GUI selection and validates the resulting Shape/Tip contract.
+- `linear_pattern` and `polar_pattern` are for one transformation of a non-pattern seed. Use `multi_transform_pattern` for combined linear and polar stages.
+- Pattern, Pocket, and thread responses include before/after volume diagnostics. A valid Shape is not proof that the intended amount of material changed.
+- `thread_helix` creates native additive or subtractive helical geometry from an editable profile sketch.
+- `spreadsheet_apply_batch` is the efficient way to create values, aliases, and property bindings in one transaction.
 
 ## Tips and Best Practices
 

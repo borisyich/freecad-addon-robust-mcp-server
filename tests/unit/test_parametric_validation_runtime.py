@@ -119,7 +119,7 @@ def test_generated_report_describes_body_tip_history_and_sketch(monkeypatch) -> 
             return 0
 
         def getStatusString(self):  # noqa: N802
-            return []
+            return "Valid"
 
         def getConstruction(self, index):  # noqa: N802, ARG002
             return False
@@ -155,6 +155,18 @@ def test_generated_report_describes_body_tip_history_and_sketch(monkeypatch) -> 
             return []
 
     sketch = FakeSketch()
+    datum = SimpleNamespace(
+        Name="DatumPlane",
+        Label="Datum Plane",
+        TypeId="PartDesign::Plane",
+        State="Valid",
+        ViewObject=SimpleNamespace(Visibility=False),
+        Placement=placement,
+        Shape=FakeShape(),
+        ExpressionEngine=[],
+        InList=[],
+        OutList=[],
+    )
     pad = SimpleNamespace(
         Name="Pad",
         Label="Pad",
@@ -175,14 +187,14 @@ def test_generated_report_describes_body_tip_history_and_sketch(monkeypatch) -> 
         ViewObject=SimpleNamespace(Visibility=True),
         Placement=placement,
         Shape=FakeShape(),
-        Group=[sketch, pad],
+        Group=[sketch, datum, pad],
         Tip=pad,
     )
     doc = SimpleNamespace(
         Name="Bracket",
         Label="Bracket",
         FileName="Bracket.FCStd",
-        Objects=[body, sketch, pad],
+        Objects=[body, sketch, datum, pad],
         recompute=lambda: None,
     )
     fake_freecad = SimpleNamespace(
@@ -205,13 +217,21 @@ def test_generated_report_describes_body_tip_history_and_sketch(monkeypatch) -> 
     assert report["bodies"][0]["tip"]["name"] == "Pad"
     assert [item["name"] for item in report["bodies"][0]["history"]] == [
         "BaseSketch",
+        "DatumPlane",
         "Pad",
     ]
     sketch_report = report["bodies"][0]["sketches"][0]
+    assert sketch_report["state"] == ["Valid"]
     assert sketch_report["analysis"]["solver"]["status"] == "under_constrained"
     assert sketch_report["analysis"]["solver"]["remaining_dof"] == 2
     assert sketch_report["named_constraint_count"] == 1
     assert sketch_report["constraints"][0]["name"] == "Width"
+    datum_report = report["bodies"][0]["history"][1]
+    assert datum_report["state"] == ["Valid"]
+    assert datum_report["shape"]["reference_geometry"] is True
+    assert datum_report["shape"]["metrics_applicable"] is False
+    assert datum_report["shape"]["volume"] is None
+    assert datum_report["shape"]["bounding_box"] is None
     assert any(
         item["category"] == "sketch_under_constrained"
         for item in report["findings"]

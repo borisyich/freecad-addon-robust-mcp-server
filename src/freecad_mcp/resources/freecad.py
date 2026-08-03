@@ -588,7 +588,7 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                         },
                         {
                             "name": "edit_object",
-                            "description": "Modify object properties",
+                            "description": "Modify properties and resolve string names for link properties",
                             "key_params": ["object_name", "properties"],
                         },
                         {
@@ -648,6 +648,11 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                             "key_params": ["body_name", "support"],
                         },
                         {
+                            "name": "set_body_tip",
+                            "description": "Set and validate the active feature of a PartDesign Body",
+                            "key_params": ["body_name", "feature_name"],
+                        },
+                        {
                             "name": "edit_sketch_geometry",
                             "description": "Batch geometry edits in one sketch transaction",
                             "key_params": ["sketch_name", "operations", "doc_name"],
@@ -659,8 +664,14 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                         },
                         {
                             "name": "pocket_sketch",
-                            "description": "Cut using sketch (subtractive)",
-                            "key_params": ["sketch_name", "length"],
+                            "description": "Validated sketch cut with explicit direction and optional base",
+                            "key_params": [
+                                "sketch_name",
+                                "length",
+                                "direction",
+                                "base_feature_name",
+                                "up_to_face",
+                            ],
                         },
                         {
                             "name": "revolution_sketch",
@@ -671,6 +682,17 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                             "name": "groove_sketch",
                             "description": "Cut by revolving sketch (subtractive revolve)",
                             "key_params": ["sketch_name", "axis", "angle"],
+                        },
+                        {
+                            "name": "thread_helix",
+                            "description": "Create additive or subtractive editable helical thread geometry",
+                            "key_params": [
+                                "sketch_name",
+                                "pitch",
+                                "height",
+                                "operation",
+                                "axis",
+                            ],
                         },
                         {
                             "name": "loft_sketches",
@@ -771,13 +793,18 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                         },
                         {
                             "name": "polar_pattern",
-                            "description": "Create circular/polar pattern",
+                            "description": "Create validated circular/polar pattern",
                             "key_params": [
                                 "feature_name",
                                 "axis",
                                 "occurrences",
                                 "angle",
                             ],
+                        },
+                        {
+                            "name": "multi_transform_pattern",
+                            "description": "Combine linear and polar stages without nesting Pattern features",
+                            "key_params": ["feature_name", "transformations"],
                         },
                         {
                             "name": "mirrored_feature",
@@ -799,6 +826,16 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                             "name": "spreadsheet_set_cell",
                             "description": "Set cell value (number, string, or formula)",
                             "key_params": ["spreadsheet_name", "cell", "value"],
+                        },
+                        {
+                            "name": "spreadsheet_apply_batch",
+                            "description": "Apply cells, aliases, and bindings in one transaction",
+                            "key_params": [
+                                "spreadsheet_name",
+                                "cells",
+                                "aliases",
+                                "bindings",
+                            ],
                         },
                         {
                             "name": "spreadsheet_get_cell",

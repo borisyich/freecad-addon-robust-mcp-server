@@ -26,6 +26,9 @@ from typing import Any
 from freecad_mcp.bridge._object_inspection_runtime import (
     build_object_inspection_code,
 )
+from freecad_mcp.bridge._object_property_runtime import (
+    OBJECT_PROPERTY_COERCION_RUNTIME,
+)
 from freecad_mcp.bridge._screenshot_runtime import build_screenshot_code
 from freecad_mcp.bridge.base import (
     ConnectionStatus,
@@ -714,6 +717,8 @@ _result_ = {{
     ) -> ObjectInfo:
         """Edit object properties."""
         code = f"""
+{OBJECT_PROPERTY_COERCION_RUNTIME}
+
 doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
 if doc is None:
     raise ValueError("No document found")
@@ -725,10 +730,17 @@ if obj is None:
 # Wrap in transaction for undo support
 doc.openTransaction("Edit Object")
 try:
-    # Set properties
+    # Set properties with type-aware conversion for object-link properties.
     for prop_name, prop_val in {properties!r}.items():
-        if hasattr(obj, prop_name):
-            setattr(obj, prop_name, prop_val)
+        if not hasattr(obj, prop_name):
+            raise ValueError(
+                f"Property {{prop_name!r}} not found on object {{obj.Name!r}}"
+            )
+        setattr(
+            obj,
+            prop_name,
+            _coerce_object_property_value(doc, obj, prop_name, prop_val),
+        )
 
     doc.recompute()
     doc.commitTransaction()

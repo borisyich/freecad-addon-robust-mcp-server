@@ -76,7 +76,7 @@ Try these example prompts with your AI assistant:
 
 ## Step 4: Explore Available Tools
 
-The MCP server provides 111 tools organized into categories:
+The MCP server provides 100+ tools organized into categories:
 
 | Category   | Examples                                             |
 | ---------- | ---------------------------------------------------- |

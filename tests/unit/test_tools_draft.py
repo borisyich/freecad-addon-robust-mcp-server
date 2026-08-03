@@ -751,6 +751,25 @@ class TestDraftTools:
             )
 
     @pytest.mark.asyncio
+    async def test_draft_text_on_surface_rejects_3d_position(
+        self, register_tools: RegisteredTools, mock_bridge: AsyncMock
+    ) -> None:
+        """Reject a 3D position because the surface-position contract is 2D."""
+        text_on_surface = register_tools["draft_text_on_surface"]
+
+        with pytest.raises(
+            ValueError, match="position must have exactly 2 elements, got 3"
+        ):
+            await text_on_surface(
+                text="TEST",
+                target_face="Face6",
+                target_object="Box",
+                position=[3, 3, 10],
+            )
+
+        mock_bridge.execute_python.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_draft_text_on_surface_face_not_found(
         self, register_tools: RegisteredTools, mock_bridge: AsyncMock
     ) -> None:

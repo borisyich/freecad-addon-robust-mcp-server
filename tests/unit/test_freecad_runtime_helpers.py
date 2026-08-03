@@ -141,6 +141,100 @@ def test_single_solid_validation_rejects_stale_body_tip() -> None:
     assert any("Body Tip" in reason for reason in result["reasons"])
 
 
+class _MaterialShape:
+    def __init__(
+        self,
+        volume: float,
+        *,
+        common_volume: float = 0.0,
+        cut_volume: float = 0.0,
+        valid: bool = True,
+        null: bool = False,
+    ) -> None:
+        self.Volume = volume
+        self._common_volume = common_volume
+        self._cut_volume = cut_volume
+        self._valid = valid
+        self._null = null
+
+    def isNull(self) -> bool:
+        return self._null
+
+    def isValid(self) -> bool:
+        return self._valid
+
+    def common(self, _other: object) -> "_MaterialShape":
+        return _MaterialShape(self._common_volume)
+
+    def cut(self, _other: object) -> "_MaterialShape":
+        return _MaterialShape(self._cut_volume)
+
+
+class _PatternFeature:
+    def __init__(self, tool_shape: _MaterialShape) -> None:
+        self.AddSubShape = tool_shape
+
+
+def test_pattern_material_change_diagnostics_detects_near_empty_result() -> None:
+    """A valid but causally impossible pattern result must be rejected."""
+    helpers = _load_helpers(FEATURE_VALIDATION_RUNTIME_HELPERS)
+    diagnose = helpers["_pattern_material_change_diagnostics"]
+
+    base = _MaterialShape(100.0, common_volume=20.0)
+    pattern = _PatternFeature(_MaterialShape(20.0))
+
+    consistent = diagnose(pattern, base, 80.0)
+    broken = diagnose(pattern, base, 1.0)
+
+    assert consistent["available"] is True
+    assert consistent["consistent"] is True
+    assert consistent["expected_material_change"] == 20.0
+    assert consistent["actual_material_change"] == 20.0
+    assert broken["available"] is True
+    assert broken["consistent"] is False
+    assert broken["actual_material_change"] == 99.0
+
+
+class _TransformFeature:
+    def __init__(self, options: list[str], current: str) -> None:
+        self._options = options
+        self._transform_mode = current
+
+    @property
+    def TransformMode(self) -> str:
+        return self._transform_mode
+
+    @TransformMode.setter
+    def TransformMode(self, value: str) -> None:
+        if value not in self._options:
+            raise ValueError(f"{value!r} is not part of the enumeration")
+        self._transform_mode = value
+
+    def getEnumerationsOfProperty(self, name: str) -> list[str]:
+        assert name == "TransformMode"
+        return self._options
+
+
+def test_transform_mode_uses_freecad_advertised_enum_instead_of_fixed_label() -> None:
+    """FreeCAD 1.0 builds may not expose the newer ``Features`` label."""
+    helpers = _load_helpers(FEATURE_VALIDATION_RUNTIME_HELPERS)
+    configure = helpers["_configure_feature_transform_mode"]
+    feature = _TransformFeature(
+        ["Transform tool shapes", "Transform whole shape"],
+        "Transform whole shape",
+    )
+
+    result = configure(feature)
+
+    assert feature.TransformMode == "Transform tool shapes"
+    assert result == {
+        "available": True,
+        "value": "Transform tool shapes",
+        "options": ["Transform tool shapes", "Transform whole shape"],
+        "changed": True,
+    }
+
+
 class _Wire:
     def __init__(self, closed: bool) -> None:
         self._closed = closed
