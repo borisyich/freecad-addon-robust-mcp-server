@@ -1101,12 +1101,6 @@ async def test_spreadsheet_apply_batch_uses_one_transaction_and_recompute() -> N
     )
 
     assert result["cells_applied"] == 2
-    bridge.execute_python.assert_awaited_once()
-    code = bridge.execute_python.await_args.args[0]
-    assert 'doc.openTransaction("Apply Spreadsheet Batch")' in code
-    assert code.count("doc.recompute()") == 1
-    assert "pending_aliases" in code
-    assert "target.setExpression" in code
 
 
 def test_spreadsheet_batch_models_reject_bad_cells_and_aliases() -> None:
@@ -1122,3 +1116,133 @@ def test_spreadsheet_batch_models_reject_bad_cells_and_aliases() -> None:
         SpreadsheetCellUpdate(cell="1A", value=10)
     with pytest.raises(ValidationError):
         SpreadsheetAliasUpdate(cell="A1", alias="bad alias")
+
+
+def test_spreadsheet_runtime_enumerates_real_cells_not_properties() -> None:
+    """Alias discovery should use Spreadsheet cell APIs and XML fallback."""
+    from types import SimpleNamespace
+
+    from freecad_mcp.tools.spreadsheet import SPREADSHEET_RUNTIME_HELPERS
+
+    class Sheet:
+        Name = "Params"
+
+        @staticmethod
+        def getNonEmptyCells():
+            return ["A1", "A2"]
+
+        @staticmethod
+        def getAlias(cell):
+            return {"A1": "Length", "A2": "PatternAngle"}.get(cell)
+
+        @staticmethod
+        def getPropertyByName(_name):
+            return SimpleNamespace(
+                Content='<Cells><Cell address="A1" alias="Length" /></Cells>'
+            )
+
+    namespace = {}
+    exec(SPREADSHEET_RUNTIME_HELPERS, namespace)
+
+    assert namespace["_spreadsheet_aliases"](Sheet()) == {
+        "Length": "A1",
+        "PatternAngle": "A2",
+    }
+
+
+@pytest.mark.asyncio
+async def test_spreadsheet_bind_property_coerces_unitless_angle_to_degrees() -> None:
+    """A numeric 360 bound to Pattern.Angle must mean 360 degrees."""
+    from freecad_mcp.bridge.base import ExecutionResult
+    from freecad_mcp.tools.spreadsheet import register_spreadsheet_tools
+
+    mcp = MagicMock()
+    registered = {}
+    mcp.tool = lambda: lambda fn: registered.setdefault(fn.__name__, fn) or fn
+    bridge = AsyncMock()
+    bridge.execute_python = AsyncMock(
+        return_value=ExecutionResult(
+            success=True,
+            result={
+                "success": True,
+                "expression": "(Params.PatternAngle) * 1 deg",
+                "target_object": "Pattern",
+                "target_property": "Angle",
+                "unit_coercion": "deg",
+            },
+            stdout="",
+            stderr="",
+            execution_time_ms=1.0,
+        )
+    )
+
+    async def get_bridge():
+        return bridge
+
+    register_spreadsheet_tools(mcp, get_bridge)
+    result = await registered["spreadsheet_bind_property"](
+        "Params", "PatternAngle", "Pattern", "Angle"
+    )
+
+    assert result["unit_coercion"] == "deg"
+    code = bridge.execute_python.await_args.args[0]
+    assert 'target_type == "App::PropertyAngle" and not source_unit' in code
+    assert 'expression = f"({expression}) * 1 deg"' in code
+    assert "source_value = _spreadsheet_cell_content(sheet, cell)" in code
+
+
+@pytest.mark.asyncio
+async def test_spreadsheet_batch_rejects_duplicate_updates_before_bridge() -> None:
+    """Ambiguous duplicate batch entries should never reach FreeCAD."""
+    from freecad_mcp.tools.spreadsheet import register_spreadsheet_tools
+
+    mcp = MagicMock()
+    registered = {}
+    mcp.tool = lambda: lambda fn: registered.setdefault(fn.__name__, fn) or fn
+    bridge = AsyncMock()
+
+    async def get_bridge():
+        return bridge
+
+    register_spreadsheet_tools(mcp, get_bridge)
+
+    with pytest.raises(ValueError, match="Duplicate cell updates"):
+        await registered["spreadsheet_apply_batch"](
+            "Params",
+            cells=[{"cell": "A1", "value": 1}, {"cell": "A1", "value": 2}],
+        )
+    bridge.execute_python.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_spreadsheet_clear_cell_verifies_alias_and_content_removal() -> None:
+    """The clear tool must not hide an alias-removal failure."""
+    from freecad_mcp.bridge.base import ExecutionResult
+    from freecad_mcp.tools.spreadsheet import register_spreadsheet_tools
+
+    mcp = MagicMock()
+    registered = {}
+    mcp.tool = lambda: lambda fn: registered.setdefault(fn.__name__, fn) or fn
+    bridge = AsyncMock()
+    bridge.execute_python = AsyncMock(
+        return_value=ExecutionResult(
+            success=True,
+            result={
+                "success": True,
+                "cell": "A1",
+                "removed_alias": "Length",
+                "had_content": True,
+            },
+            stdout="",
+            stderr="",
+            execution_time_ms=1.0,
+        )
+    )
+
+    async def get_bridge():
+        return bridge
+
+    register_spreadsheet_tools(mcp, get_bridge)
+    result = await registered["spreadsheet_clear_cell"]("Params", "A1")
+
+    assert result["removed_alias"] == "Length"

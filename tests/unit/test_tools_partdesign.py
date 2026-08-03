@@ -889,6 +889,37 @@ class TestPartDesignTools:
         assert "[False, True]" in generated_code
 
     @pytest.mark.asyncio
+    async def test_create_hole_accepts_iso_fine_with_underscore(
+        self, register_tools, mock_bridge
+    ):
+        """The documented ISO_FINE spelling must resolve to FreeCAD's enum."""
+        mock_bridge.execute_python = AsyncMock(
+            return_value=ExecutionResult(
+                success=True,
+                result={
+                    "name": "Hole",
+                    "validated": True,
+                    "removed_volume": 100.0,
+                },
+                stdout="",
+                stderr="",
+                execution_time_ms=15.0,
+            )
+        )
+        create_hole = register_tools["create_hole"]
+
+        await create_hole(
+            sketch_name="HoleSketch",
+            threaded=True,
+            thread_type="ISO_FINE",
+            thread_size="M12x1.25",
+        )
+
+        generated_code = mock_bridge.execute_python.await_args.args[0]
+        assert "resolved_thread_profile = 'ISOMetricFineProfile'" in generated_code
+        assert "requested_size = 'M12x1.25'.strip()" in generated_code
+
+    @pytest.mark.asyncio
     async def test_create_cylindrical_cut(self, register_tools, mock_bridge):
         """create_cylindrical_cut should validate an explicit-axis cut."""
         mock_bridge.execute_python = AsyncMock(

@@ -293,7 +293,13 @@ such as `horizontal`, `vertical`, `coincident`, `parallel`, `perpendicular`,
 
 For `create_hole`, use non-construction circles in a dedicated sketch attached
 to an actual planar solid face. Use `create_cylindrical_cut` for radial or
-off-face cuts.""",
+off-face cuts. `thread_type="ISO_FINE"` is supported; provide the exact fine
+`thread_size` such as `M12x1.25`. When changing an existing Hole with
+`edit_object`, set `ThreadType` and `ThreadSize` in the same call.
+
+For Spreadsheet-driven pattern angles, a unitless value such as `360` is bound
+as degrees. Prefer `spreadsheet_apply_batch` for atomic value/alias/binding
+updates; failed batches restore the affected cells, aliases, and expressions.""",
             "boolean": """# Boolean Operations Guidance
 
 ## Available Operations

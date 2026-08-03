@@ -234,6 +234,51 @@ for x in (-20.0, 0.0, 20.0):
 
 
 @pytest.mark.asyncio
+async def test_iso_fine_thread_alias_creates_requested_size(
+    live_bridge: XmlRpcBridge,
+    create_hole_tool: Any,
+) -> None:
+    """The documented ISO_FINE spelling should survive FreeCAD enumeration resets."""
+    doc_name = "MCPHoleIsoFine"
+    geometry = """
+sketch.addGeometry(
+    Part.Circle(FreeCAD.Vector(0.0, 0.0, 0.0), FreeCAD.Vector(0, 0, 1), 5.0),
+    False,
+)
+"""
+    await _create_test_body(live_bridge, doc_name, "FineThreadSketch", geometry)
+    try:
+        result = await create_hole_tool(
+            sketch_name="FineThreadSketch",
+            depth=8.0,
+            threaded=True,
+            thread_type="ISO_FINE",
+            thread_size="M12x1.25",
+            doc_name=doc_name,
+        )
+        assert result["validated"] is True
+
+        inspection = await live_bridge.execute_python(
+            f"""
+hole = FreeCAD.getDocument({doc_name!r}).getObject({result['name']!r})
+_result_ = {{
+    "thread_type": str(hole.ThreadType),
+    "thread_size": str(hole.ThreadSize),
+    "threaded": bool(hole.Threaded),
+}}
+"""
+        )
+        assert inspection.success, inspection.error_traceback
+        assert inspection.result == {
+            "thread_type": "ISOMetricFineProfile",
+            "thread_size": "M12x1.25",
+            "threaded": True,
+        }
+    finally:
+        await _close_document(live_bridge, doc_name)
+
+
+@pytest.mark.asyncio
 async def test_point_only_profile_fails_without_leaving_hole(
     live_bridge: XmlRpcBridge,
     create_hole_tool: Any,

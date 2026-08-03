@@ -268,6 +268,18 @@ edit_object(
 
 For `Body.Tip`, prefer `set_body_tip`: it verifies Body membership, one valid solid, positive volume, recompute state, and the final Tip link. `edit_object` provides flexible type-aware assignment but does not replace feature-specific validation.
 
+When changing `PartDesign::Hole.ThreadType`, include `ThreadSize` in the same
+call. FreeCAD resets `ThreadSize` when the profile enumeration changes, so the
+tool applies these dependent properties in safe order and rejects a profile-only
+edit. Friendly values such as `ISO_FINE` are accepted:
+
+```python
+edit_object(
+    object_name="Hole",
+    properties={"ThreadType": "ISO_FINE", "ThreadSize": "M12x1.25"},
+)
+```
+
 #### delete_object
 
 Delete an object.
@@ -664,6 +676,10 @@ create_hole(
 ) -> dict
 ```
 
+`ISO_FINE` is normalized to FreeCAD's `ISOMetricFineProfile` enumeration before
+the requested `thread_size` is selected. The size is validated against the
+enumeration advertised by the running FreeCAD build.
+
 #### create_cylindrical_cut
 
 Create a cylindrical cut from an explicit world-space start point and axis.
@@ -786,7 +802,7 @@ mirrored_feature(
 
 ### spreadsheet_apply_batch
 
-Apply cell values, aliases, and object-property bindings to an existing Spreadsheet in one transaction and one final recompute. Use this instead of dozens of independent setter calls when creating a parameter table. Binding targets, properties, and aliases are validated before mutation.
+Apply cell values, aliases, and object-property bindings to an existing Spreadsheet in one transaction and one final recompute. Use this instead of dozens of independent setter calls when creating a parameter table. Binding targets, properties, aliases, duplicate entries, and alias collisions are validated before mutation. Because FreeCAD 1.0 does not roll Spreadsheet mutations back on `abortTransaction()`, the tool snapshots and explicitly restores affected cells, aliases, and expressions if any operation fails.
 
 ```python
 spreadsheet_apply_batch(
@@ -799,6 +815,15 @@ spreadsheet_apply_batch(
 ```
 
 At least one non-empty list is required. Aliases created in the same batch may immediately be used by bindings.
+Retries are idempotent, including aliases that already point to the requested
+cell. When a unitless Spreadsheet value is bound to an `App::PropertyAngle`
+such as `PartDesign::PolarPattern.Angle`, the generated expression multiplies
+the value by `1 deg`; a cell that already has an angle unit is bound directly.
+
+`spreadsheet_get_aliases` enumerates actual Spreadsheet cells (not ordinary
+FreeCAD object properties). `spreadsheet_clear_cell` is idempotent and reports
+the removed alias; it verifies that both content and alias are gone before
+returning success.
 
 ---
 

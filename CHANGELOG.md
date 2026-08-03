@@ -82,6 +82,12 @@
 - Added explicit Pocket direction/base selection, validated `Feature.FaceN` support for `UpToFace`, `set_body_tip`, and additive/subtractive `thread_helix`.
 - Added link-property name resolution to `edit_object` and atomic `spreadsheet_apply_batch`.
 - Fixed parametric-validator State serialization and excluded datum reference geometry from solid volume/bounds metrics.
+- Fixed Spreadsheet alias discovery, idempotent cell clearing, and real rollback
+  for failed `spreadsheet_apply_batch` calls. Unitless values bound to angle
+  properties are now explicitly interpreted as degrees.
+- Fixed the documented `create_hole(thread_type="ISO_FINE")` spelling and made
+  `edit_object` require/apply `ThreadSize` together with a Hole thread-profile
+  change so FreeCAD cannot silently reset the size to its first enumeration.
 
 This project uses **component-specific versioning**. Each component has its own
 release notes and version history.

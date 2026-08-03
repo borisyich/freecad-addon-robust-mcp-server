@@ -122,12 +122,12 @@ Geometry-changing operations are transaction-backed where applicable. Use `histo
 |---|---|
 | `spreadsheet_create` | Create a new Spreadsheet object. |
 | `spreadsheet_set_cell` | Set the value of a cell in a spreadsheet. |
-| `spreadsheet_apply_batch` | Apply cells, aliases, and property bindings in one transaction and recompute. |
+| `spreadsheet_apply_batch` | Atomically apply cells, aliases, and bindings with explicit rollback on failure. |
 | `spreadsheet_get_cell` | Get the value of a cell in a spreadsheet. |
 | `spreadsheet_set_alias` | Set an alias for a cell in a spreadsheet. |
-| `spreadsheet_get_aliases` | Get all aliases defined in a spreadsheet. |
-| `spreadsheet_clear_cell` | Clear a cell in a spreadsheet. |
-| `spreadsheet_bind_property` | Bind an object property to a spreadsheet cell using expressions. |
+| `spreadsheet_get_aliases` | Get aliases by enumerating actual spreadsheet cells. |
+| `spreadsheet_clear_cell` | Idempotently clear cell content and its alias, then verify removal. |
+| `spreadsheet_bind_property` | Bind a property; unitless angle values are interpreted as degrees. |
 | `spreadsheet_get_cell_range` | Get values from a range of cells in a spreadsheet. |
 | `spreadsheet_import_csv` | Import data from a CSV file into a spreadsheet. |
 | `spreadsheet_export_csv` | Export spreadsheet data to a CSV file. |

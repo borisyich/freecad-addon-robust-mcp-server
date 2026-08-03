@@ -389,7 +389,9 @@ metric; use formal checkpoints only when the task benefits from them.
 - `linear_pattern` and `polar_pattern` are for one transformation of a non-pattern seed. Use `multi_transform_pattern` for combined linear and polar stages.
 - Pattern, Pocket, and thread responses include before/after volume diagnostics. A valid Shape is not proof that the intended amount of material changed.
 - `thread_helix` creates native additive or subtractive helical geometry from an editable profile sketch.
-- `spreadsheet_apply_batch` is the efficient way to create values, aliases, and property bindings in one transaction.
+- `spreadsheet_apply_batch` is the efficient way to create values, aliases, and property bindings in one transaction. It validates alias collisions and restores affected cells, aliases, and expressions if a later operation fails.
+- A unitless spreadsheet number bound to an angle property is interpreted in degrees, so `360` can safely drive `PolarPattern.Angle`. Supplying `360 deg` remains supported.
+- Change a Hole thread profile and size together, for example `edit_object("Hole", {"ThreadType": "ISO_FINE", "ThreadSize": "M12x1.25"})`; this prevents FreeCAD from silently resetting the size.
 
 ## Tips and Best Practices
 

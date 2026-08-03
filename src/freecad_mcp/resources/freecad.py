@@ -717,10 +717,17 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                         {
                             "name": "create_hole",
                             "description": (
-                                "Create validated holes from a planar-face or "
-                                "origin-plane circle sketch"
+                                "Create validated holes, including ISO_FINE "
+                                "threads, from a planar-face or origin-plane "
+                                "circle sketch"
                             ),
-                            "key_params": ["sketch_name", "diameter", "depth"],
+                            "key_params": [
+                                "sketch_name",
+                                "diameter",
+                                "depth",
+                                "thread_type",
+                                "thread_size",
+                            ],
                         },
                         {
                             "name": "create_cylindrical_cut",
@@ -815,7 +822,10 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                 },
                 "spreadsheet": {
                     "description": "Spreadsheet workbench for parametric design",
-                    "note": "All mutating operations are wrapped in transactions for undo support",
+                    "note": (
+                        "Batch mutations explicitly roll back cells, aliases, "
+                        "and bindings; unitless angle bindings use degrees"
+                    ),
                     "tools": [
                         {
                             "name": "spreadsheet_create",
@@ -829,7 +839,10 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                         },
                         {
                             "name": "spreadsheet_apply_batch",
-                            "description": "Apply cells, aliases, and bindings in one transaction",
+                            "description": (
+                                "Atomically apply cells, aliases, and bindings "
+                                "with explicit rollback"
+                            ),
                             "key_params": [
                                 "spreadsheet_name",
                                 "cells",
@@ -849,17 +862,19 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                         },
                         {
                             "name": "spreadsheet_get_aliases",
-                            "description": "Get all aliases in a spreadsheet",
+                            "description": "Get aliases from actual spreadsheet cells",
                             "key_params": ["spreadsheet_name"],
                         },
                         {
                             "name": "spreadsheet_clear_cell",
-                            "description": "Clear a cell and its alias",
+                            "description": "Idempotently clear and verify cell and alias",
                             "key_params": ["spreadsheet_name", "cell"],
                         },
                         {
                             "name": "spreadsheet_bind_property",
-                            "description": "Bind object property to spreadsheet cell",
+                            "description": (
+                                "Bind a property; unitless angles are degrees"
+                            ),
                             "key_params": [
                                 "spreadsheet_name",
                                 "alias",

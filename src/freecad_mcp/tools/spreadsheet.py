@@ -5,9 +5,109 @@ parametric design through cell values that can drive model dimensions.
 """
 
 from collections.abc import Awaitable, Callable
+from textwrap import dedent
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+SPREADSHEET_RUNTIME_HELPERS = dedent(
+    r'''
+    def _spreadsheet_cell_content(sheet, cell):
+        try:
+            return sheet.getContents(cell) or ""
+        except Exception:
+            return ""
+
+
+    def _spreadsheet_cell_alias(sheet, cell):
+        try:
+            return sheet.getAlias(cell) or None
+        except Exception:
+            return None
+
+
+    def _spreadsheet_aliases(sheet):
+        cells = set()
+        try:
+            cells.update(sheet.getNonEmptyCells())
+        except Exception:
+            pass
+
+        # ``getNonEmptyCells`` is the public API, but include addresses from
+        # the serialized cell store as a compatibility fallback for older
+        # FreeCAD builds and alias-only cells.
+        try:
+            import xml.etree.ElementTree as ET
+
+            root = ET.fromstring(sheet.getPropertyByName("cells").Content)
+            for node in root.iter("Cell"):
+                address = node.attrib.get("address")
+                if address:
+                    cells.add(address)
+        except Exception:
+            pass
+
+        aliases = {}
+        for cell in sorted(cells):
+            alias = _spreadsheet_cell_alias(sheet, cell)
+            if alias:
+                aliases[alias] = cell
+        return aliases
+
+
+    def _spreadsheet_restore_content(sheet, cell, content):
+        if not content:
+            return
+        # Spreadsheet.getContents prefixes literal strings with one quote,
+        # while Spreadsheet.set expects the original unquoted text.
+        restored = content[1:] if content.startswith("'") else content
+        sheet.set(cell, restored)
+
+
+    def _spreadsheet_serializable_value(value):
+        if value is None or isinstance(value, (bool, int, float, str)):
+            return value
+        # FreeCAD.Units.Quantity and other wrapped cell values are not
+        # marshalable by XML-RPC. Their string form preserves value and unit.
+        return str(value)
+
+
+    def _spreadsheet_binding_expression(sheet, alias, target, property_name):
+        cell = sheet.getCellFromAlias(alias)
+        if not cell:
+            raise ValueError(f"Alias not found: {alias!r}")
+
+        expression = f"{sheet.Name}.{alias}"
+        try:
+            source_value = sheet.get(cell)
+        except Exception:
+            # A cell changed earlier in the same batch is not available via
+            # get() until recompute, while getContents() is immediately valid.
+            source_value = _spreadsheet_cell_content(sheet, cell)
+        source_unit = ""
+        try:
+            source_unit = FreeCAD.Units.Quantity(source_value).Unit.Type
+        except Exception:
+            pass
+
+        try:
+            target_type = target.getTypeIdOfProperty(property_name)
+        except Exception:
+            target_type = ""
+
+        unit_coercion = None
+        if target_type == "App::PropertyAngle" and not source_unit:
+            expression = f"({expression}) * 1 deg"
+            unit_coercion = "deg"
+
+        return expression, {
+            "source_cell": cell,
+            "source_unit": source_unit or None,
+            "target_property_type": target_type or None,
+            "unit_coercion": unit_coercion,
+        }
+    '''
+).strip()
 
 
 class SpreadsheetCellUpdate(BaseModel):
@@ -27,6 +127,7 @@ class SpreadsheetAliasUpdate(BaseModel):
 
     @model_validator(mode="after")
     def validate_alias(self) -> "SpreadsheetAliasUpdate":
+        """Reject aliases that FreeCAD cannot expose as identifiers."""
         if not self.alias.isidentifier():
             raise ValueError("alias must be a valid Python identifier")
         return self
@@ -413,6 +514,8 @@ except Exception:
         bridge = await get_bridge()
 
         code = f"""
+{SPREADSHEET_RUNTIME_HELPERS}
+
 doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
 if doc is None:
     raise ValueError("No document found")
@@ -421,21 +524,7 @@ sheet = doc.getObject({spreadsheet_name!r})
 if sheet is None:
     raise ValueError(f"Spreadsheet not found: {spreadsheet_name!r}")
 
-aliases = {{}}
-
-# Get aliases by checking which properties are aliases
-# In FreeCAD, spreadsheet aliases become properties on the sheet object
-try:
-    # Method 1: Try getPropertyByName for each potential alias
-    for prop_name in sheet.PropertiesList:
-        try:
-            cell = sheet.getCellFromAlias(prop_name)
-            if cell:
-                aliases[prop_name] = cell
-        except Exception:
-            pass
-except Exception:
-    pass
+aliases = _spreadsheet_aliases(sheet)
 
 _result_ = {{
     "spreadsheet": sheet.Name,
@@ -481,6 +570,8 @@ _result_ = {{
         bridge = await get_bridge()
 
         code = f"""
+{SPREADSHEET_RUNTIME_HELPERS}
+
 doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
 if doc is None:
     raise ValueError("No document found")
@@ -493,21 +584,31 @@ if sheet is None:
 doc.openTransaction("Clear Spreadsheet Cell")
 try:
     cell = {cell!r}
+    previous_alias = _spreadsheet_cell_alias(sheet, cell)
+    previous_content = _spreadsheet_cell_content(sheet, cell)
 
-    # Clear alias first if any
-    try:
+    # Clearing is idempotent. Do not suppress alias-removal failures: returning
+    # success while an alias survives makes the cell impossible to reuse.
+    if previous_alias:
         sheet.setAlias(cell, "")
-    except Exception:
-        pass
-
-    # Clear content
-    sheet.clear(cell)
+    if previous_content:
+        sheet.clear(cell)
     doc.recompute()
+
+    remaining_alias = _spreadsheet_cell_alias(sheet, cell)
+    remaining_content = _spreadsheet_cell_content(sheet, cell)
+    if remaining_alias or remaining_content:
+        raise RuntimeError(
+            f"Cell {{cell}} was not fully cleared: "
+            f"alias={{remaining_alias!r}}, content={{remaining_content!r}}"
+        )
     doc.commitTransaction()
 
     _result_ = {{
         "success": True,
         "cell": cell,
+        "removed_alias": previous_alias,
+        "had_content": bool(previous_content),
     }}
 except Exception:
     doc.abortTransaction()
@@ -565,6 +666,8 @@ except Exception:
         bridge = await get_bridge()
 
         code = f"""
+{SPREADSHEET_RUNTIME_HELPERS}
+
 doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
 if doc is None:
     raise ValueError("No document found")
@@ -595,9 +698,9 @@ if not hasattr(target, prop):
 # Wrap in transaction for undo support
 doc.openTransaction("Bind Property to Spreadsheet")
 try:
-    # Create the expression binding
-    # Format: ObjectName.Alias
-    expression = f"{{sheet.Name}}.{{alias}}"
+    expression, binding_metadata = _spreadsheet_binding_expression(
+        sheet, alias, target, prop
+    )
     target.setExpression(prop, expression)
     doc.recompute()
     doc.commitTransaction()
@@ -607,6 +710,7 @@ try:
         "expression": expression,
         "target_object": target.Name,
         "target_property": prop,
+        **binding_metadata,
     }}
 except Exception:
     doc.abortTransaction()
@@ -668,8 +772,30 @@ except Exception:
         if not (normalized_cells or normalized_aliases or normalized_bindings):
             raise ValueError("Batch must contain cells, aliases, or bindings")
 
+        def reject_duplicates(
+            items: list[dict[str, Any]], field: str, description: str
+        ) -> None:
+            values = [item[field] for item in items]
+            duplicates = sorted({value for value in values if values.count(value) > 1})
+            if duplicates:
+                joined = ", ".join(repr(value) for value in duplicates)
+                raise ValueError(f"Duplicate {description} in batch: {joined}")
+
+        reject_duplicates(normalized_cells, "cell", "cell updates")
+        reject_duplicates(normalized_aliases, "cell", "alias target cells")
+        reject_duplicates(normalized_aliases, "alias", "aliases")
+        binding_targets = [
+            {
+                "target": (item["target_object"], item["target_property"]),
+            }
+            for item in normalized_bindings
+        ]
+        reject_duplicates(binding_targets, "target", "binding targets")
+
         bridge = await get_bridge()
         code = f"""
+{SPREADSHEET_RUNTIME_HELPERS}
+
 cells = {normalized_cells!r}
 aliases = {normalized_aliases!r}
 bindings = {normalized_bindings!r}
@@ -680,8 +806,24 @@ sheet = doc.getObject({spreadsheet_name!r})
 if sheet is None or not hasattr(sheet, "set") or not hasattr(sheet, "setAlias"):
     raise ValueError(f"Spreadsheet not found: {spreadsheet_name!r}")
 
+# Resolve the final alias map before mutating the document. This permits an
+# intentional alias swap while rejecting collisions and makes retries
+# idempotent after an interrupted/failed client call.
+existing_aliases = _spreadsheet_aliases(sheet)
+final_alias_by_cell = {{cell: alias for alias, cell in existing_aliases.items()}}
+for item in aliases:
+    final_alias_by_cell[item["cell"]] = item["alias"]
+final_aliases = {{}}
+for cell, alias in final_alias_by_cell.items():
+    other_cell = final_aliases.get(alias)
+    if other_cell is not None and other_cell != cell:
+        raise ValueError(
+            f"Alias {{alias!r}} would be assigned to both "
+            f"{{other_cell}} and {{cell}}"
+        )
+    final_aliases[alias] = cell
+
 # Validate binding targets and aliases before mutating the document.
-pending_aliases = {{item["alias"] for item in aliases}}
 resolved_bindings = []
 for item in bindings:
     target = doc.getObject(item["target_object"])
@@ -692,30 +834,62 @@ for item in bindings:
             f"Property not found on target {{target.Name!r}}: "
             f"{{item['target_property']!r}}"
         )
-    if item["alias"] not in pending_aliases:
-        try:
-            existing_cell = sheet.getCellFromAlias(item["alias"])
-        except Exception:
-            existing_cell = None
-        if not existing_cell:
-            raise ValueError(f"Alias not found: {{item['alias']!r}}")
+    if item["alias"] not in final_aliases:
+        raise ValueError(f"Alias not found: {{item['alias']!r}}")
     resolved_bindings.append((item, target))
+
+touched_cells = sorted(
+    {{item["cell"] for item in cells}} | {{item["cell"] for item in aliases}}
+)
+cell_snapshot = {{
+    cell: {{
+        "content": _spreadsheet_cell_content(sheet, cell),
+        "alias": _spreadsheet_cell_alias(sheet, cell),
+    }}
+    for cell in touched_cells
+}}
+expression_snapshot = []
+for item, target in resolved_bindings:
+    old_expression = dict(getattr(target, "ExpressionEngine", [])).get(
+        item["target_property"]
+    )
+    expression_snapshot.append((target, item["target_property"], old_expression))
 
 doc.openTransaction("Apply Spreadsheet Batch")
 try:
+    # Detach bindings being replaced before a source cell changes units. This
+    # avoids a transient invalid expression such as (360 deg) * 1 deg when an
+    # existing unitless angle parameter is upgraded to an explicit angle.
+    for target, property_name, _old_expression in expression_snapshot:
+        target.setExpression(property_name, None)
+
     for item in cells:
         sheet.set(item["cell"], str(item["value"]))
+
+    # Remove aliases from every affected cell first so swaps and idempotent
+    # retries cannot fail with "Alias already defined".
+    for item in aliases:
+        if _spreadsheet_cell_alias(sheet, item["cell"]):
+            sheet.setAlias(item["cell"], "")
     for item in aliases:
         sheet.setAlias(item["cell"], item["alias"])
 
+    # Make values (including formula units) queryable without recomputing the
+    # whole document. The final doc.recompute() below still occurs exactly once.
+    if bindings:
+        sheet.recompute()
+
     expression_results = []
     for item, target in resolved_bindings:
-        expression = f"{{sheet.Name}}.{{item['alias']}}"
+        expression, binding_metadata = _spreadsheet_binding_expression(
+            sheet, item["alias"], target, item["target_property"]
+        )
         target.setExpression(item["target_property"], expression)
         expression_results.append({{
             "target_object": target.Name,
             "target_property": item["target_property"],
             "expression": expression,
+            **binding_metadata,
         }})
 
     doc.recompute()
@@ -728,11 +902,47 @@ try:
         computed_cells.append({{
             "cell": item["cell"],
             "value": item["value"],
-            "computed": computed,
+            "computed": _spreadsheet_serializable_value(computed),
         }})
     doc.commitTransaction()
-except Exception:
+except Exception as batch_error:
     doc.abortTransaction()
+    rollback_errors = []
+
+    # abortTransaction() does not restore already-mutated Spreadsheet cells in
+    # FreeCAD 1.0, so restore every touched value, alias and expression.
+    for cell in touched_cells:
+        try:
+            if _spreadsheet_cell_alias(sheet, cell):
+                sheet.setAlias(cell, "")
+            if _spreadsheet_cell_content(sheet, cell):
+                sheet.clear(cell)
+        except Exception as exc:
+            rollback_errors.append(f"clear {{cell}}: {{exc}}")
+    for cell, previous in cell_snapshot.items():
+        try:
+            _spreadsheet_restore_content(sheet, cell, previous["content"])
+            if previous["alias"]:
+                sheet.setAlias(cell, previous["alias"])
+        except Exception as exc:
+            rollback_errors.append(f"restore {{cell}}: {{exc}}")
+    for target, property_name, old_expression in expression_snapshot:
+        try:
+            target.setExpression(property_name, old_expression)
+        except Exception as exc:
+            rollback_errors.append(
+                f"restore {{target.Name}}.{{property_name}}: {{exc}}"
+            )
+    try:
+        doc.recompute()
+    except Exception as exc:
+        rollback_errors.append(f"recompute: {{exc}}")
+
+    if rollback_errors:
+        raise RuntimeError(
+            "Spreadsheet batch failed and rollback was incomplete: "
+            + "; ".join(rollback_errors)
+        ) from batch_error
     raise
 
 _result_ = {{

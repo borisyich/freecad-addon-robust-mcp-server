@@ -591,17 +591,8 @@ obj = doc.getObject({obj_name!r})
 if obj is None:
     raise ValueError(f"Object not found: {obj_name!r}")
 
-# Set properties with type-aware conversion for object-link properties.
-for prop_name, prop_val in {properties!r}.items():
-    if not hasattr(obj, prop_name):
-        raise ValueError(
-            f"Property {{prop_name!r}} not found on object {{obj.Name!r}}"
-        )
-    setattr(
-        obj,
-        prop_name,
-        _coerce_object_property_value(doc, obj, prop_name, prop_val),
-    )
+# Set properties with type-aware conversion and dependent-property ordering.
+_set_object_properties(doc, obj, {properties!r})
 
 doc.recompute()
 

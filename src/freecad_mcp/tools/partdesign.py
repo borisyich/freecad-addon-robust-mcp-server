@@ -2123,7 +2123,11 @@ _result_ = {{
         depth_type = hole_type_map[normalized_hole_type]
 
         normalized_thread_type = (
-            thread_type.strip().upper().replace(" ", "").replace("-", "")
+            thread_type.strip()
+            .upper()
+            .replace(" ", "")
+            .replace("-", "")
+            .replace("_", "")
         )
         thread_type_map = {
             "ISO": "ISOMetricProfile",
