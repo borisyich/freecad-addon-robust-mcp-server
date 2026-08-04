@@ -11,6 +11,17 @@ from .test_all_tools_refactor_audit import _call, _fresh, live_tools  # noqa: F4
 pytestmark = [pytest.mark.integration, pytest.mark.slow]
 
 
+async def _execute_python_result(
+    tools: dict[str, Any], *, code: str
+) -> Any:
+    """Execute bridge code and return only its user payload."""
+    response = await _call(tools, "execute_python", code=code)
+    assert isinstance(response, dict), response
+    assert response.get("success") is True, response
+    assert "result" in response, response
+    return response["result"]
+
+
 async def _base_plate(tools: dict[str, Any], doc: str, body: str = "Body") -> str:
     await _fresh(tools, doc)
     await _call(tools, "create_partdesign_body", name=body, doc_name=doc)
@@ -35,6 +46,110 @@ async def _base_plate(tools: dict[str, Any], doc: str, body: str = "Body") -> st
                          direction=[0, 0, 1], name="BasePad", doc_name=doc)
     assert result["validated"] is True
     return result["name"]
+
+
+async def _assert_valid_model(tools: dict[str, Any], doc: str) -> dict[str, Any]:
+    report = await _call(
+        tools, "validate_parametric_model", doc_name=doc, recompute=True
+    )
+    errors = [
+        finding
+        for finding in report.get("findings", [])
+        if finding.get("severity") == "error"
+    ]
+    assert report.get("document", {}).get("recompute_error") is None, report
+    assert report.get("assessment") != "invalid_or_broken", report
+    assert not errors, errors
+    return report
+
+
+async def _plate_with_offset_pocket(
+    tools: dict[str, Any], doc: str, *, x: float = -15.0
+) -> str:
+    await _base_plate(tools, doc)
+    await _call(
+        tools,
+        "create_sketch",
+        body_name="Body",
+        support={"kind": "origin_plane", "plane": "XY_Plane"},
+        name="PocketSketch",
+        doc_name=doc,
+    )
+    await _call(
+        tools,
+        "execute_python",
+        code=f'''
+doc = FreeCAD.getDocument({doc!r})
+sketch = doc.getObject("PocketSketch")
+sketch.AttachmentOffset.Base.z = 10
+doc.recompute()
+_result_ = True
+''',
+    )
+    await _call(
+        tools,
+        "edit_sketch_geometry",
+        sketch_name="PocketSketch",
+        operations=[
+            {"op": "add_circle", "center_x": x, "center_y": 0, "radius": 3}
+        ],
+        doc_name=doc,
+    )
+    pocket = await _call(
+        tools,
+        "pocket_sketch",
+        sketch_name="PocketSketch",
+        length=10,
+        type="ThroughAll",
+        name="Pocket",
+        doc_name=doc,
+    )
+    assert pocket["validated"] is True
+    return pocket["name"]
+
+
+async def _setup_pipe_sketches(
+    tools: dict[str, Any], doc: str, *, subtractive: bool
+) -> None:
+    await _fresh(tools, doc)
+    result = await _execute_python_result(
+        tools,
+        code=f'''
+import Part
+import Sketcher
+doc = FreeCAD.getDocument({doc!r})
+body = doc.addObject("PartDesign::Body", "Body")
+if {subtractive!r}:
+    base = body.newObject("PartDesign::Feature", "BaseSolid")
+    base.Shape = Part.makeBox(60, 40, 20, FreeCAD.Vector(-30, -20, -10))
+    body.Tip = base
+profile = body.newObject("Sketcher::SketchObject", "Profile")
+profile.MapMode = "Deactivated"
+profile.Placement = FreeCAD.Placement(
+    FreeCAD.Vector({-31 if subtractive else 0}, 0, 0),
+    FreeCAD.Rotation(FreeCAD.Vector(0, 0, 1), FreeCAD.Vector(1, 0, 0)),
+)
+profile.addGeometry(
+    Part.Circle(FreeCAD.Vector(0, 0, 0), FreeCAD.Vector(0, 0, 1), 3),
+    False,
+)
+spine = body.newObject("Sketcher::SketchObject", "Spine")
+spine.MapMode = "Deactivated"
+spine.addGeometry(
+    Part.LineSegment(
+        FreeCAD.Vector({-31 if subtractive else 0}, 0, 0),
+        FreeCAD.Vector({31 if subtractive else 30}, 0, 0),
+    ),
+    False,
+)
+doc.recompute()
+_result_ = {{
+    "profile_wires": len(profile.Shape.Wires),
+    "spine_edges": len(spine.Shape.Edges),
+}}
+''',
+    )
+    assert result == {"profile_wires": 1, "spine_edges": 1}
 
 
 @pytest.mark.asyncio
@@ -219,7 +334,10 @@ async def test_sketch_geometry_and_constraint_operation_catalog(live_tools: dict
             {"op": "angle", "geometry1": 0, "value": 0.5},
         ),
         "fix": (
-            [{"op": "add_point", "x": 3, "y": 4}],
+            [
+                {"op": "add_line", "x1": 0, "y1": 0, "x2": 5, "y2": 0},
+                {"op": "add_line", "x1": 5, "y1": 0, "x2": 5, "y2": 5},
+            ],
             {"op": "fix", "geometry1": 0},
         ),
         "add_constraint": (
@@ -251,190 +369,351 @@ async def test_sketch_geometry_and_constraint_operation_catalog(live_tools: dict
                 doc_name=doc,
             )
 
-
-@pytest.mark.asyncio
-async def test_prismatic_feature_chain_and_choice_values(live_tools: dict[str, Any]) -> None:
-    tools = live_tools
-    doc = "McpAuditPrismatic"
-    await _base_plate(tools, doc)
-    await _call(tools, "create_cylindrical_cut", body_name="Body",
-                axis_origin=[0, 0, -1], axis_direction=[0, 0, 1],
-                diameter=8, depth=12, name="CenterCut", doc_name=doc)
+    limit_sketch = "FixLimit"
     await _call(
         tools,
         "create_sketch",
         body_name="Body",
         support={"kind": "origin_plane", "plane": "XY_Plane"},
-        name="PocketSketch",
+        name=limit_sketch,
         doc_name=doc,
     )
-    await _call(tools, "execute_python", code=f"""
-doc = FreeCAD.getDocument({doc!r})
-sketch = doc.getObject("PocketSketch")
-sketch.AttachmentOffset.Base.z = 10
-doc.recompute()
-_result_ = True
-""")
-    await _call(tools, "edit_sketch_geometry", sketch_name="PocketSketch",
-                operations=[{"op": "add_circle", "center_x": 15, "center_y": 0, "radius": 3}],
-                doc_name=doc)
-    pocket = await _call(tools, "pocket_sketch", sketch_name="PocketSketch",
-                         length=10, type="ThroughAll", name="Pocket", doc_name=doc)
-    assert pocket["validated"] is True
-    await _call(tools, "linear_pattern", feature_name="Pocket", direction="X",
-                length=30, occurrences=2, name="Linear", doc_name=doc)
-    await _call(tools, "polar_pattern", feature_name="Pocket", axis="Z",
-                angle=360, occurrences=4, name="Polar", doc_name=doc)
-    await _call(tools, "mirrored_feature", feature_name="Pocket", plane="YZ",
-                name="Mirror", doc_name=doc)
+    await _call(
+        tools,
+        "edit_sketch_geometry",
+        sketch_name=limit_sketch,
+        operations=[{"op": "add_line", "x1": 0, "y1": 0, "x2": 5, "y2": 0}],
+        doc_name=doc,
+    )
+    with pytest.raises(ValueError, match="more than 50%"):
+        await _call(
+            tools,
+            "edit_sketch_constraints",
+            sketch_name=limit_sketch,
+            operations=[{"op": "fix", "geometry1": 0}],
+            doc_name=doc,
+        )
+    limit_info = await _call(
+        tools, "get_sketch_info", sketch_name=limit_sketch, doc_name=doc
+    )
+    assert limit_info["sketch_status"]["constraint_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_prismatic_feature_chain_and_choice_values(live_tools: dict[str, Any]) -> None:
+    tools = live_tools
+
+    # Each transformation owns a fresh linear Body history. Parallel branches
+    # in one Body are not a realistic PartDesign workflow.
+    linear_doc = "McpAuditPrismaticLinear"
+    await _plate_with_offset_pocket(tools, linear_doc)
+    linear = await _call(
+        tools, "linear_pattern", feature_name="Pocket", direction="X",
+        length=30, occurrences=2, name="Linear", doc_name=linear_doc,
+    )
+    assert linear["validated"] is True
+    await _assert_valid_model(tools, linear_doc)
+
+    # A dress-up on BasePad would insert a branch behind the current Linear Tip.
+    # The tool must reject it before creating a feature or corrupting the DAG.
+    with pytest.raises(ValueError, match="current Body Tip"):
+        await _call(
+            tools, "fillet_edges", object_name="BasePad", radius=1.0,
+            edges=["Edge1"], name="StaleFillet", doc_name=linear_doc,
+        )
+    unchanged = await _execute_python_result(
+        tools,
+        code=f'''
+doc = FreeCAD.getDocument({linear_doc!r})
+body = doc.getObject("Body")
+_result_ = {{
+    "tip": getattr(body.Tip, "Name", None),
+    "stale_feature_absent": doc.getObject("StaleFillet") is None,
+}}
+''',
+    )
+    assert unchanged == {"tip": "Linear", "stale_feature_absent": True}
+    await _assert_valid_model(tools, linear_doc)
+
+    polar_doc = "McpAuditPrismaticPolar"
+    await _plate_with_offset_pocket(tools, polar_doc)
+    polar = await _call(
+        tools, "polar_pattern", feature_name="Pocket", axis="Z",
+        angle=360, occurrences=4, name="Polar", doc_name=polar_doc,
+    )
+    assert polar["validated"] is True
+    await _assert_valid_model(tools, polar_doc)
+
+    mirror_doc = "McpAuditPrismaticMirror"
+    await _plate_with_offset_pocket(tools, mirror_doc)
+    mirror = await _call(
+        tools, "mirrored_feature", feature_name="Pocket", plane="YZ",
+        name="Mirror", doc_name=mirror_doc,
+    )
+    assert mirror["validated"] is True
+    assert mirror["tip"] == "Mirror"
+    assert mirror["tip_matches"] is True
+    await _assert_valid_model(tools, mirror_doc)
+
+    # Dress-up features are independent terminal operations. Chaining them
+    # through stale pattern branches caused the previous DAG warnings.
+    fillet_doc = "McpAuditPrismaticFillet"
+    await _base_plate(tools, fillet_doc)
+    fillet = await _call(
+        tools, "fillet_edges", object_name="BasePad", radius=1.0,
+        edges=["Edge1"], name="Fillet", doc_name=fillet_doc,
+    )
+    assert fillet["validated"] is True
+    await _assert_valid_model(tools, fillet_doc)
+
+    chamfer_doc = "McpAuditPrismaticChamfer"
+    await _base_plate(tools, chamfer_doc)
+    chamfer = await _call(
+        tools, "chamfer_edges", object_name="BasePad", size=1.0,
+        edges=["Edge1"], name="Chamfer", doc_name=chamfer_doc,
+    )
+    assert chamfer["validated"] is True
+    await _assert_valid_model(tools, chamfer_doc)
+
+    datum_doc = "McpAuditPrismaticDatum"
+    await _base_plate(tools, datum_doc)
     for base_plane in ("XY_Plane", "XZ_Plane", "YZ_Plane"):
-        await _call(tools, "create_datum_plane", body_name="Body", offset=2,
-                    base_plane=base_plane, name=f"DP{base_plane[:2]}", doc_name=doc)
-    for base_axis in ("X_Axis", "Y_Axis", "Z_Axis"):
-        await _call(tools, "create_datum_line", body_name="Body", base_axis=base_axis,
-                    name=f"DL{base_axis[0]}", doc_name=doc)
-    await _call(tools, "create_datum_point", body_name="Body", position=[5, 5, 5],
-                name="DatumPoint", doc_name=doc)
-    await _call(tools, "fillet_edges", object_name="Linear", radius=0.5,
-                edges=["Edge1"], name="Fillet", doc_name=doc)
-    await _call(tools, "chamfer_edges", object_name="Fillet", size=0.3,
-                edges=["Edge2"], name="Chamfer", doc_name=doc)
-    await _call(tools, "validate_parametric_model", doc_name=doc)
+        datum_plane = await _call(
+            tools, "create_datum_plane", body_name="Body", offset=2,
+            base_plane=base_plane, name=f"DP{base_plane[:2]}", doc_name=datum_doc,
+        )
+        assert datum_plane["validated"] is True
+        assert datum_plane["tip"] == "BasePad"
+        assert datum_plane["tip_preserved"] is True
+    expected_directions = {
+        "X_Axis": [1.0, 0.0, 0.0],
+        "Y_Axis": [0.0, 1.0, 0.0],
+        "Z_Axis": [0.0, 0.0, 1.0],
+    }
+    for base_axis, expected in expected_directions.items():
+        datum = await _call(
+            tools, "create_datum_line", body_name="Body", base_axis=base_axis,
+            name=f"DL{base_axis[0]}", doc_name=datum_doc,
+        )
+        assert datum["validated"] is True
+        assert datum["map_mode"] == "Deactivated"
+        assert datum["direction"] == pytest.approx(expected, abs=1e-8)
+    datum_point = await _call(
+        tools, "create_datum_point", body_name="Body", position=[5, 5, 5],
+        name="DatumPoint", doc_name=datum_doc,
+    )
+    assert datum_point["validated"] is True
+    assert datum_point["tip"] == "BasePad"
+    assert datum_point["tip_preserved"] is True
+    assert datum_point["position"] == pytest.approx([5.0, 5.0, 5.0], abs=1e-8)
+    datum_tree = await _execute_python_result(
+        tools,
+        code=f'''
+body = FreeCAD.getDocument({datum_doc!r}).getObject("Body")
+_result_ = {{
+    "tip": getattr(body.Tip, "Name", None),
+    "datum_names": sorted(
+        obj.Name for obj in body.Group
+        if getattr(obj, "TypeId", "").startswith((
+            "PartDesign::Plane", "PartDesign::Line", "PartDesign::Point"
+        ))
+    ),
+}}
+''',
+    )
+    assert datum_tree["tip"] == "BasePad"
+    assert datum_tree["datum_names"] == sorted(
+        ["DPXY", "DPXZ", "DPYZ", "DLX", "DLY", "DLZ", "DatumPoint"]
+    )
+    await _assert_valid_model(tools, datum_doc)
 
 
 @pytest.mark.asyncio
 async def test_revolution_loft_sweep_and_subtractive_families(live_tools: dict[str, Any]) -> None:
     tools = live_tools
-    # A native turned body.
-    doc = "McpAuditTurned"
-    await _fresh(tools, doc)
-    await _call(tools, "create_partdesign_body", name="Body", doc_name=doc)
+
+    turned_doc = "McpAuditTurned"
+    await _fresh(tools, turned_doc)
+    await _call(tools, "create_partdesign_body", name="Body", doc_name=turned_doc)
     await _call(
-        tools,
-        "create_sketch",
-        body_name="Body",
+        tools, "create_sketch", body_name="Body",
         support={"kind": "origin_plane", "plane": "XZ_Plane"},
-        name="TurnProfile",
-        doc_name=doc,
+        name="TurnProfile", doc_name=turned_doc,
     )
-    await _call(tools, "edit_sketch_geometry", sketch_name="TurnProfile",
-                operations=[{"op": "add_rectangle", "x": 0, "y": 8, "width": 25, "height": 8}],
-                doc_name=doc)
-    turned = await _call(tools, "revolution_sketch", sketch_name="TurnProfile",
-                         axis="Sketch_H", angle=360, name="Revolution", doc_name=doc)
+    await _call(
+        tools, "edit_sketch_geometry", sketch_name="TurnProfile",
+        operations=[{"op": "add_rectangle", "x": 0, "y": 8, "width": 25, "height": 8}],
+        doc_name=turned_doc,
+    )
+    turned = await _call(
+        tools, "revolution_sketch", sketch_name="TurnProfile",
+        axis="Sketch_H", angle=360, name="Revolution", doc_name=turned_doc,
+    )
     assert turned["validated"] is True
     await _call(
-        tools,
-        "create_sketch",
-        body_name="Body",
+        tools, "create_sketch", body_name="Body",
         support={"kind": "origin_plane", "plane": "XZ_Plane"},
-        name="GrooveProfile",
-        doc_name=doc,
+        name="GrooveProfile", doc_name=turned_doc,
     )
-    await _call(tools, "edit_sketch_geometry", sketch_name="GrooveProfile",
-                operations=[{"op": "add_rectangle", "x": 10, "y": 12, "width": 3, "height": 5}],
-                doc_name=doc)
-    await _call(tools, "groove_sketch", sketch_name="GrooveProfile",
-                axis="Sketch_H", angle=360, name="Groove", doc_name=doc)
+    await _call(
+        tools, "edit_sketch_geometry", sketch_name="GrooveProfile",
+        operations=[{"op": "add_rectangle", "x": 10, "y": 12, "width": 3, "height": 5}],
+        doc_name=turned_doc,
+    )
+    groove = await _call(
+        tools, "groove_sketch", sketch_name="GrooveProfile",
+        axis="Sketch_H", angle=360, name="Groove", doc_name=turned_doc,
+    )
+    assert groove["validated"] is True
+    await _assert_valid_model(tools, turned_doc)
 
-    # Additive loft through origin and datum-plane profiles.
     loft_doc = "McpAuditLoft"
     await _fresh(tools, loft_doc)
     await _call(tools, "create_partdesign_body", name="Body", doc_name=loft_doc)
     await _call(
-        tools,
-        "create_sketch",
-        body_name="Body",
+        tools, "create_sketch", body_name="Body",
         support={"kind": "origin_plane", "plane": "XY_Plane"},
-        name="LoftA",
-        doc_name=loft_doc,
+        name="LoftA", doc_name=loft_doc,
     )
-    await _call(tools, "edit_sketch_geometry", sketch_name="LoftA",
-                operations=[{"op": "add_circle", "center_x": 0, "center_y": 0, "radius": 8}],
-                doc_name=loft_doc)
-    await _call(tools, "create_datum_plane", body_name="Body", offset=20,
-                base_plane="XY_Plane", name="LoftPlane", doc_name=loft_doc)
     await _call(
-        tools,
-        "create_sketch",
-        body_name="Body",
-        support={"kind": "datum_plane", "name": "LoftPlane"},
-        name="LoftB",
+        tools, "edit_sketch_geometry", sketch_name="LoftA",
+        operations=[{"op": "add_circle", "center_x": 0, "center_y": 0, "radius": 8}],
         doc_name=loft_doc,
     )
-    await _call(tools, "edit_sketch_geometry", sketch_name="LoftB",
-                operations=[{"op": "add_circle", "center_x": 0, "center_y": 0, "radius": 4}],
-                doc_name=loft_doc)
-    await _call(tools, "loft_sketches", sketch_names=["LoftA", "LoftB"],
-                ruled=False, closed=False, name="AdditiveLoft", doc_name=loft_doc)
+    await _call(
+        tools, "create_datum_plane", body_name="Body", offset=20,
+        base_plane="XY_Plane", name="LoftPlane", doc_name=loft_doc,
+    )
+    await _call(
+        tools, "create_sketch", body_name="Body",
+        support={"kind": "datum_plane", "name": "LoftPlane"},
+        name="LoftB", doc_name=loft_doc,
+    )
+    await _call(
+        tools, "edit_sketch_geometry", sketch_name="LoftB",
+        operations=[{"op": "add_circle", "center_x": 0, "center_y": 0, "radius": 4}],
+        doc_name=loft_doc,
+    )
+    loft = await _call(
+        tools, "loft_sketches", sketch_names=["LoftA", "LoftB"],
+        ruled=False, closed=False, name="AdditiveLoft", doc_name=loft_doc,
+    )
+    assert loft["validated"] is True
+    await _assert_valid_model(tools, loft_doc)
 
-    # Tool dispatch for all transition values. Geometry compatibility is
-    # independently asserted by the successful Transformed case.
-    sweep_doc = "McpAuditSweep"
-    await _fresh(tools, sweep_doc)
-    await _call(tools, "execute_python", code=f"""
-import Part, Sketcher
-doc = FreeCAD.getDocument({sweep_doc!r})
-body = doc.addObject("PartDesign::Body", "Body")
-profile = doc.addObject("PartDesign::Feature", "SweepBase")
-profile.Shape = Part.makeCylinder(8, 30)
-body.addObject(profile)
-for transition in ("Transformed", "Right", "Round"):
-    p = body.newObject("Sketcher::SketchObject", "Profile_" + transition)
-    if hasattr(p, "AttachmentSupport"):
-        p.AttachmentSupport = [(doc.getObject("XZ_Plane"), [""])]
-    else:
-        p.Support = (doc.getObject("XZ_Plane"), [""])
-    p.MapMode = "FlatFace"
-    p.addGeometry(Part.Circle(FreeCAD.Vector(0,0,0), FreeCAD.Vector(0,0,1), 2), False)
-    s = body.newObject("Sketcher::SketchObject", "Spine_" + transition)
-    if hasattr(s, "AttachmentSupport"):
-        s.AttachmentSupport = [(doc.getObject("YZ_Plane"), [""])]
-    else:
-        s.Support = (doc.getObject("YZ_Plane"), [""])
-    s.MapMode = "FlatFace"
-    s.addGeometry(Part.LineSegment(FreeCAD.Vector(0,0,0), FreeCAD.Vector(0,20,0)), False)
-doc.recompute()
-_result_ = True
-""")
+    # A straight path is intentionally used for all transition enum values:
+    # each case is geometrically valid, not merely a dispatch probe.
     for transition in ("Transformed", "Right", "Round"):
-        try:
-            await _call(tools, "sweep_sketch", profile_sketch=f"Profile_{transition}",
-                        spine_sketch=f"Spine_{transition}", transition=transition,
-                        name=f"Sweep_{transition}", doc_name=sweep_doc)
-        except Exception as exc:
-            assert "unsupported" not in str(exc).lower(), str(exc)
+        sweep_doc = f"McpAuditSweep{transition}"
+        await _setup_pipe_sketches(tools, sweep_doc, subtractive=False)
+        sweep = await _call(
+            tools, "sweep_sketch", profile_sketch="Profile", spine_sketch="Spine",
+            transition=transition, name=f"Sweep{transition}", doc_name=sweep_doc,
+        )
+        assert sweep["validated"] is True
+        await _assert_valid_model(tools, sweep_doc)
 
-    # The remaining shape-modifying tools are exercised against isolated valid
-    # solids so a topology failure in one feature does not mask dispatch.
-    for index, tool_name in enumerate(("draft_feature", "thickness_feature", "subtractive_loft", "subtractive_pipe")):
-        case_doc = f"McpAuditAdvanced{index}"
-        await _base_plate(tools, case_doc)
-        if tool_name == "draft_feature":
-            for plane in ("XY", "XZ", "YZ"):
-                try:
-                    await _call(tools, tool_name, object_name="BasePad", angle=2,
-                                plane=plane, faces=["Face1"], name=f"Draft{plane}", doc_name=case_doc)
-                except Exception as exc:
-                    assert "unsupported" not in str(exc).lower(), str(exc)
-        elif tool_name == "thickness_feature":
-            await _call(tools, tool_name, object_name="BasePad", thickness=1,
-                        faces_to_remove=["Face6"], name="Thickness", doc_name=case_doc)
-        else:
-            # Real dispatch and validation of list/transition arguments. More
-            # detailed geometric success cases live in the dedicated existing
-            # comprehensive workflow modules.
-            try:
-                if tool_name == "subtractive_loft":
-                    await _call(tools, tool_name, sketch_names=["BaseSketch"],
-                                ruled=True, closed=False, name="SubLoft", doc_name=case_doc)
-                else:
-                    for transition in ("Transformed", "Right", "Round"):
-                        try:
-                            await _call(tools, tool_name, profile_sketch="BaseSketch",
-                                        spine_sketch="BaseSketch", transition=transition,
-                                        name=f"SubPipe{transition}", doc_name=case_doc)
-                        except Exception as exc:
-                            assert "unsupported" not in str(exc).lower(), str(exc)
-            except Exception as exc:
-                assert "unsupported" not in str(exc).lower(), str(exc)
+    # Each neutral plane is a true boundary of the selected side face.
+    draft_cases = {
+        "XY": ([-20, -15, 0], [40, 30, 20], [1, 0, 0]),
+        "XZ": ([-20, 0, -15], [40, 20, 30], [1, 0, 0]),
+        "YZ": ([0, -20, -15], [20, 40, 30], [0, 1, 0]),
+    }
+    for plane, (origin, size, face_normal) in draft_cases.items():
+        draft_doc = f"McpAuditDraft{plane}"
+        await _fresh(tools, draft_doc)
+        setup = await _execute_python_result(
+            tools,
+            code=f'''
+import Part
+doc = FreeCAD.getDocument({draft_doc!r})
+body = doc.addObject("PartDesign::Body", "Body")
+base = body.newObject("PartDesign::Feature", "BaseSolid")
+base.Shape = Part.makeBox(
+    {size[0]}, {size[1]}, {size[2]}, FreeCAD.Vector(*{origin!r})
+)
+body.Tip = base
+doc.recompute()
+target = FreeCAD.Vector(*{face_normal!r})
+best = max(
+    range(len(base.Shape.Faces)),
+    key=lambda index: float(base.Shape.Faces[index].normalAt(0, 0).dot(target)),
+)
+_result_ = {{"face": f"Face{{best + 1}}"}}
+''',
+        )
+        draft = await _call(
+            tools, "draft_feature", object_name="BaseSolid", angle=2,
+            plane=plane, faces=[setup["face"]], name=f"Draft{plane}",
+            doc_name=draft_doc,
+        )
+        assert draft["validated"] is True
+        await _assert_valid_model(tools, draft_doc)
+
+    thickness_doc = "McpAuditThickness"
+    await _base_plate(tools, thickness_doc)
+    top = await _execute_python_result(
+        tools,
+        code=f'''
+doc = FreeCAD.getDocument({thickness_doc!r})
+obj = doc.getObject("BasePad")
+best = max(
+    range(len(obj.Shape.Faces)),
+    key=lambda index: float(obj.Shape.Faces[index].CenterOfMass.z),
+)
+_result_ = {{"face": f"Face{{best + 1}}"}}
+''',
+    )
+    thickness = await _call(
+        tools, "thickness_feature", object_name="BasePad", thickness=1,
+        faces_to_remove=[top["face"]], name="Thickness", doc_name=thickness_doc,
+    )
+    assert thickness["validated"] is True
+    await _assert_valid_model(tools, thickness_doc)
+
+    subloft_doc = "McpAuditSubtractiveLoft"
+    await _fresh(tools, subloft_doc)
+    setup = await _execute_python_result(
+        tools,
+        code=f'''
+import Part
+import Sketcher
+doc = FreeCAD.getDocument({subloft_doc!r})
+body = doc.addObject("PartDesign::Body", "Body")
+base = body.newObject("PartDesign::Feature", "BaseSolid")
+base.Shape = Part.makeBox(20, 20, 30, FreeCAD.Vector(-10, -10, 0))
+body.Tip = base
+for name, z, radius in (("LoftCutA", -1, 5), ("LoftCutB", 31, 3)):
+    sketch = body.newObject("Sketcher::SketchObject", name)
+    sketch.MapMode = "Deactivated"
+    sketch.Placement.Base.z = z
+    sketch.addGeometry(
+        Part.Circle(FreeCAD.Vector(0, 0, 0), FreeCAD.Vector(0, 0, 1), radius),
+        False,
+    )
+doc.recompute()
+_result_ = {{
+    "a_wires": len(doc.getObject("LoftCutA").Shape.Wires),
+    "b_wires": len(doc.getObject("LoftCutB").Shape.Wires),
+}}
+''',
+    )
+    assert setup == {"a_wires": 1, "b_wires": 1}
+    subloft = await _call(
+        tools, "subtractive_loft", sketch_names=["LoftCutA", "LoftCutB"],
+        ruled=False, closed=False, name="SubtractiveLoft", doc_name=subloft_doc,
+    )
+    assert subloft["validated"] is True
+    assert subloft["removed_volume"] > 0
+    await _assert_valid_model(tools, subloft_doc)
+
+    for transition in ("Transformed", "Right", "Round"):
+        pipe_doc = f"McpAuditSubPipe{transition}"
+        await _setup_pipe_sketches(tools, pipe_doc, subtractive=True)
+        pipe = await _call(
+            tools, "subtractive_pipe", profile_sketch="Profile", spine_sketch="Spine",
+            transition=transition, name=f"SubPipe{transition}", doc_name=pipe_doc,
+        )
+        assert pipe["validated"] is True
+        assert pipe["removed_volume"] > 0
+        await _assert_valid_model(tools, pipe_doc)

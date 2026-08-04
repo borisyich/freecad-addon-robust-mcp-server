@@ -625,21 +625,36 @@ def _body_summary(body):
 
     body_states = _state_values(body)
     body_shape = _shape_summary(body)
+    invalid_history_items = [item for item in history if not item.get("valid")]
     tip_valid = tip_summary is not None and bool(tip_summary.get("valid"))
+    reference_only = last_shape_feature is None
+    tip_requirement_satisfied = bool(
+        tip_valid or (tip is None and reference_only)
+    )
     body_valid = bool(
         not _state_has_error(body_states)
         and body_shape["valid"] is not False
-        and tip_valid
+        and not invalid_history_items
+        and tip_requirement_satisfied
     )
 
     issues = []
     warnings = []
     if tip is None:
-        issues.append("Body has no Tip.")
+        if reference_only:
+            warnings.append(
+                "Body has no Tip because no shape-bearing feature has been created yet."
+            )
+        else:
+            issues.append("Body has no Tip despite shape-bearing feature history.")
     elif tip not in history_objects:
         issues.append("Body Tip is not present in Body history.")
     elif tip_summary is not None and not tip_summary.get("has_solid"):
         warnings.append("Body Tip does not currently expose a solid result.")
+    for item in invalid_history_items:
+        issues.append(
+            f"Body history item {item.get('name')!r} ({item.get('type_id')}) is invalid."
+        )
     if tip is not None and last_shape_feature is not None and tip is not last_shape_feature:
         warnings.append(
             "Body Tip is not the latest shape-bearing item in the recorded history."
@@ -663,6 +678,8 @@ def _body_summary(body):
         "placement": _placement_summary(body),
         "shape": body_shape,
         "tip": tip_summary,
+        "reference_only": reference_only,
+        "invalid_history_item_count": len(invalid_history_items),
         "tip_is_latest_shape_feature": bool(
             tip is not None and last_shape_feature is not None and tip is last_shape_feature
         ),

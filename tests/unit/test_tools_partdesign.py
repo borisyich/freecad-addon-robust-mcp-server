@@ -849,6 +849,9 @@ class TestPartDesignTools:
                     "name": "Fillet",
                     "label": "Fillet",
                     "type_id": "PartDesign::Fillet",
+                    "validated": True,
+                    "shape_valid": True,
+                    "solid_count": 1,
                 },
                 stdout="",
                 stderr="",
@@ -860,6 +863,10 @@ class TestPartDesignTools:
         result = await fillet(object_name="Pad", radius=2.0)
 
         assert result["name"] == "Fillet"
+        generated_code = mock_bridge.execute_python.await_args.args[0]
+        assert '_require_current_body_tip(body, obj, "Fillet")' in generated_code
+        assert "_validate_single_solid_feature" in generated_code
+        assert "_cleanup_failed_partdesign_feature" in generated_code
         mock_bridge.execute_python.assert_called_once()
 
     @pytest.mark.asyncio
@@ -872,6 +879,9 @@ class TestPartDesignTools:
                     "name": "Chamfer",
                     "label": "Chamfer",
                     "type_id": "PartDesign::Chamfer",
+                    "validated": True,
+                    "shape_valid": True,
+                    "solid_count": 1,
                 },
                 stdout="",
                 stderr="",
@@ -883,6 +893,10 @@ class TestPartDesignTools:
         result = await chamfer(object_name="Pad", size=1.0)
 
         assert result["name"] == "Chamfer"
+        generated_code = mock_bridge.execute_python.await_args.args[0]
+        assert '_require_current_body_tip(body, obj, "Chamfer")' in generated_code
+        assert "_validate_single_solid_feature" in generated_code
+        assert "_cleanup_failed_partdesign_feature" in generated_code
         mock_bridge.execute_python.assert_called_once()
 
     @pytest.mark.asyncio
@@ -1180,6 +1194,9 @@ class TestPartDesignTools:
                     "name": "Mirrored",
                     "label": "Mirrored",
                     "type_id": "PartDesign::Mirrored",
+                    "validated": True,
+                    "shape_valid": True,
+                    "solid_count": 1,
                 },
                 stdout="",
                 stderr="",
@@ -1191,6 +1208,13 @@ class TestPartDesignTools:
         result = await mirrored(feature_name="Pad", plane="XY")
 
         assert result["name"] == "Mirrored"
+        generated_code = mock_bridge.execute_python.await_args.args[0]
+        assert '_require_current_body_tip(body, feature, "Mirrored feature")' in generated_code
+        assert "body.Tip = feature" in generated_code
+        assert "transform_mode = _configure_feature_transform_mode(mirror)" in generated_code
+        assert "body.Tip = mirror" in generated_code
+        assert "_validate_single_solid_feature(mirror, body)" in generated_code
+        assert "_cleanup_failed_partdesign_feature" in generated_code
         mock_bridge.execute_python.assert_called_once()
 
     @pytest.mark.asyncio
@@ -1259,6 +1283,13 @@ class TestPartDesignTools:
                     "name": "DatumPlane",
                     "label": "DatumPlane",
                     "type_id": "PartDesign::Plane",
+                    "validated": True,
+                    "base_plane": "XY_Plane",
+                    "map_mode": "FlatFace",
+                    "offset": 10.0,
+                    "tip": "Pad",
+                    "tip_preserved": True,
+                    "status": [],
                 },
                 stdout="",
                 stderr="",
@@ -1273,6 +1304,12 @@ class TestPartDesignTools:
 
         assert result["name"] == "DatumPlane"
         assert result["type_id"] == "PartDesign::Plane"
+        assert result["validated"] is True
+        generated_code = mock_bridge.execute_python.await_args.args[0]
+        assert "_feature_status_strings(datum)" in generated_code
+        assert "Datum plane unexpectedly changed Body Tip" in generated_code
+        assert "doc.removeObject(created_name)" in generated_code
+        compile(generated_code, "<create-datum-plane>", "exec")
         mock_bridge.execute_python.assert_called_once()
 
     @pytest.mark.asyncio
@@ -1285,6 +1322,11 @@ class TestPartDesignTools:
                     "name": "DatumLine",
                     "label": "DatumLine",
                     "type_id": "PartDesign::Line",
+                    "validated": True,
+                    "shape_valid": True,
+                    "solid_count": 1,
+                    "map_mode": "Deactivated",
+                    "direction": [1.0, 0.0, 0.0],
                 },
                 stdout="",
                 stderr="",
@@ -1297,6 +1339,11 @@ class TestPartDesignTools:
 
         assert result["name"] == "DatumLine"
         assert result["type_id"] == "PartDesign::Line"
+        generated_code = mock_bridge.execute_python.await_args.args[0]
+        assert 'datum.MapMode = "Deactivated"' in generated_code
+        assert "FreeCAD.Rotation(FreeCAD.Vector(0, 0, 1), target_direction)" in generated_code
+        assert "datum.Placement.Rotation.multVec" in generated_code
+        assert "ObjectXY" not in generated_code
         mock_bridge.execute_python.assert_called_once()
 
     @pytest.mark.asyncio
@@ -1309,6 +1356,13 @@ class TestPartDesignTools:
                     "name": "DatumPoint",
                     "label": "DatumPoint",
                     "type_id": "PartDesign::Point",
+                    "validated": True,
+                    "map_mode": "Deactivated",
+                    "position": [10.0, 20.0, 30.0],
+                    "position_error": 0.0,
+                    "tip": "Pad",
+                    "tip_preserved": True,
+                    "status": [],
                 },
                 stdout="",
                 stderr="",
@@ -1322,9 +1376,14 @@ class TestPartDesignTools:
 
         assert result["name"] == "DatumPoint"
         assert result["type_id"] == "PartDesign::Point"
+        assert result["validated"] is True
         assert 'datum.MapMode = "Deactivated"' in generated_code
         assert "datum.Placement = FreeCAD.Placement" in generated_code
+        assert "_feature_status_strings(datum)" in generated_code
+        assert "Datum point unexpectedly changed Body Tip" in generated_code
+        assert "doc.removeObject(created_name)" in generated_code
         assert '_resolve_body_origin_feature(body, "Point")' not in generated_code
+        compile(generated_code, "<create-datum-point>", "exec")
         mock_bridge.execute_python.assert_called_once()
 
     # Tests for PartDesign dress-up features
@@ -1339,6 +1398,9 @@ class TestPartDesignTools:
                     "name": "Draft",
                     "label": "Draft",
                     "type_id": "PartDesign::Draft",
+                    "validated": True,
+                    "shape_valid": True,
+                    "solid_count": 1,
                 },
                 stdout="",
                 stderr="",
@@ -1353,6 +1415,10 @@ class TestPartDesignTools:
 
         assert result["name"] == "Draft"
         assert result["type_id"] == "PartDesign::Draft"
+        generated_code = mock_bridge.execute_python.await_args.args[0]
+        assert '_require_current_body_tip(body, obj, "Draft")' in generated_code
+        assert "_validated_shape_subelement_names" in generated_code
+        assert "_validate_single_solid_feature(draft, body)" in generated_code
         mock_bridge.execute_python.assert_called_once()
 
     @pytest.mark.asyncio
@@ -1365,6 +1431,9 @@ class TestPartDesignTools:
                     "name": "Thickness",
                     "label": "Thickness",
                     "type_id": "PartDesign::Thickness",
+                    "validated": True,
+                    "shape_valid": True,
+                    "solid_count": 1,
                 },
                 stdout="",
                 stderr="",
@@ -1379,6 +1448,10 @@ class TestPartDesignTools:
 
         assert result["name"] == "Thickness"
         assert result["type_id"] == "PartDesign::Thickness"
+        generated_code = mock_bridge.execute_python.await_args.args[0]
+        assert '_require_current_body_tip(body, obj, "Thickness")' in generated_code
+        assert "_validated_shape_subelement_names" in generated_code
+        assert "_validate_single_solid_feature(thick, body)" in generated_code
         mock_bridge.execute_python.assert_called_once()
 
     # Tests for PartDesign subtractive features
@@ -1393,6 +1466,12 @@ class TestPartDesignTools:
                     "name": "SubtractiveLoft",
                     "label": "SubtractiveLoft",
                     "type_id": "PartDesign::SubtractiveLoft",
+                    "validated": True,
+                    "shape_valid": True,
+                    "solid_count": 1,
+                    "removed_volume": 100.0,
+                    "base_volume": 1000.0,
+                    "result_volume": 900.0,
                 },
                 stdout="",
                 stderr="",
@@ -1405,6 +1484,9 @@ class TestPartDesignTools:
 
         assert result["name"] == "SubtractiveLoft"
         assert result["type_id"] == "PartDesign::SubtractiveLoft"
+        generated_code = mock_bridge.execute_python.await_args.args[0]
+        assert "_validate_subtractive_feature(loft, body, base_shape)" in generated_code
+        assert "_cleanup_failed_partdesign_feature" in generated_code
         mock_bridge.execute_python.assert_called_once()
 
     @pytest.mark.asyncio
@@ -1417,6 +1499,12 @@ class TestPartDesignTools:
                     "name": "SubtractivePipe",
                     "label": "SubtractivePipe",
                     "type_id": "PartDesign::SubtractivePipe",
+                    "validated": True,
+                    "shape_valid": True,
+                    "solid_count": 1,
+                    "removed_volume": 100.0,
+                    "base_volume": 1000.0,
+                    "result_volume": 900.0,
                 },
                 stdout="",
                 stderr="",
@@ -1429,7 +1517,39 @@ class TestPartDesignTools:
 
         assert result["name"] == "SubtractivePipe"
         assert result["type_id"] == "PartDesign::SubtractivePipe"
+        generated_code = mock_bridge.execute_python.await_args.args[0]
+        assert "Profile and spine must be inside the same PartDesign Body" in generated_code
+        assert "_validate_subtractive_feature(pipe, body, base_shape)" in generated_code
+        assert "_cleanup_failed_partdesign_feature" in generated_code
         mock_bridge.execute_python.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_shape_tools_reject_invalid_inputs_before_bridge_call(
+        self, register_tools, mock_bridge
+    ):
+        with pytest.raises(ValueError, match="Fillet radius"):
+            await register_tools["fillet_edges"](object_name="Pad", radius=0)
+        with pytest.raises(ValueError, match="Chamfer size"):
+            await register_tools["chamfer_edges"](object_name="Pad", size=0)
+        with pytest.raises(ValueError, match="Thickness must be positive"):
+            await register_tools["thickness_feature"](
+                object_name="Pad", thickness=0, faces_to_remove=["Face1"]
+            )
+        with pytest.raises(ValueError, match="at least two sketches"):
+            await register_tools["subtractive_loft"](sketch_names=["Sketch"])
+        with pytest.raises(ValueError, match="must be distinct"):
+            await register_tools["subtractive_loft"](
+                sketch_names=["Sketch", "Sketch"]
+            )
+        with pytest.raises(ValueError, match="must be different sketches"):
+            await register_tools["subtractive_pipe"](
+                profile_sketch="Sketch", spine_sketch="Sketch"
+            )
+        with pytest.raises(ValueError, match="must be different sketches"):
+            await register_tools["sweep_sketch"](
+                profile_sketch="Sketch", spine_sketch="Sketch"
+            )
+        mock_bridge.execute_python.assert_not_called()
 
     # Tests for sketch inspection
 

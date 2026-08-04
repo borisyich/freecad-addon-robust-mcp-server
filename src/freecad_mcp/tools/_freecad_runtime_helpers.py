@@ -173,6 +173,51 @@ BODY_RUNTIME_HELPERS = _runtime_code(
         return candidate, "nearest_predecessor"
 
 
+    def _require_current_body_tip(body, feature, operation_name):
+        """Reject dress-up operations on stale Body-history branches.
+
+        PartDesign dress-up and one-off transform features are expected to extend
+        the current Body Tip.  Creating them from an older feature can produce a
+        branched dependency graph and later ``The graph must be a DAG`` errors.
+        """
+        current_tip = getattr(body, "Tip", None)
+        if current_tip is feature:
+            return
+        raise ValueError(
+            f"{operation_name} must target the current Body Tip "
+            f"{getattr(current_tip, 'Name', None)!r}, not "
+            f"{getattr(feature, 'Name', '<unknown>')!r}. Finish or remove the "
+            "downstream branch first instead of inserting a dress-up feature "
+            "into older Body history."
+        )
+
+
+    def _validated_shape_subelement_names(obj, requested, prefix):
+        """Return validated ``EdgeN`` or ``FaceN`` names for ``obj.Shape``."""
+        shape = getattr(obj, "Shape", None)
+        if shape is None or shape.isNull() or not shape.isValid():
+            raise ValueError(
+                f"Object {getattr(obj, 'Name', '<unknown>')!r} has no valid shape"
+            )
+        collection_name = "Edges" if prefix == "Edge" else "Faces"
+        available = len(getattr(shape, collection_name))
+        names = list(requested or [f"{prefix}{index}" for index in range(1, available + 1)])
+        if not names:
+            raise ValueError(f"Object has no {collection_name.lower()} to select")
+        if len(set(names)) != len(names):
+            raise ValueError(f"Duplicate {prefix.lower()} references are not allowed: {names}")
+        for name in names:
+            if not isinstance(name, str) or not name.startswith(prefix):
+                raise ValueError(f"Expected {prefix}N reference, got {name!r}")
+            suffix = name[len(prefix):]
+            if not suffix.isdigit() or int(suffix) < 1 or int(suffix) > available:
+                raise ValueError(
+                    f"{name!r} is outside the available {prefix} range "
+                    f"1..{available}"
+                )
+        return names
+
+
     def _reject_nested_partdesign_pattern(feature):
         """Route chained pattern requests through a native MultiTransform."""
         pattern_types = {

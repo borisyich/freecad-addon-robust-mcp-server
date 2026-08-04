@@ -96,6 +96,11 @@
   connectivity with unused-alias findings.
 - Extended `edit_sketch_geometry(add_arc)` with endpoint/radius arcs and native
   tangent fillets between two existing lines.
+- Reworked live PartDesign choice workflows to use separate linear Body histories and genuinely valid geometry for every draft plane and additive/subtractive pipe transition; positive scenarios now fail on `validate_parametric_model` errors instead of swallowing FreeCAD exceptions.
+- Added post-recompute Shape/State/Body-Tip validation with rollback for fillet, chamfer, mirror, draft, thickness, subtractive loft, and subtractive pipe. Dress-up operations now reject stale Body-history branches and invalid `EdgeN`/`FaceN` references before mutation.
+- Replaced the unsupported datum-line `ObjectXY` attachment with a deactivated datum aligned by Placement to the selected Body-local X/Y/Z axis, including direction/status validation.
+- Refined Body validation so datum-only/reference-only construction states without a Tip are reported as incomplete warnings, while a missing Tip after shape-bearing history remains an error; invalid non-Tip history items are now surfaced.
+- Added post-recompute validation, rollback, and Body Tip preservation to datum plane and datum point creation, and made the live datum workflow operate on a real padded Body.
 
 This project uses **component-specific versioning**. Each component has its own
 release notes and version history.

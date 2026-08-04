@@ -629,7 +629,9 @@ loft_sketches(
 
 #### sweep_sketch
 
-Sweep a profile along a path.
+Sweep a profile along a path. Profile and spine must be different sketches in
+the same Body; the profile must contain a closed wire and the spine at least one
+edge. The result is committed only after additive-volume and solid validation.
 
 ```python
 sweep_sketch(
@@ -673,6 +675,39 @@ groove_sketch(
     axis: str = "Base_X",
     symmetric: bool = False,
     reversed: bool = False,
+    name: str | None = None,
+    doc_name: str | None = None
+) -> dict
+```
+
+#### subtractive_loft
+
+Cut material through at least two distinct closed profile sketches in the same
+Body. An existing valid solid must precede the profiles. The tool validates a
+real positive volume decrease and rolls the feature back on failure.
+
+```python
+subtractive_loft(
+    sketch_names: list[str],
+    ruled: bool = False,
+    closed: bool = False,
+    name: str | None = None,
+    doc_name: str | None = None
+) -> dict
+```
+
+#### subtractive_pipe
+
+Sweep a closed profile along a different path sketch in the same Body. The path
+must contain at least one edge and an existing solid must precede both sketches.
+The operation is accepted only when it removes measurable material and leaves
+one valid solid as the Body Tip.
+
+```python
+subtractive_pipe(
+    profile_sketch: str,
+    spine_sketch: str,
+    transition: str = "Transformed",  # "Transformed", "Right", "Round"
     name: str | None = None,
     doc_name: str | None = None
 ) -> dict
@@ -749,7 +784,10 @@ create_cylindrical_cut(
 
 #### fillet_edges
 
-Add rounded edges.
+Add rounded edges. For a PartDesign object, the source must be the current
+Body Tip. `EdgeN` references are validated before mutation; after recompute the
+result must be one valid solid and the new Body Tip, otherwise the feature is
+removed and the previous Tip is restored.
 
 ```python
 fillet_edges(
@@ -763,7 +801,8 @@ fillet_edges(
 
 #### chamfer_edges
 
-Add beveled edges.
+Add beveled edges. The same current-Tip, `EdgeN`, post-recompute, and rollback
+contract used by `fillet_edges` applies.
 
 ```python
 chamfer_edges(
@@ -840,7 +879,9 @@ Internal transformation stages are owned by the MultiTransform and intentionally
 
 #### mirrored_feature
 
-Mirror a feature across a plane.
+Mirror the current Body Tip across a plane. The source must be one valid solid;
+the mirrored feature is rolled back when recompute reports an error, an invalid
+Shape, multiple/no solids, or a Body-Tip mismatch.
 
 ```python
 mirrored_feature(

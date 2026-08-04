@@ -307,3 +307,180 @@ def test_generated_report_describes_body_tip_history_and_sketch(monkeypatch) -> 
     categories = {item["category"] for item in report["findings"]}
     assert "required_dimension_missing" in categories
     assert "unused_spreadsheet_parameter" in categories
+
+
+def test_reference_only_body_without_tip_is_incomplete_not_broken(monkeypatch) -> None:
+    """Datum-only construction state must not be classified as corrupt."""
+    import sys
+    from types import SimpleNamespace
+
+    class NullShape:
+        ShapeType = "Shape"
+        Solids = []
+        Shells = []
+        Faces = []
+        Edges = []
+        Vertexes = []
+        Wires = []
+        Volume = 0.0
+        Area = 0.0
+
+        def isNull(self):  # noqa: N802
+            return True
+
+        def isValid(self):  # noqa: N802
+            return True
+
+    placement = SimpleNamespace(
+        Base=SimpleNamespace(x=0.0, y=0.0, z=0.0),
+        Rotation=SimpleNamespace(
+            Axis=SimpleNamespace(x=0.0, y=0.0, z=1.0), Angle=0.0
+        ),
+    )
+    datum = SimpleNamespace(
+        Name="DatumPlane",
+        Label="Datum Plane",
+        TypeId="PartDesign::Plane",
+        State=[],
+        ViewObject=SimpleNamespace(Visibility=True),
+        Placement=placement,
+        Shape=None,
+        ExpressionEngine=[],
+        InList=[],
+        OutList=[],
+    )
+    body = SimpleNamespace(
+        Name="Body",
+        Label="Body",
+        TypeId="PartDesign::Body",
+        State=[],
+        ViewObject=SimpleNamespace(Visibility=True),
+        Placement=placement,
+        Shape=NullShape(),
+        Group=[datum],
+        Tip=None,
+    )
+    doc = SimpleNamespace(
+        Name="DatumOnly",
+        Label="DatumOnly",
+        FileName="",
+        Objects=[body, datum],
+        recompute=lambda: None,
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "FreeCAD",
+        SimpleNamespace(ActiveDocument=doc, listDocuments=lambda: {"DatumOnly": doc}),
+    )
+
+    namespace: dict[str, object] = {}
+    exec(
+        build_parametric_validation_code(
+            doc_name="DatumOnly",
+            recompute=True,
+            include_sketch_constraints=False,
+        ),
+        namespace,
+    )
+    report = namespace["_result_"]
+    body_report = report["bodies"][0]
+
+    assert report["assessment"] == "review_recommended"
+    assert body_report["valid"] is True
+    assert body_report["reference_only"] is True
+    assert body_report["invalid_history_item_count"] == 0
+    assert not [item for item in report["findings"] if item["severity"] == "error"]
+    assert any(
+        "no shape-bearing feature" in warning
+        for warning in body_report["warnings"]
+    )
+
+
+def test_missing_tip_with_shape_history_remains_invalid(monkeypatch) -> None:
+    """A lost Tip after solid feature creation is still a structural error."""
+    import sys
+    from types import SimpleNamespace
+
+    class BoundBox:
+        XMin = YMin = ZMin = 0.0
+        XMax = YMax = ZMax = 1.0
+        XLength = YLength = ZLength = 1.0
+
+    bound_box = BoundBox()
+
+    class SolidShape:
+        ShapeType = "Solid"
+        Solids = [object()]
+        Shells = [object()]
+        Faces = [object()]
+        Edges = [object()]
+        Vertexes = [object()]
+        Wires = []
+        Volume = 1.0
+        Area = 6.0
+        BoundBox = bound_box
+
+        def isNull(self):  # noqa: N802
+            return False
+
+        def isValid(self):  # noqa: N802
+            return True
+
+    placement = SimpleNamespace(
+        Base=SimpleNamespace(x=0.0, y=0.0, z=0.0),
+        Rotation=SimpleNamespace(
+            Axis=SimpleNamespace(x=0.0, y=0.0, z=1.0), Angle=0.0
+        ),
+    )
+    pad = SimpleNamespace(
+        Name="Pad",
+        Label="Pad",
+        TypeId="PartDesign::Pad",
+        State=[],
+        ViewObject=SimpleNamespace(Visibility=True),
+        Placement=placement,
+        Shape=SolidShape(),
+        ExpressionEngine=[],
+        InList=[],
+        OutList=[],
+    )
+    body = SimpleNamespace(
+        Name="Body",
+        Label="Body",
+        TypeId="PartDesign::Body",
+        State=[],
+        ViewObject=SimpleNamespace(Visibility=True),
+        Placement=placement,
+        Shape=SolidShape(),
+        Group=[pad],
+        Tip=None,
+    )
+    doc = SimpleNamespace(
+        Name="LostTip",
+        Label="LostTip",
+        FileName="",
+        Objects=[body, pad],
+        recompute=lambda: None,
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "FreeCAD",
+        SimpleNamespace(ActiveDocument=doc, listDocuments=lambda: {"LostTip": doc}),
+    )
+
+    namespace: dict[str, object] = {}
+    exec(
+        build_parametric_validation_code(
+            doc_name="LostTip",
+            recompute=True,
+            include_sketch_constraints=False,
+        ),
+        namespace,
+    )
+    report = namespace["_result_"]
+    body_report = report["bodies"][0]
+
+    assert report["assessment"] == "invalid_or_broken"
+    assert body_report["valid"] is False
+    assert body_report["reference_only"] is False
+    assert any("despite shape-bearing" in issue for issue in body_report["issues"])

@@ -430,6 +430,19 @@ def register_partdesign_tools(
                 )
         return normalized
 
+    def require_valid_feature_result(
+        payload: Any, operation: str
+    ) -> dict[str, Any]:
+        """Enforce the host-side contract for neutral PartDesign features."""
+        normalized = _validation_payload(payload, operation)
+        _validate_optional_common_evidence(normalized, operation)
+        if normalized.get("validated") is not True:
+            raise ValueError(
+                f"{operation} validation contract was not satisfied: "
+                + repr(normalized)
+            )
+        return normalized
+
     @mcp.tool()
     async def create_partdesign_body(
         name: str | None = None,
@@ -1651,7 +1664,10 @@ _result_ = {{
         name: str | None = None,
         doc_name: str | None = None,
     ) -> dict[str, Any]:
-        """Add fillet (rounded edges) to an object.
+        """Add a validated fillet to the current solid feature.
+
+        For PartDesign objects the source must be the current Body Tip. This
+        avoids inserting a dress-up feature into an older history branch.
 
         Args:
             object_name: Name of the object to fillet.
@@ -1667,68 +1683,78 @@ _result_ = {{
                 - label: Fillet label
                 - type_id: Object type
         """
+        if radius <= 0:
+            raise ValueError("Fillet radius must be positive")
         bridge = await get_bridge()
-
-        # Use actual None or list, not string "None"
-        edges_param = edges if edges else None
-
         code = f"""
+{BODY_RUNTIME_HELPERS}
+
+{FEATURE_VALIDATION_RUNTIME_HELPERS}
+
 doc = (
-    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
+    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None
     else FreeCAD.ActiveDocument
 ) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
 obj = doc.getObject({object_name!r})
 if obj is None:
     raise ValueError(f"Object not found: {object_name!r}")
+body = _find_body_containing_object(doc, obj)
+selected_edges = _validated_shape_subelement_names(obj, {edges!r}, "Edge")
+if body is not None:
+    if not _is_valid_single_solid_feature(obj):
+        raise ValueError(f"Fillet source is not one valid solid: {{obj.Name}}")
+    _require_current_body_tip(body, obj, "Fillet")
 
-# Check if this is in a PartDesign Body
-body = None
-for parent in doc.Objects:
-    if parent.TypeId == "PartDesign::Body":
-        if hasattr(parent, "Group") and obj in parent.Group:
-            body = parent
-            break
-
-# Get selected edges (None means all edges)
-selected_edges = {edges_param!r}
-
-# Wrap in transaction for undo support
+original_tip_name = getattr(body.Tip, "Name", None) if body is not None else None
+created_name = None
 doc.openTransaction("Fillet Edges")
 try:
     fillet_name = {name!r} or "Fillet"
-
-    if body:
-        # PartDesign Fillet
+    if body is not None:
         fillet = body.newObject("PartDesign::Fillet", fillet_name)
-        fillet.Base = (obj, selected_edges if selected_edges else obj.Shape.Edges)
-        fillet.Radius = {radius}
+        fillet.Base = (obj, selected_edges)
+        fillet.Radius = {radius!r}
     else:
-        # Part Fillet
         fillet = doc.addObject("Part::Fillet", fillet_name)
         fillet.Base = obj
-
-        if selected_edges:
-            edge_list = [(int(e.replace("Edge", "")), {radius}, {radius}) for e in selected_edges]
-        else:
-            edge_list = [(i+1, {radius}, {radius}) for i in range(len(obj.Shape.Edges))]
-
-        fillet.Edges = edge_list
-
+        fillet.Edges = [
+            (int(edge_name[4:]), {radius!r}, {radius!r})
+            for edge_name in selected_edges
+        ]
+    created_name = fillet.Name
     doc.recompute()
+    validation = _validate_single_solid_feature(
+        fillet, body, require_body_tip=body is not None
+    )
+    if not validation["ok"]:
+        raise ValueError("Fillet failed: " + "; ".join(validation["reasons"]))
     doc.commitTransaction()
 except Exception:
-    doc.abortTransaction()
+    try:
+        doc.abortTransaction()
+    finally:
+        _cleanup_failed_partdesign_feature(
+            doc, body, created_name, original_tip_name
+        )
     raise
 
 _result_ = {{
     "name": fillet.Name,
     "label": fillet.Label,
     "type_id": fillet.TypeId,
+    "validated": validation["ok"],
+    "shape_valid": validation["shape_valid"],
+    "solid_count": validation["solid_count"],
+    "tip_matches": validation["tip_matches"],
+    "status": validation["status"],
+    "result_volume": validation["result_volume"],
+    "source_feature": obj.Name,
+    "edges": selected_edges,
 }}
 """
         result = await bridge.execute_python(code)
         if result.success:
-            return result.result
+            return require_valid_feature_result(result.result, "Fillet")
         raise ValueError(result.error_traceback or "Fillet failed")
 
     @mcp.tool()
@@ -1739,84 +1765,82 @@ _result_ = {{
         name: str | None = None,
         doc_name: str | None = None,
     ) -> dict[str, Any]:
-        """Add chamfer (beveled edges) to an object.
+        """Add a validated chamfer to the current solid feature.
 
-        Args:
-            object_name: Name of the object to chamfer.
-            size: Chamfer size.
-            edges: List of edge names to chamfer (e.g., ["Edge1", "Edge2"]).
-                   Chamfers all edges if None.
-            name: Chamfer feature name. Auto-generated if None.
-            doc_name: Document containing the object. Uses active document if None.
-
-        Returns:
-            Dictionary with created chamfer information:
-                - name: Chamfer name
-                - label: Chamfer label
-                - type_id: Object type
+        For PartDesign objects the source must be the current Body Tip.
         """
+        if size <= 0:
+            raise ValueError("Chamfer size must be positive")
         bridge = await get_bridge()
-
-        # Use actual None or list, not string "None"
-        edges_param = edges if edges else None
-
         code = f"""
+{BODY_RUNTIME_HELPERS}
+
+{FEATURE_VALIDATION_RUNTIME_HELPERS}
+
 doc = (
-    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
+    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None
     else FreeCAD.ActiveDocument
 ) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
 obj = doc.getObject({object_name!r})
 if obj is None:
     raise ValueError(f"Object not found: {object_name!r}")
+body = _find_body_containing_object(doc, obj)
+selected_edges = _validated_shape_subelement_names(obj, {edges!r}, "Edge")
+if body is not None:
+    if not _is_valid_single_solid_feature(obj):
+        raise ValueError(f"Chamfer source is not one valid solid: {{obj.Name}}")
+    _require_current_body_tip(body, obj, "Chamfer")
 
-# Check if this is in a PartDesign Body
-body = None
-for parent in doc.Objects:
-    if parent.TypeId == "PartDesign::Body":
-        if hasattr(parent, "Group") and obj in parent.Group:
-            body = parent
-            break
-
-# Get selected edges (None means all edges)
-selected_edges = {edges_param!r}
-
-# Wrap in transaction for undo support
+original_tip_name = getattr(body.Tip, "Name", None) if body is not None else None
+created_name = None
 doc.openTransaction("Chamfer Edges")
 try:
     chamfer_name = {name!r} or "Chamfer"
-
-    if body:
-        # PartDesign Chamfer
+    if body is not None:
         chamfer = body.newObject("PartDesign::Chamfer", chamfer_name)
-        chamfer.Base = (obj, selected_edges if selected_edges else obj.Shape.Edges)
-        chamfer.Size = {size}
+        chamfer.Base = (obj, selected_edges)
+        chamfer.Size = {size!r}
     else:
-        # Part Chamfer
         chamfer = doc.addObject("Part::Chamfer", chamfer_name)
         chamfer.Base = obj
-
-        if selected_edges:
-            edge_list = [(int(e.replace("Edge", "")), {size}, {size}) for e in selected_edges]
-        else:
-            edge_list = [(i+1, {size}, {size}) for i in range(len(obj.Shape.Edges))]
-
-        chamfer.Edges = edge_list
-
+        chamfer.Edges = [
+            (int(edge_name[4:]), {size!r}, {size!r})
+            for edge_name in selected_edges
+        ]
+    created_name = chamfer.Name
     doc.recompute()
+    validation = _validate_single_solid_feature(
+        chamfer, body, require_body_tip=body is not None
+    )
+    if not validation["ok"]:
+        raise ValueError("Chamfer failed: " + "; ".join(validation["reasons"]))
     doc.commitTransaction()
 except Exception:
-    doc.abortTransaction()
+    try:
+        doc.abortTransaction()
+    finally:
+        _cleanup_failed_partdesign_feature(
+            doc, body, created_name, original_tip_name
+        )
     raise
 
 _result_ = {{
     "name": chamfer.Name,
     "label": chamfer.Label,
     "type_id": chamfer.TypeId,
+    "validated": validation["ok"],
+    "shape_valid": validation["shape_valid"],
+    "solid_count": validation["solid_count"],
+    "tip_matches": validation["tip_matches"],
+    "status": validation["status"],
+    "result_volume": validation["result_volume"],
+    "source_feature": obj.Name,
+    "edges": selected_edges,
 }}
 """
         result = await bridge.execute_python(code)
         if result.success:
-            return result.result
+            return require_valid_feature_result(result.result, "Chamfer")
         raise ValueError(result.error_traceback or "Chamfer failed")
 
     @mcp.tool()
@@ -3288,9 +3312,8 @@ _result_ = {{
         name: str | None = None,
         doc_name: str | None = None,
     ) -> dict[str, Any]:
-        """Create a Mirrored feature from a PartDesign feature.
-
-        Mirrors a feature across a plane.
+        """
+        Mirror the current PartDesign feature and validate the resulting solid.
 
         Args:
             feature_name: Name of the feature to mirror.
@@ -3305,59 +3328,86 @@ _result_ = {{
                 - type_id: Object type
         """
         bridge = await get_bridge()
-
-        plane_map = {
-            "XY": "XY_Plane",
-            "XZ": "XZ_Plane",
-            "YZ": "YZ_Plane",
-        }
-
+        plane_map = {"XY": "XY_Plane", "XZ": "XZ_Plane", "YZ": "YZ_Plane"}
         if plane not in plane_map:
             raise ValueError(f"Invalid plane: {plane}. Use: XY, XZ, YZ")
-
-        plane_ref = plane_map[plane]
-
         code = f"""
 {BODY_RUNTIME_HELPERS}
 
+{FEATURE_VALIDATION_RUNTIME_HELPERS}
+
 doc = (
-    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
+    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None
     else FreeCAD.ActiveDocument
 ) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
 feature = doc.getObject({feature_name!r})
 if feature is None:
     raise ValueError(f"Feature not found: {feature_name!r}")
-
-# Find the body containing this feature
 body = _find_body_containing_object(doc, feature)
-
 if body is None:
     raise ValueError("Feature must be inside a PartDesign Body")
-
-# Wrap in transaction for undo support
+if not _is_valid_single_solid_feature(feature):
+    raise ValueError(f"Mirror source is not one valid solid: {{feature.Name}}")
+_require_current_body_tip(body, feature, "Mirrored feature")
+base_shape = feature.Shape.copy()
+original_tip_name = getattr(body.Tip, "Name", None)
+created_name = None
 doc.openTransaction("Mirrored Feature")
 try:
-    mirror_name = {name!r} or "Mirrored"
-    mirror = body.newObject("PartDesign::Mirrored", mirror_name)
+    body.Tip = feature
+    mirror = body.newObject("PartDesign::Mirrored", {name!r} or "Mirrored")
+    created_name = mirror.Name
+    transform_mode = _configure_feature_transform_mode(mirror)
     mirror.Originals = [feature]
-    plane_obj = _resolve_body_origin_feature(body, {plane_ref!r})
+    plane_obj = _resolve_body_origin_feature(body, {plane_map[plane]!r})
     mirror.MirrorPlane = (plane_obj, [""])
-
+    body.Tip = mirror
     doc.recompute()
+    validation = _validate_single_solid_feature(mirror, body)
+    if not validation["ok"]:
+        raise ValueError(
+            "Mirrored feature failed: " + "; ".join(validation["reasons"])
+        )
+    material_change = _pattern_material_change_diagnostics(
+        mirror, base_shape, validation["result_volume"]
+    )
+    if material_change["available"] and not material_change["consistent"]:
+        raise ValueError(
+            "Mirrored feature failed causal material-change validation: "
+            + material_change["reason"]
+        )
     doc.commitTransaction()
 except Exception:
-    doc.abortTransaction()
+    try:
+        doc.abortTransaction()
+    finally:
+        _cleanup_failed_partdesign_feature(
+            doc, body, created_name, original_tip_name
+        )
     raise
 
 _result_ = {{
     "name": mirror.Name,
     "label": mirror.Label,
     "type_id": mirror.TypeId,
+    "validated": validation["ok"],
+    "shape_valid": validation["shape_valid"],
+    "solid_count": validation["solid_count"],
+    "tip_matches": validation["tip_matches"],
+    "tip": getattr(body.Tip, "Name", None),
+    "status": validation["status"],
+    "transform_mode": transform_mode["value"],
+    "transform_mode_options": transform_mode["options"],
+    "base_volume": float(base_shape.Volume),
+    "result_volume": validation["result_volume"],
+    "source_feature": feature.Name,
+    "plane": {plane!r},
+    "material_change_diagnostics": material_change,
 }}
 """
         result = await bridge.execute_python(code)
         if result.success:
-            return result.result
+            return require_valid_feature_result(result.result, "Mirrored feature")
         raise ValueError(result.error_traceback or "Mirrored feature failed")
 
     @mcp.tool()
@@ -3488,6 +3538,8 @@ _result_ = {{
                 - validated: Check if the result has a valid shape
                 - added_volume: Effective volume added to the Body
         """
+        if profile_sketch == spine_sketch:
+            raise ValueError("Sweep profile and spine must be different sketches")
         bridge = await get_bridge()
 
         transition_map = {
@@ -3524,6 +3576,15 @@ body = _find_body_containing_object(doc, profile)
 
 if body is None:
     raise ValueError("Sketches must be inside a PartDesign Body for Sweep operation")
+if _find_body_containing_object(doc, spine) is not body:
+    raise ValueError("Sweep profile and spine must be inside the same Body")
+doc.recompute()
+if not list(getattr(getattr(profile, "Shape", None), "Wires", []) or []):
+    raise ValueError("Sweep profile must contain a closed wire")
+spine_edges = list(getattr(getattr(spine, "Shape", None), "Edges", []) or [])
+if not spine_edges:
+    raise ValueError("Sweep spine must contain at least one edge")
+spine_names = [f"Edge{{index}}" for index in range(1, len(spine_edges) + 1)]
 
 base_feature = _find_preceding_single_solid_feature(body, profile)
 base_shape = base_feature.Shape.copy() if base_feature is not None else None
@@ -3537,7 +3598,7 @@ try:
     sweep = body.newObject("PartDesign::AdditivePipe", sweep_name)
     created_sweep_name = sweep.Name
     sweep.Profile = profile
-    sweep.Spine = (spine, ["Edge1"])
+    sweep.Spine = (spine, spine_names)
     sweep.Transition = {transition_map[transition]}
 
     doc.recompute()
@@ -3579,9 +3640,8 @@ _result_ = {{
         name: str | None = None,
         doc_name: str | None = None,
     ) -> dict[str, Any]:
-        """Create a datum plane in a PartDesign body.
-
-        Datum planes are reference planes used for sketching or measurements.
+        """
+        Create and validate an offset datum plane in a PartDesign Body.
 
         Args:
             body_name: Name of the PartDesign body.
@@ -3604,50 +3664,92 @@ _result_ = {{
         code = f"""
 {BODY_RUNTIME_HELPERS}
 
+{FEATURE_VALIDATION_RUNTIME_HELPERS}
+
 doc = (
-    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
+    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None
     else FreeCAD.ActiveDocument
 ) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
-
 body = doc.getObject({body_name!r})
-if body is None:
-    raise ValueError(f"Body not found: {body_name!r}")
-
-# Wrap in transaction for undo support
+if body is None or getattr(body, "TypeId", "") != "PartDesign::Body":
+    raise ValueError(f"PartDesign Body not found: {body_name!r}")
+plane = {base_plane!r}
+if plane not in {{"XY_Plane", "XZ_Plane", "YZ_Plane"}}:
+    raise ValueError(f"Invalid base plane: {{plane!r}}")
+plane_obj = _resolve_body_origin_feature(body, plane)
+original_tip_name = getattr(getattr(body, "Tip", None), "Name", None)
+created_name = None
+expected_offset = float({offset!r})
 doc.openTransaction("Create Datum Plane")
 try:
-    datum_name = {name!r} or "DatumPlane"
-    datum = body.newObject("PartDesign::Plane", datum_name)
-
-    # Set reference plane
-    plane = {base_plane!r}
-    if plane not in {{"XY_Plane", "XZ_Plane", "YZ_Plane"}}:
-        raise ValueError(f"Invalid base plane: {{plane!r}}")
-    plane_obj = _resolve_body_origin_feature(body, plane)
+    datum = body.newObject("PartDesign::Plane", {name!r} or "DatumPlane")
+    created_name = datum.Name
     datum.AttachmentSupport = [(plane_obj, "")]
     datum.MapMode = "FlatFace"
     datum.MapPathParameter = 0
     datum.MapReversed = False
     datum.AttachmentOffset = FreeCAD.Placement(
-        FreeCAD.Vector(0, 0, {offset}),
-        FreeCAD.Rotation(0, 0, 0, 1)
+        FreeCAD.Vector(0, 0, expected_offset),
+        FreeCAD.Rotation(0, 0, 0, 1),
     )
-
     doc.recompute()
-    doc.commitTransaction()
 
-    _result_ = {{
-        "name": datum.Name,
-        "label": datum.Label,
-        "type_id": datum.TypeId,
-    }}
+    current_tip_name = getattr(getattr(body, "Tip", None), "Name", None)
+    if current_tip_name != original_tip_name:
+        body.Tip = doc.getObject(original_tip_name) if original_tip_name else None
+        doc.recompute()
+    tip_preserved = (
+        getattr(getattr(body, "Tip", None), "Name", None) == original_tip_name
+    )
+    status = _feature_status_strings(datum)
+    errors = [
+        item for item in status
+        if "error" in item.lower() or "invalid" in item.lower()
+    ]
+    actual_offset = float(datum.AttachmentOffset.Base.z)
+    if errors:
+        raise ValueError("Datum plane failed: " + "; ".join(errors))
+    if datum.MapMode != "FlatFace":
+        raise ValueError(f"Datum plane MapMode is {{datum.MapMode!r}}, expected 'FlatFace'")
+    if abs(actual_offset - expected_offset) > 1e-9:
+        raise ValueError(
+            f"Datum plane offset mismatch: expected {{expected_offset}}, got {{actual_offset}}"
+        )
+    if not tip_preserved:
+        raise ValueError("Datum plane unexpectedly changed Body Tip")
+    doc.commitTransaction()
 except Exception:
-    doc.abortTransaction()
+    try:
+        doc.abortTransaction()
+    finally:
+        if created_name and doc.getObject(created_name) is not None:
+            try:
+                doc.removeObject(created_name)
+            except Exception:
+                pass
+        try:
+            body.Tip = doc.getObject(original_tip_name) if original_tip_name else None
+            doc.recompute()
+        except Exception:
+            pass
     raise
+
+_result_ = {{
+    "name": datum.Name,
+    "label": datum.Label,
+    "type_id": datum.TypeId,
+    "validated": True,
+    "base_plane": plane,
+    "map_mode": datum.MapMode,
+    "offset": actual_offset,
+    "tip": getattr(getattr(body, "Tip", None), "Name", None),
+    "tip_preserved": tip_preserved,
+    "status": status,
+}}
 """
         result = await bridge.execute_python(code)
         if result.success:
-            return result.result
+            return require_valid_feature_result(result.result, "Create datum plane")
         raise ValueError(result.error_traceback or "Create datum plane failed")
 
     @mcp.tool()
@@ -3657,9 +3759,11 @@ except Exception:
         name: str | None = None,
         doc_name: str | None = None,
     ) -> dict[str, Any]:
-        """Create a datum line (axis) in a PartDesign body.
+        """
+        Create a free datum line aligned with a Body-local origin axis.
 
-        Datum lines are reference axes used for patterns or measurements.
+        The origin axis is used only as an orientation choice. The datum line
+        is deliberately not attached with the unsupported ``ObjectXY`` mode.
 
         Args:
             body_name: Name of the PartDesign body.
@@ -3674,48 +3778,80 @@ except Exception:
                 - type_id: Object type
         """
         bridge = await get_bridge()
-
         code = f"""
 {BODY_RUNTIME_HELPERS}
 
+{FEATURE_VALIDATION_RUNTIME_HELPERS}
+
 doc = (
-    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
+    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None
     else FreeCAD.ActiveDocument
 ) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
-
 body = doc.getObject({body_name!r})
-if body is None:
-    raise ValueError(f"Body not found: {body_name!r}")
-
-# Wrap in transaction for undo support
+if body is None or getattr(body, "TypeId", "") != "PartDesign::Body":
+    raise ValueError(f"PartDesign Body not found: {body_name!r}")
+axis = {base_axis!r}
+targets = {{
+    "X_Axis": FreeCAD.Vector(1, 0, 0),
+    "Y_Axis": FreeCAD.Vector(0, 1, 0),
+    "Z_Axis": FreeCAD.Vector(0, 0, 1),
+}}
+if axis not in targets:
+    raise ValueError(f"Invalid base axis: {{axis!r}}")
+target_direction = targets[axis]
+created_name = None
 doc.openTransaction("Create Datum Line")
 try:
-    datum_name = {name!r} or "DatumLine"
-    datum = body.newObject("PartDesign::Line", datum_name)
-
-    # Set reference axis
-    axis = {base_axis!r}
-    if axis not in {{"X_Axis", "Y_Axis", "Z_Axis"}}:
-        raise ValueError(f"Invalid base axis: {{axis!r}}")
-    axis_obj = _resolve_body_origin_feature(body, axis)
-    datum.AttachmentSupport = [(axis_obj, "")]
-    datum.MapMode = "ObjectXY"
-
+    datum = body.newObject("PartDesign::Line", {name!r} or "DatumLine")
+    created_name = datum.Name
+    datum.MapMode = "Deactivated"
+    datum.Placement = FreeCAD.Placement(
+        FreeCAD.Vector(0, 0, 0),
+        FreeCAD.Rotation(FreeCAD.Vector(0, 0, 1), target_direction),
+    )
     doc.recompute()
+    status = _feature_status_strings(datum)
+    errors = [
+        item for item in status
+        if "error" in item.lower() or "invalid" in item.lower()
+    ]
+    direction = datum.Placement.Rotation.multVec(FreeCAD.Vector(0, 0, 1))
+    direction.normalize()
+    alignment = abs(float(direction.dot(target_direction)))
+    if errors:
+        raise ValueError("Datum line failed: " + "; ".join(errors))
+    if alignment < 0.999999:
+        raise ValueError(
+            f"Datum line direction mismatch: alignment={{alignment:.9g}}"
+        )
     doc.commitTransaction()
-
-    _result_ = {{
-        "name": datum.Name,
-        "label": datum.Label,
-        "type_id": datum.TypeId,
-    }}
 except Exception:
-    doc.abortTransaction()
+    try:
+        doc.abortTransaction()
+    finally:
+        if created_name and doc.getObject(created_name) is not None:
+            try:
+                doc.removeObject(created_name)
+                doc.recompute()
+            except Exception:
+                pass
     raise
+
+_result_ = {{
+    "name": datum.Name,
+    "label": datum.Label,
+    "type_id": datum.TypeId,
+    "validated": True,
+    "source_axis": axis,
+    "map_mode": datum.MapMode,
+    "direction": [float(direction.x), float(direction.y), float(direction.z)],
+    "alignment": alignment,
+    "status": status,
+}}
 """
         result = await bridge.execute_python(code)
         if result.success:
-            return result.result
+            return require_valid_feature_result(result.result, "Create datum line")
         raise ValueError(result.error_traceback or "Create datum line failed")
 
     @mcp.tool()
@@ -3725,9 +3861,8 @@ except Exception:
         name: str | None = None,
         doc_name: str | None = None,
     ) -> dict[str, Any]:
-        """Create a datum point in a PartDesign body.
-
-        Datum points are reference points used for measurements or construction.
+        """
+        Create and validate a free datum point in a PartDesign Body.
 
         Args:
             body_name: Name of the PartDesign body.
@@ -3742,50 +3877,95 @@ except Exception:
                 - type_id: Object type
         """
         bridge = await get_bridge()
-
-        pos = position if position else [0, 0, 0]
+        pos = position if position is not None else [0.0, 0.0, 0.0]
+        if len(pos) != 3:
+            raise ValueError("position must contain exactly three coordinates")
 
         code = f"""
 {BODY_RUNTIME_HELPERS}
 
+{FEATURE_VALIDATION_RUNTIME_HELPERS}
+
 doc = (
-    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
+    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None
     else FreeCAD.ActiveDocument
 ) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
-
 body = doc.getObject({body_name!r})
-if body is None:
-    raise ValueError(f"Body not found: {body_name!r}")
-
-# Wrap in transaction for undo support
+if body is None or getattr(body, "TypeId", "") != "PartDesign::Body":
+    raise ValueError(f"PartDesign Body not found: {body_name!r}")
+expected = FreeCAD.Vector({float(pos[0])}, {float(pos[1])}, {float(pos[2])})
+original_tip_name = getattr(getattr(body, "Tip", None), "Name", None)
+created_name = None
 doc.openTransaction("Create Datum Point")
 try:
-    datum_name = {name!r} or "DatumPoint"
-    datum = body.newObject("PartDesign::Point", datum_name)
-
-    # FreeCAD Bodies expose origin axes and planes, but no attachable origin
-    # point object. A free datum point is therefore positioned directly.
+    datum = body.newObject("PartDesign::Point", {name!r} or "DatumPoint")
+    created_name = datum.Name
     datum.MapMode = "Deactivated"
     datum.Placement = FreeCAD.Placement(
-        FreeCAD.Vector({pos[0]}, {pos[1]}, {pos[2]}),
-        FreeCAD.Rotation(0, 0, 0, 1)
+        expected,
+        FreeCAD.Rotation(0, 0, 0, 1),
     )
-
     doc.recompute()
-    doc.commitTransaction()
 
-    _result_ = {{
-        "name": datum.Name,
-        "label": datum.Label,
-        "type_id": datum.TypeId,
-    }}
+    current_tip_name = getattr(getattr(body, "Tip", None), "Name", None)
+    if current_tip_name != original_tip_name:
+        body.Tip = doc.getObject(original_tip_name) if original_tip_name else None
+        doc.recompute()
+    tip_preserved = (
+        getattr(getattr(body, "Tip", None), "Name", None) == original_tip_name
+    )
+    status = _feature_status_strings(datum)
+    errors = [
+        item for item in status
+        if "error" in item.lower() or "invalid" in item.lower()
+    ]
+    actual = datum.Placement.Base
+    position_error = float((actual - expected).Length)
+    if errors:
+        raise ValueError("Datum point failed: " + "; ".join(errors))
+    if datum.MapMode != "Deactivated":
+        raise ValueError(
+            f"Datum point MapMode is {{datum.MapMode!r}}, expected 'Deactivated'"
+        )
+    if position_error > 1e-9:
+        raise ValueError(
+            f"Datum point position mismatch: error={{position_error:.9g}}"
+        )
+    if not tip_preserved:
+        raise ValueError("Datum point unexpectedly changed Body Tip")
+    doc.commitTransaction()
 except Exception:
-    doc.abortTransaction()
+    try:
+        doc.abortTransaction()
+    finally:
+        if created_name and doc.getObject(created_name) is not None:
+            try:
+                doc.removeObject(created_name)
+            except Exception:
+                pass
+        try:
+            body.Tip = doc.getObject(original_tip_name) if original_tip_name else None
+            doc.recompute()
+        except Exception:
+            pass
     raise
+
+_result_ = {{
+    "name": datum.Name,
+    "label": datum.Label,
+    "type_id": datum.TypeId,
+    "validated": True,
+    "map_mode": datum.MapMode,
+    "position": [float(actual.x), float(actual.y), float(actual.z)],
+    "position_error": position_error,
+    "tip": getattr(getattr(body, "Tip", None), "Name", None),
+    "tip_preserved": tip_preserved,
+    "status": status,
+}}
 """
         result = await bridge.execute_python(code)
         if result.success:
-            return result.result
+            return require_valid_feature_result(result.result, "Create datum point")
         raise ValueError(result.error_traceback or "Create datum point failed")
 
     # =========================================================================
@@ -3801,10 +3981,8 @@ except Exception:
         name: str | None = None,
         doc_name: str | None = None,
     ) -> dict[str, Any]:
-        """Add draft angle to faces of an object.
-
-        Draft angles are used in manufacturing to allow parts to be
-        released from molds.
+        """
+        Draft selected faces of the current Body Tip and validate the solid.
 
         Args:
             object_name: Name of the object to draft.
@@ -3821,68 +3999,73 @@ except Exception:
                 - label: Draft label
                 - type_id: Object type
         """
+        if angle == 0:
+            raise ValueError("Draft angle must be non-zero")
         bridge = await get_bridge()
-
-        # Use actual None or list, not string "None"
-        faces_param = faces if faces else None
-
+        plane_map = {"XY": "XY_Plane", "XZ": "XZ_Plane", "YZ": "YZ_Plane"}
+        if plane not in plane_map:
+            raise ValueError(f"Invalid plane: {plane}. Use: XY, XZ, YZ")
         code = f"""
 {BODY_RUNTIME_HELPERS}
 
+{FEATURE_VALIDATION_RUNTIME_HELPERS}
+
 doc = (
-    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
+    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None
     else FreeCAD.ActiveDocument
 ) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
-
 obj = doc.getObject({object_name!r})
 if obj is None:
     raise ValueError(f"Object not found: {object_name!r}")
-
-# Check if this is in a PartDesign Body
-body = None
-for parent in doc.Objects:
-    if parent.TypeId == "PartDesign::Body":
-        if hasattr(parent, "Group") and obj in parent.Group:
-            body = parent
-            break
-
+body = _find_body_containing_object(doc, obj)
 if body is None:
     raise ValueError("Object must be inside a PartDesign Body for Draft operation")
-
-# Get selected faces (None means all suitable faces)
-selected_faces = {faces_param!r}
-
-# Wrap in transaction for undo support
+if not _is_valid_single_solid_feature(obj):
+    raise ValueError(f"Draft source is not one valid solid: {{obj.Name}}")
+_require_current_body_tip(body, obj, "Draft")
+selected_faces = _validated_shape_subelement_names(obj, {faces!r}, "Face")
+original_tip_name = getattr(body.Tip, "Name", None)
+created_name = None
 doc.openTransaction("Draft Feature")
 try:
-    draft_name = {name!r} or "Draft"
-    draft = body.newObject("PartDesign::Draft", draft_name)
-
-    draft.Angle = {angle}
-    draft.Base = (obj, selected_faces if selected_faces else [])
-
-    # Set neutral plane
-    plane_name = {plane!r}
-    plane_map = {{"XY": "XY_Plane", "XZ": "XZ_Plane", "YZ": "YZ_Plane"}}
-    if plane_name in plane_map:
-        plane_obj = _resolve_body_origin_feature(body, plane_map[plane_name])
-        draft.NeutralPlane = (plane_obj, "")
-
+    draft = body.newObject("PartDesign::Draft", {name!r} or "Draft")
+    created_name = draft.Name
+    draft.Angle = {angle!r}
+    draft.Base = (obj, selected_faces)
+    plane_obj = _resolve_body_origin_feature(body, {plane_map[plane]!r})
+    draft.NeutralPlane = (plane_obj, [""])
     doc.recompute()
+    validation = _validate_single_solid_feature(draft, body)
+    if not validation["ok"]:
+        raise ValueError("Draft failed: " + "; ".join(validation["reasons"]))
     doc.commitTransaction()
-
-    _result_ = {{
-        "name": draft.Name,
-        "label": draft.Label,
-        "type_id": draft.TypeId,
-    }}
 except Exception:
-    doc.abortTransaction()
+    try:
+        doc.abortTransaction()
+    finally:
+        _cleanup_failed_partdesign_feature(
+            doc, body, created_name, original_tip_name
+        )
     raise
+
+_result_ = {{
+    "name": draft.Name,
+    "label": draft.Label,
+    "type_id": draft.TypeId,
+    "validated": validation["ok"],
+    "shape_valid": validation["shape_valid"],
+    "solid_count": validation["solid_count"],
+    "tip_matches": validation["tip_matches"],
+    "status": validation["status"],
+    "result_volume": validation["result_volume"],
+    "source_feature": obj.Name,
+    "faces": selected_faces,
+    "plane": {plane!r},
+}}
 """
         result = await bridge.execute_python(code)
         if result.success:
-            return result.result
+            return require_valid_feature_result(result.result, "Draft")
         raise ValueError(result.error_traceback or "Draft feature failed")
 
     @mcp.tool()
@@ -3893,10 +4076,8 @@ except Exception:
         name: str | None = None,
         doc_name: str | None = None,
     ) -> dict[str, Any]:
-        """Create a thickness (shell) feature in PartDesign.
-
-        Hollows out a solid by removing specified faces and offsetting
-        the remaining faces.
+        """
+        Shell the current Body Tip and validate the resulting solid.
 
         Args:
             object_name: Name of the solid feature to shell.
@@ -3911,55 +4092,73 @@ except Exception:
                 - label: Thickness label
                 - type_id: Object type
         """
+        if thickness <= 0:
+            raise ValueError("Thickness must be positive")
+        if not faces_to_remove:
+            raise ValueError("Thickness requires at least one face to remove")
         bridge = await get_bridge()
-
         code = f"""
+{BODY_RUNTIME_HELPERS}
+
+{FEATURE_VALIDATION_RUNTIME_HELPERS}
+
 doc = (
-    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
+    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None
     else FreeCAD.ActiveDocument
 ) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
-
 obj = doc.getObject({object_name!r})
 if obj is None:
     raise ValueError(f"Object not found: {object_name!r}")
-
-# Check if this is in a PartDesign Body
-body = None
-for parent in doc.Objects:
-    if parent.TypeId == "PartDesign::Body":
-        if hasattr(parent, "Group") and obj in parent.Group:
-            body = parent
-            break
-
+body = _find_body_containing_object(doc, obj)
 if body is None:
     raise ValueError("Object must be inside a PartDesign Body for Thickness operation")
-
-# Wrap in transaction for undo support
+if not _is_valid_single_solid_feature(obj):
+    raise ValueError(f"Thickness source is not one valid solid: {{obj.Name}}")
+_require_current_body_tip(body, obj, "Thickness")
+selected_faces = _validated_shape_subelement_names(
+    obj, {faces_to_remove!r}, "Face"
+)
+original_tip_name = getattr(body.Tip, "Name", None)
+created_name = None
 doc.openTransaction("Thickness Feature")
 try:
-    thickness_name = {name!r} or "Thickness"
-    thick = body.newObject("PartDesign::Thickness", thickness_name)
-
-    thick.Value = {thickness}
-    thick.Base = (obj, {faces_to_remove!r})
-    thick.Mode = 0  # Skin mode
-    thick.Join = 0  # Arc join
-
+    thick = body.newObject("PartDesign::Thickness", {name!r} or "Thickness")
+    created_name = thick.Name
+    thick.Value = {thickness!r}
+    thick.Base = (obj, selected_faces)
+    thick.Mode = 0
+    thick.Join = 0
     doc.recompute()
+    validation = _validate_single_solid_feature(thick, body)
+    if not validation["ok"]:
+        raise ValueError("Thickness failed: " + "; ".join(validation["reasons"]))
     doc.commitTransaction()
-
-    _result_ = {{
-        "name": thick.Name,
-        "label": thick.Label,
-        "type_id": thick.TypeId,
-    }}
 except Exception:
-    doc.abortTransaction()
+    try:
+        doc.abortTransaction()
+    finally:
+        _cleanup_failed_partdesign_feature(
+            doc, body, created_name, original_tip_name
+        )
     raise
+
+_result_ = {{
+    "name": thick.Name,
+    "label": thick.Label,
+    "type_id": thick.TypeId,
+    "validated": validation["ok"],
+    "shape_valid": validation["shape_valid"],
+    "solid_count": validation["solid_count"],
+    "tip_matches": validation["tip_matches"],
+    "status": validation["status"],
+    "result_volume": validation["result_volume"],
+    "source_feature": obj.Name,
+    "faces_to_remove": selected_faces,
+}}
 """
         result = await bridge.execute_python(code)
         if result.success:
-            return result.result
+            return require_valid_feature_result(result.result, "Thickness")
         raise ValueError(result.error_traceback or "Thickness feature failed")
 
     # =========================================================================
@@ -3974,7 +4173,8 @@ except Exception:
         name: str | None = None,
         doc_name: str | None = None,
     ) -> dict[str, Any]:
-        """Create a subtractive loft (cut) through multiple sketches.
+        """
+        Create and validate a subtractive loft through distinct profiles.
 
         Args:
             sketch_names: List of sketch names to loft through (in order).
@@ -3989,57 +4189,85 @@ except Exception:
                 - label: Loft label
                 - type_id: Object type
         """
+        if len(sketch_names) < 2:
+            raise ValueError("Subtractive loft requires at least two sketches")
+        if len(set(sketch_names)) != len(sketch_names):
+            raise ValueError("Subtractive loft sketches must be distinct")
         bridge = await get_bridge()
-
         code = f"""
 {BODY_RUNTIME_HELPERS}
 
+{FEATURE_VALIDATION_RUNTIME_HELPERS}
+
 doc = (
-    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
+    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None
     else FreeCAD.ActiveDocument
 ) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
-
 sketches = []
-for sname in {sketch_names!r}:
-    sketch = doc.getObject(sname)
+for sketch_name in {sketch_names!r}:
+    sketch = doc.getObject(sketch_name)
     if sketch is None:
-        raise ValueError(f"Sketch not found: {{sname}}")
+        raise ValueError(f"Sketch not found: {{sketch_name}}")
     sketches.append(sketch)
-
-if len(sketches) < 2:
-    raise ValueError("Loft requires at least 2 sketches")
-
-# Find the body containing the first sketch
 body = _find_body_containing_object(doc, sketches[0])
-
 if body is None:
     raise ValueError("Sketches must be inside a PartDesign Body")
-
-# Wrap in transaction for undo support
+for sketch in sketches[1:]:
+    if _find_body_containing_object(doc, sketch) is not body:
+        raise ValueError("All subtractive loft sketches must be in the same Body")
+doc.recompute()
+for sketch in sketches:
+    if not list(getattr(getattr(sketch, "Shape", None), "Wires", []) or []):
+        raise ValueError(f"Subtractive loft profile has no closed wire: {{sketch.Name}}")
+base_feature = _find_preceding_single_solid_feature(body, sketches[0])
+if base_feature is None:
+    raise ValueError("Subtractive loft requires an existing solid before its profiles")
+base_shape = base_feature.Shape.copy()
+original_tip_name = getattr(body.Tip, "Name", None)
+created_name = None
 doc.openTransaction("Subtractive Loft")
 try:
-    loft_name = {name!r} or "SubtractiveLoft"
-    loft = body.newObject("PartDesign::SubtractiveLoft", loft_name)
+    loft = body.newObject("PartDesign::SubtractiveLoft", {name!r} or "SubtractiveLoft")
+    created_name = loft.Name
     loft.Profile = sketches[0]
     loft.Sections = sketches[1:]
-    loft.Ruled = {ruled}
-    loft.Closed = {closed}
-
+    loft.Ruled = {ruled!r}
+    loft.Closed = {closed!r}
     doc.recompute()
+    validation = _validate_subtractive_feature(loft, body, base_shape)
+    if not validation["ok"]:
+        raise ValueError(
+            "Subtractive loft failed: " + "; ".join(validation["reasons"])
+        )
     doc.commitTransaction()
-
-    _result_ = {{
-        "name": loft.Name,
-        "label": loft.Label,
-        "type_id": loft.TypeId,
-    }}
 except Exception:
-    doc.abortTransaction()
+    try:
+        doc.abortTransaction()
+    finally:
+        _cleanup_failed_partdesign_feature(
+            doc, body, created_name, original_tip_name
+        )
     raise
+
+_result_ = {{
+    "name": loft.Name,
+    "label": loft.Label,
+    "type_id": loft.TypeId,
+    "validated": validation["ok"],
+    "shape_valid": validation["shape_valid"],
+    "solid_count": validation["solid_count"],
+    "tip_matches": validation["tip_matches"],
+    "status": validation["status"],
+    "removed_volume": validation["removed_volume"],
+    "base_volume": float(base_shape.Volume),
+    "result_volume": validation["result_volume"],
+    "base_feature": base_feature.Name,
+    "profiles": [sketch.Name for sketch in sketches],
+}}
 """
         result = await bridge.execute_python(code)
         if result.success:
-            return result.result
+            return require_subtractive_result(result.result, "Subtractive loft")
         raise ValueError(result.error_traceback or "Subtractive loft failed")
 
     @mcp.tool()
@@ -4050,7 +4278,8 @@ except Exception:
         name: str | None = None,
         doc_name: str | None = None,
     ) -> dict[str, Any]:
-        """Create a subtractive pipe (sweep cut) along a spine path.
+        """
+        Create and validate a sweep cut using distinct profile and path sketches.
 
         Args:
             profile_sketch: Name of the profile sketch to sweep.
@@ -4068,63 +4297,90 @@ except Exception:
                 - label: Pipe label
                 - type_id: Object type
         """
-        bridge = await get_bridge()
-
-        transition_map = {
-            "Transformed": 0,
-            "Right": 1,
-            "Round": 2,
-        }
-
+        if profile_sketch == spine_sketch:
+            raise ValueError("Subtractive pipe profile and spine must be different sketches")
+        transition_map = {"Transformed": 0, "Right": 1, "Round": 2}
         if transition not in transition_map:
             raise ValueError(f"Invalid transition: {transition}")
-
+        bridge = await get_bridge()
         code = f"""
 {BODY_RUNTIME_HELPERS}
 
+{FEATURE_VALIDATION_RUNTIME_HELPERS}
+
 doc = (
-    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
+    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None
     else FreeCAD.ActiveDocument
 ) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
-
 profile = doc.getObject({profile_sketch!r})
 if profile is None:
     raise ValueError(f"Profile sketch not found: {profile_sketch!r}")
-
 spine = doc.getObject({spine_sketch!r})
 if spine is None:
     raise ValueError(f"Spine sketch not found: {spine_sketch!r}")
-
-# Find the body containing the profile sketch
 body = _find_body_containing_object(doc, profile)
-
-if body is None:
-    raise ValueError("Sketches must be inside a PartDesign Body")
-
-# Wrap in transaction for undo support
+if body is None or _find_body_containing_object(doc, spine) is not body:
+    raise ValueError("Profile and spine must be inside the same PartDesign Body")
+doc.recompute()
+if not list(getattr(getattr(profile, "Shape", None), "Wires", []) or []):
+    raise ValueError("Subtractive pipe profile must contain a closed wire")
+spine_edges = list(getattr(getattr(spine, "Shape", None), "Edges", []) or [])
+if not spine_edges:
+    raise ValueError("Subtractive pipe spine must contain at least one edge")
+group = list(getattr(body, "Group", []) or [])
+first_input = min((profile, spine), key=group.index)
+base_feature = _find_preceding_single_solid_feature(body, first_input)
+if base_feature is None:
+    raise ValueError("Subtractive pipe requires an existing solid before its sketches")
+base_shape = base_feature.Shape.copy()
+spine_names = [f"Edge{{index}}" for index in range(1, len(spine_edges) + 1)]
+original_tip_name = getattr(body.Tip, "Name", None)
+created_name = None
 doc.openTransaction("Subtractive Pipe")
 try:
-    pipe_name = {name!r} or "SubtractivePipe"
-    pipe = body.newObject("PartDesign::SubtractivePipe", pipe_name)
+    pipe = body.newObject("PartDesign::SubtractivePipe", {name!r} or "SubtractivePipe")
+    created_name = pipe.Name
     pipe.Profile = profile
-    pipe.Spine = (spine, ["Edge1"])
+    pipe.Spine = (spine, spine_names)
     pipe.Transition = {transition_map[transition]}
-
     doc.recompute()
+    validation = _validate_subtractive_feature(pipe, body, base_shape)
+    if not validation["ok"]:
+        raise ValueError(
+            "Subtractive pipe failed: " + "; ".join(validation["reasons"])
+        )
     doc.commitTransaction()
-
-    _result_ = {{
-        "name": pipe.Name,
-        "label": pipe.Label,
-        "type_id": pipe.TypeId,
-    }}
 except Exception:
-    doc.abortTransaction()
+    try:
+        doc.abortTransaction()
+    finally:
+        _cleanup_failed_partdesign_feature(
+            doc, body, created_name, original_tip_name
+        )
     raise
+
+_result_ = {{
+    "name": pipe.Name,
+    "label": pipe.Label,
+    "type_id": pipe.TypeId,
+    "validated": validation["ok"],
+    "shape_valid": validation["shape_valid"],
+    "solid_count": validation["solid_count"],
+    "tip_matches": validation["tip_matches"],
+    "status": validation["status"],
+    "removed_volume": validation["removed_volume"],
+    "base_volume": float(base_shape.Volume),
+    "result_volume": validation["result_volume"],
+    "base_feature": base_feature.Name,
+    "profile": profile.Name,
+    "spine": spine.Name,
+    "spine_edges": spine_names,
+    "transition": {transition!r},
+}}
 """
         result = await bridge.execute_python(code)
         if result.success:
-            return result.result
+            return require_subtractive_result(result.result, "Subtractive pipe")
         raise ValueError(result.error_traceback or "Subtractive pipe failed")
 
     # =========================================================================
