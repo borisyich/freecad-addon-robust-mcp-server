@@ -10,6 +10,7 @@ def test_generated_parametric_validation_code_compiles() -> None:
         doc_name="Bracket",
         recompute=True,
         include_sketch_constraints=False,
+        required_dimension_names=["Width", "Height"],
     )
 
     compile(code, "<parametric-validation>", "exec")
@@ -21,6 +22,9 @@ def test_generated_parametric_validation_code_compiles() -> None:
     assert '"solver_constraint_indices"' in code
     assert '"has_solid"' in code
     assert "_analyze_sketch" in code
+    assert "__REQUIRED_DIMENSION_NAMES__" not in code
+    assert "required_dimension_missing" in code
+    assert "unused_spreadsheet_parameter" in code
 
 
 def test_generated_code_can_include_constraint_details() -> None:
@@ -91,8 +95,9 @@ def test_generated_report_describes_body_tip_history_and_sketch(monkeypatch) -> 
     )
 
     class FakeConstraint:
-        Type = "DistanceX"
-        Name = "Width"
+        def __init__(self, constraint_type: str, name: str) -> None:
+            self.Type = constraint_type
+            self.Name = name
 
     class FakeSketch:
         Name = "BaseSketch"
@@ -105,9 +110,12 @@ def test_generated_report_describes_body_tip_history_and_sketch(monkeypatch) -> 
         Support = None
         AttachmentSupport = []
         ExpressionEngine = []
-        Constraints = [FakeConstraint()]
+        Constraints = [
+            FakeConstraint("DistanceX", "Width"),
+            FakeConstraint("Horizontal", "Depth"),
+        ]
         GeometryCount = 4
-        ConstraintCount = 1
+        ConstraintCount = 2
         ExternalGeometry = []
         FullyConstrained = False
         DoF = 2
@@ -130,8 +138,8 @@ def test_generated_report_describes_body_tip_history_and_sketch(monkeypatch) -> 
         def getGeometryWithDependentParameters(self):  # noqa: N802
             return [(0, 1), (1, 2)]
 
-        def getConstraintName(self, index):  # noqa: N802, ARG002
-            return "Width"
+        def getConstraintName(self, index):  # noqa: N802
+            return ["Width", "Depth"][index]
 
         def isDriving(self, index):  # noqa: N802, ARG002
             return True
@@ -139,7 +147,9 @@ def test_generated_report_describes_body_tip_history_and_sketch(monkeypatch) -> 
         def isInVirtualSpace(self, index):  # noqa: N802, ARG002
             return False
 
-        def getDatum(self, index):  # noqa: N802, ARG002
+        def getDatum(self, index):  # noqa: N802
+            if index != 0:
+                raise RuntimeError("Geometric constraints do not have datums")
             return SimpleNamespace(Value=20.0, Unit="mm", __str__=lambda _: "20 mm")
 
         def getLastConflicting(self):  # noqa: N802
@@ -154,7 +164,45 @@ def test_generated_report_describes_body_tip_history_and_sketch(monkeypatch) -> 
         def getLastMalformedConstraints(self):  # noqa: N802
             return []
 
+    class FakeSpreadsheet:
+        Name = "Params"
+        Label = "Parameters"
+        TypeId = "Spreadsheet::Sheet"
+        State = []
+        ViewObject = SimpleNamespace(Visibility=False)
+        ExpressionEngine = []
+        InList = []
+        OutList = []
+
+        def getNonEmptyCells(self):  # noqa: N802
+            return ["A1", "A2", "A3", "A4"]
+
+        def getContents(self, cell):  # noqa: N802
+            return {
+                "A1": "20 mm",
+                "A2": "5 mm",
+                "A3": "=Width / 2",
+                "A4": "30 mm",
+            }[cell]
+
+        def getAlias(self, cell):  # noqa: N802
+            return {
+                "A1": "Width",
+                "A2": "Orphan",
+                "A3": "HalfWidth",
+                "A4": "Width2",
+            }[cell]
+
+        def get(self, cell):
+            return {
+                "A1": "20.00 mm",
+                "A2": "5.00 mm",
+                "A3": "10.00 mm",
+                "A4": "30.00 mm",
+            }[cell]
+
     sketch = FakeSketch()
+    params = FakeSpreadsheet()
     datum = SimpleNamespace(
         Name="DatumPlane",
         Label="Datum Plane",
@@ -175,7 +223,10 @@ def test_generated_report_describes_body_tip_history_and_sketch(monkeypatch) -> 
         ViewObject=SimpleNamespace(Visibility=True),
         Placement=placement,
         Shape=FakeShape(),
-        ExpressionEngine=[],
+        ExpressionEngine=[
+            ("Length", "Params.HalfWidth"),
+            ("Length2", "Params.Width2"),
+        ],
         InList=[sketch],
         OutList=[],
     )
@@ -194,7 +245,7 @@ def test_generated_report_describes_body_tip_history_and_sketch(monkeypatch) -> 
         Name="Bracket",
         Label="Bracket",
         FileName="Bracket.FCStd",
-        Objects=[body, sketch, datum, pad],
+        Objects=[body, sketch, datum, pad, params],
         recompute=lambda: None,
     )
     fake_freecad = SimpleNamespace(
@@ -207,6 +258,7 @@ def test_generated_report_describes_body_tip_history_and_sketch(monkeypatch) -> 
         doc_name="Bracket",
         recompute=True,
         include_sketch_constraints=True,
+        required_dimension_names=["Width", "Depth"],
     )
     namespace: dict[str, object] = {}
     exec(code, namespace)
@@ -224,7 +276,7 @@ def test_generated_report_describes_body_tip_history_and_sketch(monkeypatch) -> 
     assert sketch_report["state"] == ["Valid"]
     assert sketch_report["analysis"]["solver"]["status"] == "under_constrained"
     assert sketch_report["analysis"]["solver"]["remaining_dof"] == 2
-    assert sketch_report["named_constraint_count"] == 1
+    assert sketch_report["named_constraint_count"] == 2
     assert sketch_report["constraints"][0]["name"] == "Width"
     datum_report = report["bodies"][0]["history"][1]
     assert datum_report["state"] == ["Valid"]
@@ -236,3 +288,22 @@ def test_generated_report_describes_body_tip_history_and_sketch(monkeypatch) -> 
         item["category"] == "sketch_under_constrained"
         for item in report["findings"]
     )
+    assert report["dimension_inventory"]["required_names"] == ["Width", "Depth"]
+    usage = {
+        item["name"]: item["status"]
+        for item in report["dimension_inventory"]["usage"]
+    }
+    assert usage == {"Width": "used", "Depth": "missing"}
+    spreadsheet = report["spreadsheets"][0]
+    parameters = {item["alias"]: item for item in spreadsheet["parameters"]}
+    # Exact token matching: Params.Width2 must not count as Params.Width.
+    assert parameters["Width"]["reference_count"] == 0
+    assert parameters["Width"]["connected_to_tree"] is True
+    assert parameters["HalfWidth"]["reference_count"] == 1
+    assert parameters["HalfWidth"]["connected_to_tree"] is True
+    assert [item["alias"] for item in spreadsheet["unused_parameters"]] == [
+        "Orphan"
+    ]
+    categories = {item["category"] for item in report["findings"]}
+    assert "required_dimension_missing" in categories
+    assert "unused_spreadsheet_parameter" in categories

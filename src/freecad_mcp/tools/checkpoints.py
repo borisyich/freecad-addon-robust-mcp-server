@@ -46,9 +46,7 @@ def register_checkpoint_tools(mcp: Any) -> None:
         geometry_valid: bool,
         solid_count: int | None = None,
         expected_solid_count: int | None = 1,
-        dimension_checks_passed: bool = True,
         visual_comparison_performed: bool = False,
-        view_match_confirmed: bool = True,
         unresolved_dimensions: list[str] | None = None,
         discrepancies: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
@@ -63,9 +61,7 @@ def register_checkpoint_tools(mcp: Any) -> None:
             geometry_valid: Whether FreeCAD geometry validation passed.
             solid_count: Current number of solids when known.
             expected_solid_count: Intended number of solids; usually one.
-            dimension_checks_passed: Whether measured dimensions/volume effects pass.
             visual_comparison_performed: Whether screenshot/open/compare was completed.
-            view_match_confirmed: Whether reference and candidate use equivalent views.
             unresolved_dimensions: Required values that remain unreadable or ambiguous.
             discrepancies: Ledger entries containing category, severity, expected,
                 observed, evidence, and proposed_reaction.
@@ -97,16 +93,10 @@ def register_checkpoint_tools(mcp: Any) -> None:
                 f"solid count is {solid_count}; expected {expected_solid_count}"
             )
 
-        if not dimension_checks_passed:
-            rework_reasons.append("one or more dimensional or volume checks failed")
-
         if not visual_comparison_performed:
             rework_reasons.append(
                 "visual checkpoint was not completed with saved/opened pixels and comparison"
             )
-
-        if not view_match_confirmed:
-            rework_reasons.append("reference and candidate views are not equivalent")
 
         if unresolved:
             unresolved_reasons.append(

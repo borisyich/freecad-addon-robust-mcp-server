@@ -431,7 +431,7 @@ The server currently registers **115 MCP tools**. The tables below list common t
 | `get_screenshot`            | Return the FreeCAD view as MCP image content                  | GUI  |
 | `open_image`                | Open a local drawing or saved screenshot                      | Both |
 | `open_image_tiles`          | Return a numbered overview plus enlarged overlapping tiles   | Both |
-| `compare_images`            | Compare reference and candidate side by side                  | Both |
+| `compare_images`            | Required major-feature/seed comparison for drawing reconstruction | Both |
 | `evaluate_model_checkpoint` | Optional deterministic continue/rework assessment             | Both |
 | `set_view_angle`            | Set camera to a standard view                                 | GUI  |
 | `fit_all`                   | Fit all visible objects in the view                           | GUI  |
@@ -457,10 +457,17 @@ turning, and sheet-metal strategies, and requires native editable parametric
 structure unless the user explicitly requests direct B-rep output.
 `execute_python`, `safe_execute`, and `run_macro` remain available.
 
+For drawing/sketch input, the Skill requires saving every explicit non-starred
+source dimension before modeling. Each identifier must drive the model through a
+named constraint or connected Spreadsheet alias. `compare_images` is required
+after every major feature and before any pattern multiplies a seed element.
+
 After any model creation or geometry change, call `validate_parametric_model`
 immediately before the final response and summarize the actual Bodies, Tips,
-history, sketches, solver state, direct solids, and warnings. The report is
-informative and does not by itself prove drawing correspondence.
+history, sketches, solver state, source-dimension usage, Spreadsheet connectivity,
+direct solids, and warnings. For drawing/sketch tasks, pass the complete saved
+identifier list as `required_dimension_names`. The report is informative and
+does not by itself prove drawing correspondence.
 
 #### Validation & diagnostics (5 tools)
 
@@ -468,7 +475,7 @@ informative and does not by itself prove drawing correspondence.
 | --- | --- | --- |
 | `validate_object` | Check one object's shape and FreeCAD state | All |
 | `validate_document` | Check geometric health across a document | All |
-| `validate_parametric_model` | Report Bodies, Tips, ordered history, sketch solver/profile state, expressions, and solids outside Bodies | All |
+| `validate_parametric_model` | Report editable history, required dimensions, Spreadsheet connectivity, and direct solids | All |
 | `undo_if_invalid` | Undo after invalid document state | All |
 | `safe_execute` | Run Python with optional validation and rollback | All |
 

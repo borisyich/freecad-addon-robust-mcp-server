@@ -66,6 +66,9 @@ workflow, deliver a native editable FreeCAD model:
   Pattern, Rib, Fillet, or Chamfer where they express the design intent;
 - key dimensions controlled by named constraints, expressions, or Spreadsheet
   aliases when reuse or editing benefits from them;
+- for drawing/sketch reconstruction, a saved dimension inventory containing
+  every explicit non-starred dimension from the source and a stable identifier
+  for each value;
 - a valid Body Tip and no accidental visible helper solids.
 
 `execute_python`, `safe_execute`, and `run_macro` are always available. They may
@@ -77,9 +80,17 @@ editable history rather than only assigning a final `Shape` to `Part::Feature`.
 
 After any task that creates or changes model geometry, call:
 
+For a drawing/sketch reconstruction, pass the saved non-starred dimension
+identifiers to the validator:
+
 ```text
-validate_parametric_model(doc_name=<intended document>)
+validate_parametric_model(
+    doc_name=<intended document>,
+    required_dimension_names=[<all saved non-starred dimension identifiers>],
+)
 ```
+
+For other geometry-changing tasks, `required_dimension_names` may be omitted.
 
 Do this immediately before the final user-facing response. Summarize:
 
@@ -89,7 +100,10 @@ Do this immediately before the final user-facing response. Summarize:
 4. sketch solver/profile status, especially under-, over-, redundant, or
    conflicting constraints;
 5. solids outside Bodies and other significant findings;
-6. limitations that still require visual or dimensional verification.
+6. whether every required source dimension drives the model;
+7. whether every Spreadsheet alias is connected directly or transitively to
+   the feature tree, or has been removed as redundant;
+8. limitations that still require visual or dimensional verification.
 
 The validator is informative. Do not convert every warning into failure, but do
 not hide warnings or claim a clean parametric result when the report contradicts
@@ -141,7 +155,10 @@ Read the detailed strategy in
   line when features belong together.
 - Prefer geometric constraints (`Horizontal`, `Vertical`, `Coincident`,
   `Tangent`, `Equal`, symmetry) plus a minimal set of driving dimensions.
-- Avoid broad `Fix` constraints as a substitute for design intent.
+- Avoid broad `Fix`/`Block` constraints as a substitute for design intent.
+  They may constrain at most 50% of the sketch geometry. When the next Fix
+  would exceed that limit, use geometric/dimensional constraints or delete
+  existing Fix/Block constraints before continuing.
 - Driving sketches should normally be fully constrained before completion.
   Intermediate under-constrained sketches are acceptable only while actively
   being developed. Over-constrained, conflicting, redundant, or solver-error
@@ -305,7 +322,15 @@ axis or plane, explicit/derived/assumed status, and confidence.
 - Use `open_image_tiles` or focused crops when dimensions/features are too small
   in the full sheet. Upscaling improves presentation to the VLM but does not
   restore detail absent from the source pixels.
-- Build the axis-aware evidence table and a feature plan before modeling.
+- Before creating geometry, extract and save every explicit dimension from the
+  drawing/sketch except dimensions marked with an asterisk. Give each saved
+  dimension a stable identifier suitable for a named sketch constraint or
+  Spreadsheet alias. Do not silently omit a dimension because it looks
+  redundant; resolve how it is used or record a genuine conflict.
+- Build the axis-aware evidence table, saved dimension inventory, and feature
+  plan before modeling. Each inventory item must later be represented by a
+  named driving sketch constraint or by a Spreadsheet parameter connected to
+  the feature tree.
 - Resolve ambiguity autonomously by choosing the interpretation most consistent
   across all views. Record assumptions and alternatives; revise them when later
   evidence conflicts.
@@ -322,8 +347,9 @@ Compare equivalent views only: front-to-front, top-to-top, left/right-to-the
 matching side, section-to-section, and isometric-to-isometric. A good match in
 one projection does not prove correct depth, axis direction, or hidden geometry.
 
-Use screenshots and `compare_images` at high-risk transitions or after major
-features. If one comparison leaves any doubt about silhouette, proportions,
+When reconstructing from a drawing/image, use `compare_images` after every
+major feature; a screenshot without comparison is not a completed visual
+checkpoint. If one comparison leaves any doubt about silhouette, proportions,
 feature count, placement, orientation, or depth, repeat the comparison for every
 principal view available on the target drawing, normally in this order:
 
@@ -355,7 +381,10 @@ After a major feature or any suspicious result, use the smallest relevant check:
 - `get_sketch_info` for solver/profile state;
 - `validate_object` for one feature;
 - `validate_document` for overall geometric health;
-- `inspect_object` for placement, bounds, volume, expressions, and dependencies;
+- `inspect_object(include_properties=False)` for routine placement, bounds,
+  volume, expressions, and dependency inspection. Set `include_properties=True`
+  only when exact property values are needed to diagnose or edit a specific
+  object; do not request the full property dump by default;
 - feature responses for `base_volume`, `result_volume`, retained/change ratios, and resolved Body Tip/base;
 - screenshots/crops for visual correspondence;
 - `evaluate_model_checkpoint` only when a formal discrepancy ledger is useful.
@@ -366,7 +395,37 @@ hidden document.
 
 ### Pattern reliability
 
-Use `linear_pattern` and `polar_pattern` only on a non-pattern seed. For combined linear and polar repetition, use `multi_transform_pattern`; do not chain a Pattern feature directly into another Pattern. After every pattern, require successful `material_change_diagnostics`, then verify Shape, Body Tip, one-solid topology, before/after volume evidence, and instance layout in an equivalent view.
+Use `linear_pattern` and `polar_pattern` only on a non-pattern seed. Before any
+linear, polar, mirrored, or multi-transform pattern, compare the single seed
+feature against the corresponding source view with `compare_images`. Do not
+pattern a seed that is merely plausible: patterning multiplies its dimensional,
+placement, and orientation errors. For combined linear and polar repetition,
+use `multi_transform_pattern`; do not chain a Pattern feature directly into
+another Pattern. After every pattern, require successful
+`material_change_diagnostics`, then verify Shape, Body Tip, one-solid topology,
+before/after volume evidence, and instance layout in an equivalent view.
+
+### Sketch arc construction
+
+Use `edit_sketch_geometry(..., operations=[...])` for both of these supported
+radius-defined cases:
+
+```text
+# Arc through two endpoints with a known radius. arc_side selects which side
+# of the directed chord x1,y1 -> x2,y2 contains the minor arc.
+{"op":"add_arc", "arc_mode":"endpoints_radius",
+ "x1":0, "y1":0, "x2":20, "y2":0, "radius":15,
+ "arc_side":"left"}
+
+# Tangent arc joining two existing line segments. The lines are trimmed by the
+# native Sketcher fillet operation.
+{"op":"add_arc", "arc_mode":"tangent_fillet",
+ "line1_index":0, "line2_index":1, "radius":4}
+```
+
+For the second form, create/identify the two lines first and use their current
+geometry indices. A radius that cannot fit the line geometry must be corrected,
+not approximated with an unrelated free arc.
 
 ## 8. Completion criteria
 
@@ -379,7 +438,14 @@ Before reporting completion:
 - explain any remaining under-constrained sketches and why they are acceptable;
 - hide or remove temporary construction solids;
 - inspect the final model from the required views;
-- call `validate_parametric_model` and report its findings accurately.
+- for drawing/sketch input, confirm that the saved inventory contains every
+  non-starred source dimension and pass all identifiers to
+  `validate_parametric_model(required_dimension_names=[...])`;
+- inspect each Spreadsheet alias: determine why it exists, connect it to the
+  feature tree if required, or delete it if redundant;
+- call `validate_parametric_model` and report its findings accurately. Do not
+  finish while it reports missing/unlinked required dimensions or unused
+  Spreadsheet parameters.
 
 See [references/validation-and-editability.md](references/validation-and-editability.md)
 for interpretation details and [references/source-notes.md](references/source-notes.md)

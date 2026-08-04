@@ -4,7 +4,9 @@
 > policy is `.agents/skills/freecad-engineering/SKILL.md`. Root `AGENTS.md` and
 > `.clinerules/freecad-modeling.md` are short client routers, not duplicated
 > policy. After any geometry change, call `validate_parametric_model` before the
-> final user-facing response.
+> final user-facing response. For drawing/sketch input, save all explicit
+> non-starred dimensions, compare major features and pre-pattern seeds with
+> `compare_images`, and pass all dimension identifiers to final validation.
 
 ## Project Overview
 
@@ -1956,13 +1958,17 @@ The MCP server provides a `freecad://capabilities` resource with a curated JSON 
 
 | Tool                      | Description |
 | ------------------------- | ----------- |
-| `edit_sketch_geometry`    | Apply ordered geometry additions, deletions, external references, and construction toggles in one transaction and one recompute. |
-| `edit_sketch_constraints` | Apply ordered constraint additions or deletions in one transaction and one recompute. |
+| `edit_sketch_geometry`    | Apply ordered geometry edits, including endpoint/radius and tangent-fillet arcs, in one transaction. |
+| `edit_sketch_constraints` | Apply ordered constraints with a maximum 50% Fix/Block ratio. |
 | `get_sketch_info`         | Inspect geometry, constraints, closure, and solver status. |
 
 `edit_sketch_geometry` supports `add_rectangle`, `add_circle`, `add_line`,
 `add_arc`, `add_point`, `add_ellipse`, `add_regular_polygon`, `add_polyline`, `add_slot`, `add_bspline`,
 `add_external_geometry`, `delete_geometry`, and `toggle_construction`.
+
+For `add_arc`, use `arc_mode="endpoints_radius"` with two endpoints, radius, and
+`arc_side`, or `arc_mode="tangent_fillet"` with two existing line indices and a
+radius.
 
 `edit_sketch_constraints` supports `horizontal`, `vertical`, `coincident`,
 `parallel`, `perpendicular`, `tangent`, `equal`, `distance`, `distance_x`,
@@ -2003,7 +2009,7 @@ The MCP server provides a `freecad://capabilities` resource with a curated JSON 
 | `get_screenshot`            | Capture a view as MCP image content with the X/Y/Z corner triad. |
 | `open_image`                | Open a local image and return MCP image content. |
 | `open_image_tiles`          | Return a numbered overview and enlarged overlapping fragments. |
-| `compare_images`            | Return a labelled side-by-side visual comparison. |
+| `compare_images`            | Mandatory major-feature and pre-pattern seed comparison for drawing reconstruction. |
 | `evaluate_model_checkpoint` | Derive continue/rework from supplied checkpoint evidence. |
 | `set_view_angle`            | Set a standard camera view. |
 | `fit_all`                   | Fit all visible objects in view. |
@@ -2023,7 +2029,7 @@ The MCP server provides a `freecad://capabilities` resource with a curated JSON 
 | ------------------- | ------------------------------------------------------------------------------------- |
 | `validate_object`          | Check one object's shape validity, state, and recompute status. |
 | `validate_document`        | Check geometric health across the document. |
-| `validate_parametric_model` | Final informative scan of Bodies, Tips, ordered history, sketches, solver/profile state, constraints, expressions, and solids outside Bodies. |
+| `validate_parametric_model` | Final scan of editable history, required source dimensions, Spreadsheet connectivity, and direct solids. |
 | `undo_if_invalid`          | Check document health and automatically undo the last operation when invalid objects exist. |
 | `safe_execute`             | Execute Python with optional validation and rollback; always available. |
 

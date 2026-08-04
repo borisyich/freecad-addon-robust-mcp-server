@@ -12,6 +12,7 @@ def build_parametric_validation_code(
     doc_name: str | None,
     recompute: bool,
     include_sketch_constraints: bool,
+    required_dimension_names: list[str] | None = None,
 ) -> str:
     """Build a self-contained script executed inside the FreeCAD process.
 
@@ -21,9 +22,12 @@ def build_parametric_validation_code(
     """
     template = r'''
 import math
+import re
 import FreeCAD
 
 __SKETCH_HELPERS__
+
+required_dimension_names = __REQUIRED_DIMENSION_NAMES__
 
 
 def _finite_number(value):
@@ -32,6 +36,13 @@ def _finite_number(value):
     except Exception:
         return None
     return number if math.isfinite(number) else None
+
+
+def _text_uses_token(text, token):
+    return re.search(
+        rf"(?<![A-Za-z0-9_]){re.escape(token)}(?![A-Za-z0-9_])",
+        str(text or ""),
+    ) is not None
 
 
 def _object_ref(obj):
@@ -179,6 +190,158 @@ def _expression_summary(obj):
     return output
 
 
+def _spreadsheet_cells(sheet):
+    cells = set()
+    try:
+        cells.update(sheet.getNonEmptyCells())
+    except Exception:
+        pass
+    try:
+        import xml.etree.ElementTree as ET
+
+        root = ET.fromstring(sheet.getPropertyByName("cells").Content)
+        for node in root.iter("Cell"):
+            address = node.attrib.get("address")
+            if address:
+                cells.add(address)
+    except Exception:
+        pass
+    return sorted(cells)
+
+
+def _spreadsheet_summary(sheet, expression_bindings):
+    parameters = []
+    cells = []
+    for cell in _spreadsheet_cells(sheet):
+        try:
+            content = sheet.getContents(cell) or ""
+        except Exception:
+            content = ""
+        try:
+            alias = sheet.getAlias(cell) or None
+        except Exception:
+            alias = None
+        try:
+            computed = str(sheet.get(cell))
+        except Exception:
+            computed = None
+
+        references = []
+        tokens = [f"{sheet.Name}.{cell}"]
+        if alias:
+            tokens.extend(
+                [
+                    f"{sheet.Name}.{alias}",
+                    f"<<{getattr(sheet, 'Label', sheet.Name)}>>.{alias}",
+                ]
+            )
+        for binding in expression_bindings:
+            expression = binding.get("expression", "")
+            if (
+                not str(binding.get("object_type", "")).startswith("Spreadsheet::")
+                and any(_text_uses_token(expression, token) for token in tokens)
+            ):
+                references.append(binding)
+
+        cell_summary = {
+            "cell": cell,
+            "alias": alias,
+            "content": content,
+            "computed": computed,
+            "references": references,
+            "reference_count": len(references),
+            "dependencies": [],
+            "dependent_cells": [],
+            "connected_to_tree": bool(references),
+        }
+        cells.append(cell_summary)
+        if alias:
+            parameters.append(cell_summary)
+
+    return {
+        "name": getattr(sheet, "Name", None),
+        "label": getattr(sheet, "Label", None),
+        "type_id": getattr(sheet, "TypeId", None),
+        "visibility": _visibility(sheet),
+        "cell_count": len(cells),
+        "parameter_count": len(parameters),
+        "cells": cells,
+        "parameters": parameters,
+        "unused_parameters": [],
+    }
+
+
+def _resolve_spreadsheet_connectivity(spreadsheets):
+    """Mark aliases that directly or transitively drive non-Spreadsheet objects."""
+    node_by_id = {}
+    token_to_node_ids = {}
+    for spreadsheet in spreadsheets:
+        sheet_name = spreadsheet["name"]
+        sheet_label = spreadsheet["label"] or sheet_name
+        for cell in spreadsheet["cells"]:
+            node_id = f"{sheet_name}.{cell['cell']}"
+            cell["node_id"] = node_id
+            node_by_id[node_id] = cell
+            tokens = [f"{sheet_name}.{cell['cell']}"]
+            if cell["alias"]:
+                tokens.extend(
+                    [
+                        f"{sheet_name}.{cell['alias']}",
+                        f"<<{sheet_label}>>.{cell['alias']}",
+                    ]
+                )
+            for token in tokens:
+                token_to_node_ids.setdefault(token, set()).add(node_id)
+
+    for spreadsheet in spreadsheets:
+        local_aliases = {
+            cell["alias"]: cell["node_id"]
+            for cell in spreadsheet["cells"]
+            if cell["alias"]
+        }
+        local_cells = {
+            cell["cell"]: cell["node_id"] for cell in spreadsheet["cells"]
+        }
+        for source in spreadsheet["cells"]:
+            content = source["content"] or ""
+            dependencies = set()
+            for token, node_ids in token_to_node_ids.items():
+                if _text_uses_token(content, token):
+                    dependencies.update(node_ids)
+            for token, node_id in {**local_cells, **local_aliases}.items():
+                if _text_uses_token(content, token):
+                    dependencies.add(node_id)
+            dependencies.discard(source["node_id"])
+            source["dependencies"] = sorted(dependencies)
+            for dependency in dependencies:
+                node_by_id[dependency]["dependent_cells"].append(source["node_id"])
+
+    connected = {
+        node_id
+        for node_id, node in node_by_id.items()
+        if node["connected_to_tree"]
+    }
+    changed = True
+    while changed:
+        changed = False
+        for node_id in list(connected):
+            for dependency in node_by_id[node_id]["dependencies"]:
+                if dependency not in connected:
+                    connected.add(dependency)
+                    changed = True
+
+    for spreadsheet in spreadsheets:
+        for cell in spreadsheet["cells"]:
+            cell["connected_to_tree"] = cell["node_id"] in connected
+            cell["dependent_cells"] = sorted(set(cell["dependent_cells"]))
+        spreadsheet["unused_parameters"] = [
+            parameter
+            for parameter in spreadsheet["parameters"]
+            if not parameter["connected_to_tree"]
+        ]
+    return spreadsheets
+
+
 def _placement_summary(obj):
     try:
         placement = obj.Placement
@@ -321,6 +484,7 @@ def _sketch_summary(sketch, body_name=None):
     states = _state_values(sketch)
     constraint_type_counts = {}
     named_constraint_count = 0
+    named_constraints = []
     constraints = []
     try:
         raw_constraints = list(sketch.Constraints or [])
@@ -334,6 +498,15 @@ def _sketch_summary(sketch, body_name=None):
         )
         if detail["name"]:
             named_constraint_count += 1
+            named_constraints.append(
+                {
+                    "index": detail["index"],
+                    "name": detail["name"],
+                    "type": detail["type"],
+                    "driving": detail["driving"],
+                    "datum": detail["datum"],
+                }
+            )
         if __INCLUDE_CONSTRAINTS__:
             constraints.append(detail)
 
@@ -364,6 +537,7 @@ def _sketch_summary(sketch, body_name=None):
         "expressions": _expression_summary(sketch),
         "constraint_type_counts": constraint_type_counts,
         "named_constraint_count": named_constraint_count,
+        "named_constraints": named_constraints,
         "solver_constraint_indices": solver_constraint_indices,
         "analysis": analysis,
     }
@@ -522,6 +696,14 @@ if doc is None:
         "standalone_sketches": [],
         "uncontained_shape_objects": [],
         "spreadsheets": [],
+        "dimension_inventory": {
+            "provided": bool(required_dimension_names),
+            "required_names": required_dimension_names,
+            "usage": [],
+            "all_used": False,
+            "named_dimension_constraints": [],
+            "spreadsheet_parameters": [],
+        },
         "findings": [
             {
                 "severity": "error",
@@ -592,21 +774,98 @@ else:
             }
         )
 
+    expression_bindings = []
+    for obj in doc.Objects:
+        for expression in _expression_summary(obj):
+            expression_bindings.append(
+                {
+                    "object": getattr(obj, "Name", None),
+                    "label": getattr(obj, "Label", None),
+                    "object_type": getattr(obj, "TypeId", None),
+                    "property": expression["property"],
+                    "expression": expression["expression"],
+                }
+            )
+
     spreadsheets = [
-        {
-            "name": getattr(obj, "Name", None),
-            "label": getattr(obj, "Label", None),
-            "type_id": getattr(obj, "TypeId", None),
-            "visibility": _visibility(obj),
-        }
+        _spreadsheet_summary(obj, expression_bindings)
         for obj in doc.Objects
         if getattr(obj, "TypeId", "").startswith("Spreadsheet::")
     ]
+    spreadsheets = _resolve_spreadsheet_connectivity(spreadsheets)
 
     all_sketches = []
     for body in bodies:
         all_sketches.extend(body["sketches"])
     all_sketches.extend(standalone_sketches)
+
+    named_dimension_constraints = []
+    for sketch in all_sketches:
+        for constraint in sketch.get("named_constraints", []):
+            # A geometric constraint may have a name, but it is not a drawing
+            # dimension. Only constraints with a readable datum satisfy the
+            # required-dimension inventory.
+            if constraint.get("datum") is None:
+                continue
+            named_dimension_constraints.append(
+                {
+                    "name": constraint["name"],
+                    "sketch": sketch["name"],
+                    "index": constraint["index"],
+                    "type": constraint["type"],
+                    "driving": constraint["driving"],
+                    "datum": constraint["datum"],
+                }
+            )
+
+    spreadsheet_parameters = []
+    for spreadsheet in spreadsheets:
+        for parameter in spreadsheet["parameters"]:
+            spreadsheet_parameters.append(
+                {
+                    "name": parameter["alias"],
+                    "spreadsheet": spreadsheet["name"],
+                    "cell": parameter["cell"],
+                    "content": parameter["content"],
+                    "computed": parameter["computed"],
+                    "references": parameter["references"],
+                    "reference_count": parameter["reference_count"],
+                    "dependencies": parameter["dependencies"],
+                    "dependent_cells": parameter["dependent_cells"],
+                    "connected_to_tree": parameter["connected_to_tree"],
+                }
+            )
+
+    dimension_usage = []
+    for required_name in required_dimension_names:
+        sketch_matches = [
+            item
+            for item in named_dimension_constraints
+            if item["name"] == required_name
+        ]
+        spreadsheet_matches = [
+            item for item in spreadsheet_parameters if item["name"] == required_name
+        ]
+        driving_sketch_matches = [
+            item for item in sketch_matches if item.get("driving") is not False
+        ]
+        linked_spreadsheet_matches = [
+            item for item in spreadsheet_matches if item["connected_to_tree"]
+        ]
+        if driving_sketch_matches or linked_spreadsheet_matches:
+            status = "used"
+        elif sketch_matches or spreadsheet_matches:
+            status = "defined_but_unlinked"
+        else:
+            status = "missing"
+        dimension_usage.append(
+            {
+                "name": required_name,
+                "status": status,
+                "sketch_constraints": sketch_matches,
+                "spreadsheet_parameters": spreadsheet_matches,
+            }
+        )
 
     sketch_status_counts = {}
     for sketch in all_sketches:
@@ -637,6 +896,49 @@ else:
                 "message": "No PartDesign Body was found. The document may be imported, direct-shape, or non-parametric.",
             }
         )
+
+    for item in dimension_usage:
+        if item["status"] == "missing":
+            findings.append(
+                {
+                    "severity": "error",
+                    "category": "required_dimension_missing",
+                    "object": None,
+                    "message": (
+                        f"Required drawing dimension {item['name']!r} is not present "
+                        "as a named driving sketch constraint or Spreadsheet alias."
+                    ),
+                }
+            )
+        elif item["status"] == "defined_but_unlinked":
+            findings.append(
+                {
+                    "severity": "error",
+                    "category": "required_dimension_unlinked",
+                    "object": None,
+                    "message": (
+                        f"Required drawing dimension {item['name']!r} exists but does "
+                        "not drive model geometry. Bind it into the feature tree or "
+                        "replace it with a named driving constraint."
+                    ),
+                }
+            )
+
+    for spreadsheet in spreadsheets:
+        for parameter in spreadsheet["unused_parameters"]:
+            findings.append(
+                {
+                    "severity": "error",
+                    "category": "unused_spreadsheet_parameter",
+                    "object": spreadsheet["name"],
+                    "message": (
+                        f"Spreadsheet parameter {parameter['alias']!r} in "
+                        f"{parameter['cell']} has no expression binding. Determine "
+                        "why it was created; connect it to the feature tree if it is "
+                        "required, otherwise remove it."
+                    ),
+                }
+            )
 
     for body in bodies:
         if not body["valid"]:
@@ -789,9 +1091,22 @@ else:
             "sketches": len(all_sketches),
             "standalone_sketches": len(standalone_sketches),
             "spreadsheets": len(spreadsheets),
+            "spreadsheet_parameters": len(spreadsheet_parameters),
+            "required_dimensions": len(required_dimension_names),
             "uncontained_shape_objects": len(uncontained_shape_objects),
         },
         "sketch_solver_status_counts": sketch_status_counts,
+        "expression_bindings": expression_bindings,
+        "dimension_inventory": {
+            "provided": bool(required_dimension_names),
+            "required_names": required_dimension_names,
+            "usage": dimension_usage,
+            "all_used": bool(required_dimension_names) and all(
+                item["status"] == "used" for item in dimension_usage
+            ),
+            "named_dimension_constraints": named_dimension_constraints,
+            "spreadsheet_parameters": spreadsheet_parameters,
+        },
         "bodies": bodies,
         "standalone_sketches": standalone_sketches,
         "uncontained_shape_objects": uncontained_shape_objects,
@@ -804,13 +1119,20 @@ else:
                 "Body and Tip validity",
                 "ordered feature history",
                 "sketch solver/profile status",
+                "required drawing-dimension usage",
+                "Spreadsheet parameter connectivity and unused aliases",
                 "significant findings and unresolved warnings",
             ],
         },
         "limitations": [
-            "This is an informative structural and geometric diagnostic, not a hard acceptance gate.",
-            "It does not prove correspondence to a drawing, dimensions not represented in the model, manufacturability, or design intent.",
-            "Shape validity uses FreeCAD/OpenCASCADE isValid checks and does not run every expensive BOPCheck mode.",
+            "This is an informative structural and geometric diagnostic, "
+            "not a hard acceptance gate.",
+            "It can verify only required dimension identifiers supplied by the "
+            "caller; it cannot discover omitted drawing dimensions from pixels.",
+            "It does not prove correspondence to a drawing, manufacturability, "
+            "or design intent.",
+            "Shape validity uses FreeCAD/OpenCASCADE isValid checks and does not "
+            "run every expensive BOPCheck mode.",
         ],
     }
 '''
@@ -820,4 +1142,5 @@ else:
         .replace("__DOC_NAME__", repr(doc_name))
         .replace("__RECOMPUTE__", repr(recompute))
         .replace("__INCLUDE_CONSTRAINTS__", repr(include_sketch_constraints))
+        .replace("__REQUIRED_DIMENSION_NAMES__", repr(required_dimension_names or []))
     )

@@ -47,10 +47,16 @@ class SketchGeometryOperation(BaseModel):
     center_x: float | None = None
     center_y: float | None = None
     radius: float | None = None
+    arc_mode: Literal["center_angles", "endpoints_radius", "tangent_fillet"] = (
+        "center_angles"
+    )
+    arc_side: Literal["left", "right"] = "left"
     x1: float | None = None
     y1: float | None = None
     x2: float | None = None
     y2: float | None = None
+    line1_index: int | None = None
+    line2_index: int | None = None
     start_angle: float | None = None
     end_angle: float | None = None
     major_radius: float | None = None
@@ -74,13 +80,6 @@ class SketchGeometryOperation(BaseModel):
             "add_rectangle": ("x", "y", "width", "height"),
             "add_circle": ("center_x", "center_y", "radius"),
             "add_line": ("x1", "y1", "x2", "y2"),
-            "add_arc": (
-                "center_x",
-                "center_y",
-                "radius",
-                "start_angle",
-                "end_angle",
-            ),
             "add_point": ("x", "y"),
             "add_ellipse": (
                 "center_x",
@@ -102,8 +101,22 @@ class SketchGeometryOperation(BaseModel):
             "delete_geometry": ("geometry_index",),
             "toggle_construction": ("geometry_index",),
         }
+        required_fields = required_by_op.get(self.op, ())
+        if self.op == "add_arc":
+            required_fields = {
+                "center_angles": (
+                    "center_x",
+                    "center_y",
+                    "radius",
+                    "start_angle",
+                    "end_angle",
+                ),
+                "endpoints_radius": ("x1", "y1", "x2", "y2", "radius"),
+                "tangent_fillet": ("line1_index", "line2_index", "radius"),
+            }[self.arc_mode]
+
         missing = [
-            field for field in required_by_op[self.op] if getattr(self, field) is None
+            field for field in required_fields if getattr(self, field) is None
         ]
         if missing:
             raise ValueError(f"{self.op} requires: {', '.join(missing)}")
@@ -144,6 +157,23 @@ class SketchGeometryOperation(BaseModel):
             points = self.points or []
             if len(points) < 2 or any(len(point) != 2 for point in points):
                 raise ValueError("add_bspline requires at least two [x, y] points")
+        if self.op == "add_arc" and self.arc_mode == "endpoints_radius":
+            assert self.x1 is not None and self.y1 is not None
+            assert self.x2 is not None and self.y2 is not None
+            assert self.radius is not None
+            chord = ((self.x2 - self.x1) ** 2 + (self.y2 - self.y1) ** 2) ** 0.5
+            if chord <= 1e-12:
+                raise ValueError("add_arc endpoints must be different")
+            if chord > 2 * self.radius + 1e-9:
+                raise ValueError(
+                    "add_arc endpoints are farther apart than the diameter"
+                )
+        if self.op == "add_arc" and self.arc_mode == "tangent_fillet":
+            assert self.line1_index is not None and self.line2_index is not None
+            if self.line1_index < 0 or self.line2_index < 0:
+                raise ValueError("line1_index and line2_index must be non-negative")
+            if self.line1_index == self.line2_index:
+                raise ValueError("tangent_fillet requires two different line indices")
         if self.geometry_index is not None and self.geometry_index < 0:
             raise ValueError("geometry_index must be non-negative")
         return self
@@ -815,18 +845,108 @@ try:
             operation_results.append({{"op": op, "geometry_index": idx}})
 
         elif op == "add_arc":
-            circle = Part.Circle(
-                FreeCAD.Vector(operation["center_x"], operation["center_y"], 0),
-                FreeCAD.Vector(0, 0, 1),
-                operation["radius"],
-            )
-            arc = Part.ArcOfCircle(
-                circle,
-                math.radians(operation["start_angle"]),
-                math.radians(operation["end_angle"]),
-            )
-            idx = sketch.addGeometry(arc, False)
-            operation_results.append({{"op": op, "geometry_index": idx}})
+            arc_mode = operation["arc_mode"]
+            if arc_mode == "center_angles":
+                circle = Part.Circle(
+                    FreeCAD.Vector(operation["center_x"], operation["center_y"], 0),
+                    FreeCAD.Vector(0, 0, 1),
+                    operation["radius"],
+                )
+                arc = Part.ArcOfCircle(
+                    circle,
+                    math.radians(operation["start_angle"]),
+                    math.radians(operation["end_angle"]),
+                )
+                idx = sketch.addGeometry(arc, False)
+                operation_results.append({{
+                    "op": op,
+                    "arc_mode": arc_mode,
+                    "geometry_index": idx,
+                }})
+            elif arc_mode == "endpoints_radius":
+                start = FreeCAD.Vector(operation["x1"], operation["y1"], 0)
+                end = FreeCAD.Vector(operation["x2"], operation["y2"], 0)
+                chord = end - start
+                chord_length = chord.Length
+                if chord_length <= 1e-12:
+                    raise ValueError("add_arc endpoints must be different")
+                radius = float(operation["radius"])
+                if chord_length > 2.0 * radius + 1e-9:
+                    raise ValueError(
+                        "add_arc endpoints are farther apart than the diameter"
+                    )
+                midpoint = (start + end) * 0.5
+                left_normal = FreeCAD.Vector(-chord.y, chord.x, 0)
+                left_normal.normalize()
+                side_sign = 1.0 if operation["arc_side"] == "left" else -1.0
+                center_offset = math.sqrt(
+                    max(0.0, radius * radius - 0.25 * chord_length * chord_length)
+                )
+                center = midpoint - left_normal * (side_sign * center_offset)
+                arc_midpoint = center + left_normal * (side_sign * radius)
+                idx = sketch.addGeometry(Part.Arc(start, arc_midpoint, end), False)
+                operation_results.append({{
+                    "op": op,
+                    "arc_mode": arc_mode,
+                    "arc_side": operation["arc_side"],
+                    "geometry_index": idx,
+                    "center": [float(center.x), float(center.y)],
+                }})
+            elif arc_mode == "tangent_fillet":
+                line1_index = operation["line1_index"]
+                line2_index = operation["line2_index"]
+                geometry_count = int(sketch.GeometryCount)
+                if not (0 <= line1_index < geometry_count):
+                    raise ValueError(f"line1_index out of range: {{line1_index}}")
+                if not (0 <= line2_index < geometry_count):
+                    raise ValueError(f"line2_index out of range: {{line2_index}}")
+                line1 = sketch.Geometry[line1_index]
+                line2 = sketch.Geometry[line2_index]
+                if not all(
+                    hasattr(line, "StartPoint") and hasattr(line, "EndPoint")
+                    for line in (line1, line2)
+                ):
+                    raise ValueError("tangent_fillet requires two line segments")
+                # FreeCAD uses reference points to choose the intended sides
+                # of the two lines. Passing their common corner makes the
+                # reference vector zero and can make findFilletCenter fail.
+                # Use the same stable choice as SketchObject's own coincident-
+                # endpoint overload: one midpoint on each line.
+                ref1 = (line1.StartPoint + line1.EndPoint) * 0.5
+                ref2 = (line2.StartPoint + line2.EndPoint) * 0.5
+                if not hasattr(sketch, "fillet"):
+                    raise ValueError(
+                        "This FreeCAD build does not expose SketchObject.fillet"
+                    )
+                before_count = int(sketch.GeometryCount)
+                # The Python wrapper raises on failure and returns None on
+                # success. Verify the observable geometry change as an extra guard.
+                sketch.fillet(
+                    line1_index,
+                    line2_index,
+                    ref1,
+                    ref2,
+                    float(operation["radius"]),
+                    True,
+                    False,
+                )
+                after_count = int(sketch.GeometryCount)
+                if after_count <= before_count:
+                    raise ValueError(
+                        "Sketch fillet did not create geometry; "
+                        "check line intersection and radius"
+                    )
+                created_indices = list(range(before_count, after_count))
+                operation_results.append({{
+                    "op": op,
+                    "arc_mode": arc_mode,
+                    "geometry_index": created_indices[-1],
+                    "geometry_indices": created_indices,
+                    "trimmed_line_indices": [line1_index, line2_index],
+                    "radius": float(operation["radius"]),
+                }})
+            else:
+                raise ValueError(f"Unsupported add_arc arc_mode: {{arc_mode!r}}")
 
         elif op == "add_point":
             idx = sketch.addGeometry(
@@ -1025,6 +1145,9 @@ _result_ = {{
         Named operations cover the former constraint tools. ``add_constraint``
         retains the generic interface for less common Sketcher constraint types,
         while ``delete_constraint`` removes an existing constraint by index.
+        Fix/Block constraints may not cover more than 50% of the sketch geometry;
+        use geometric/dimensional constraints or remove existing Fix constraints
+        instead of freezing most of the profile.
 
         Args:
             sketch_name: Name of the sketch to edit.
@@ -1098,6 +1221,21 @@ try:
         geometry2 = operation["geometry2"]
         point2 = operation["point2"]
         value = operation["value"]
+
+        if constraint_type == "Block":
+            geometry_count = int(sketch.GeometryCount)
+            existing_fix_count = sum(
+                1
+                for existing_constraint in (sketch.Constraints or [])
+                if getattr(existing_constraint, "Type", "") == "Block"
+            )
+            projected_fix_count = existing_fix_count + 1
+            if projected_fix_count > geometry_count * 0.5:
+                raise ValueError(
+                    "Cannot apply Fix/Block constraints to more than 50% of "
+                    "sketch geometry. Use geometric or dimensional constraints, "
+                    "or delete existing Fix/Block constraints."
+                )
 
         if constraint_type in ["Horizontal", "Vertical", "Block"]:
             constraint = (

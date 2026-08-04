@@ -637,16 +637,21 @@ class TestMcpInstructions:
 Before modifying geometry:
 - inspect the intended document and existing feature history;
 - reuse one explicit document and one PartDesign Body;
-- establish drawing-view to FreeCAD-plane correspondence.
+- establish drawing-view to FreeCAD-plane correspondence;
+- for drawing/sketch input, save every explicit non-starred dimension under a
+  stable identifier before modeling.
 Prefer standard MCP tools. Use execute_python or safe_execute only when
 a required operation is unavailable or broken.
 After every major feature:
 - recompute;
 - inspect the result;
-- capture and visually review the equivalent view;
+- for drawing reconstruction, compare the equivalent reference/candidate view
+  with compare_images;
 - correct the causal feature if geometry differs from the target.
+Compare one seed element before applying any pattern.
 Before completing a geometry-changing task, call
-validate_parametric_model and report significant findings.
+validate_parametric_model and report significant findings. For drawing/sketch
+input, pass all saved dimension identifiers as required_dimension_names.
 """
         assert server_module.MCP_INSTRUCTIONS == expected
         assert server_module.mcp.instructions == expected

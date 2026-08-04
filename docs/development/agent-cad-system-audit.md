@@ -88,9 +88,12 @@ local geometry. It does not perform OCR, reconstruct missing pixels, infer CAD
 semantics, or prove that the model interpreted every fragment correctly.
 
 `compare_images` remains a qualitative side-by-side aid. It does not align the
-images or calculate correctness. A formal discrepancy ledger and
-`evaluate_model_checkpoint` are optional tools, not a mandatory global
-ACT-OBSERVE-REACT protocol.
+images or calculate correctness. For drawing reconstruction it is nevertheless a
+mandatory observation step after every major feature and before a validated seed
+is multiplied with a pattern. The agent must inspect the returned same-view
+comparison and record discrepancies instead of treating a screenshot alone as
+proof of correctness. `evaluate_model_checkpoint` remains an explicit summary of
+observed evidence; it no longer accepts self-declared dimension/view pass flags.
 
 ## Final parametric diagnostic
 
@@ -105,13 +108,18 @@ or modification. It reports:
   expressions, constraint-type counts, named constraints, and solver-reported
   conflicting/redundant indices where available;
 - standalone sketches, Spreadsheets, and solid objects outside Bodies;
+- the supplied non-starred drawing-dimension inventory and whether every stable
+  identifier is used by a named dimensional constraint or a connected
+  Spreadsheet alias;
+- Spreadsheet dependency chains, including parameters that do not directly or
+  transitively drive the feature tree;
 - findings categorized as errors or warnings;
 - explicit limitations.
 
 The report is intentionally not a hard pass/fail gate. It cannot prove:
 
 - correspondence to a drawing;
-- correctness of dimensions not encoded in model properties;
+- correctness of dimensions omitted from `required_dimension_names`;
 - manufacturability, tolerances, fits, material, or process planning;
 - semantic design intent merely from object names/types.
 
@@ -130,8 +138,11 @@ The current revision corrected the main drift found in the uploaded project:
 - removed image-only `VISUAL ACK` requirements from `open_image_tiles` and docs;
 - removed `ask_user` from checkpoint outcomes; ambiguity is handled
   autonomously through best-supported assumptions and rework;
-- changed `compare_images` and `evaluate_model_checkpoint` from mandatory gates
-  to optional review aids;
+- made `compare_images` mandatory at major drawing-reconstruction checkpoints
+  and before patterning a seed, while keeping it qualitative rather than an
+  automatic image-matching score;
+- removed agent-authored `dimension_checks_passed` and `view_match_confirmed`
+  inputs from `evaluate_model_checkpoint`;
 - kept `execute_python`, `safe_execute`, and `run_macro` registered;
 - aligned resource/prompt catalogs with the canonical Skill and final validator;
 - updated tool reference, user guide, configuration guide, changelog, and release

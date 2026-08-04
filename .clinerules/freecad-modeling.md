@@ -13,5 +13,8 @@ modifies, repairs, or validates a mechanical model in FreeCAD.
 5. Handle drawing ambiguity autonomously as defined by the Skill; do not stop
    merely to ask the user for a missing or unclear noncritical value.
 6. Use `multi_transform_pattern` instead of chaining one PartDesign Pattern directly onto another.
-7. Immediately before the final user-facing response after any geometry change,
+7. For drawing/sketch input, save all explicit non-starred dimensions, compare
+   every major feature and the pre-pattern seed with `compare_images`, and pass
+   all dimension identifiers to final validation.
+8. Immediately before the final user-facing response after any geometry change,
    call `validate_parametric_model` and summarize significant findings.

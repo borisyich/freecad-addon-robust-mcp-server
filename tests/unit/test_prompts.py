@@ -79,6 +79,8 @@ class TestFreecadPrompts:
         assert "safe_execute" in result or "undo" in result
         assert "validate_parametric_model" in result
         assert "$freecad-engineering" in result
+        assert "required_dimension_names" in result
+        assert "compare_images" in result
 
     @pytest.mark.asyncio
     async def test_freecad_startup_contains_partdesign_guidance(
@@ -147,6 +149,9 @@ class TestFreecadPrompts:
         # Should have sketching-specific content
         assert "sketch" in result.lower()
         assert "rectangle" in result.lower() or "circle" in result.lower()
+        assert "endpoints_radius" in result
+        assert "tangent_fillet" in result
+        assert "50%" in result
 
     @pytest.mark.asyncio
     async def test_freecad_guidance_boolean(
@@ -234,6 +239,8 @@ class TestFreecadPrompts:
         assert "$freecad-engineering" in result
         assert "Reconstruct from drawings or images" in result
         assert "validate_parametric_model" in result
+        assert "non-starred" in result
+        assert "compare_images" in result
         assert "drawing.png" in result
 
     @pytest.mark.asyncio

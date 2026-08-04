@@ -236,6 +236,40 @@ Create a turned part:
 1. Draws the profile using lines and arcs
 1. Uses `revolution_sketch()` to create the solid
 
+Two common radius-defined sketch arcs are available:
+
+```python
+# Arc through two endpoints with a known radius.
+edit_sketch_geometry(
+    sketch_name="TurnProfile",
+    operations=[{
+        "op": "add_arc",
+        "arc_mode": "endpoints_radius",
+        "x1": 0,
+        "y1": 0,
+        "x2": 20,
+        "y2": 0,
+        "radius": 15,
+        "arc_side": "left",
+    }],
+)
+
+# Tangent radius joining two existing line segments; the lines are trimmed.
+edit_sketch_geometry(
+    sketch_name="TurnProfile",
+    operations=[{
+        "op": "add_arc",
+        "arc_mode": "tangent_fillet",
+        "line1_index": 0,
+        "line2_index": 1,
+        "radius": 4,
+    }],
+)
+```
+
+Fix/Block constraints are deliberately limited: they may constrain at most 50%
+of sketch geometry. Use geometric and dimensional constraints for design intent.
+
 ### Pattern Operations
 
 **Request:**
@@ -248,7 +282,9 @@ Create a plate with a row of 6 holes spaced 15mm apart.
 
 1. Creates the base plate
 1. Creates one hole feature
-1. Uses `linear_pattern()` to repeat the hole. For combined linear and circular repetition, uses `multi_transform_pattern()` instead of chaining one Pattern onto another.
+1. For drawing reconstruction, compares that single hole against the matching
+   source view with `compare_images`.
+1. Uses `linear_pattern()` to repeat the accepted hole. For combined linear and circular repetition, uses `multi_transform_pattern()` instead of chaining one Pattern onto another.
 
 ---
 
@@ -374,9 +410,13 @@ that shows the feature's true profile, and obtain extrusion depth from another
 view or an explicit callout.
 
 Call `open_image(path)` for the overview and use `open_image_tiles` when local
-dimensions/features are too small. Compare only equivalent views and pass a
-short `view_context` to `compare_images`. If one pair is uncertain, compare all
-principal target views that exist—front, matching side, top, then isometric.
+dimensions/features are too small. Before creating geometry, save every explicit
+dimension except dimensions marked with an asterisk and assign each a stable
+identifier. Compare only equivalent views and pass a short `view_context` to
+`compare_images`. During drawing reconstruction, run it after every major
+feature; a screenshot alone is not a completed visual checkpoint. Compare the
+single seed before any pattern. If one pair is uncertain, compare all principal
+target views that exist—front, matching side, top, then isometric.
 `compare_images` is visual assistance rather than an automatic correctness
 metric; use formal checkpoints only when the task benefits from them.
 
@@ -386,7 +426,7 @@ metric; use formal checkpoints only when the task benefits from them.
 
 - `pocket_sketch` accepts `direction="normal"|"reversed"` and an optional explicit `base_feature_name`. Without an explicit base it prefers a valid preceding Body Tip, then the nearest valid preceding solid.
 - `set_body_tip` changes the active Body result without using `edit_object` or GUI selection and validates the resulting Shape/Tip contract.
-- `linear_pattern` and `polar_pattern` are for one transformation of a non-pattern seed. Use `multi_transform_pattern` for combined linear and polar stages.
+- `linear_pattern` and `polar_pattern` are for one transformation of a non-pattern seed. Use `multi_transform_pattern` for combined linear and polar stages. For drawing reconstruction, accept the single seed through `compare_images` before repeating it.
 - Pattern, Pocket, and thread responses include before/after volume diagnostics. A valid Shape is not proof that the intended amount of material changed.
 - `thread_helix` creates native additive or subtractive helical geometry from an editable profile sketch.
 - `spreadsheet_apply_batch` is the efficient way to create values, aliases, and property bindings in one transaction. It validates alias collisions and restores affected cells, aliases, and expressions if a later operation fails.
@@ -399,6 +439,10 @@ The canonical engineering policy is `.agents/skills/freecad-engineering/SKILL.md
 (or MCP resource `freecad://skills/freecad-engineering`). It classifies stock and
 process, covers milling/turning/sheet-metal strategies, and requires
 `validate_parametric_model` before the final response after geometry changes.
+For drawing/sketch input, pass the complete saved non-starred dimension list as
+`required_dimension_names`. The final report also flags Spreadsheet aliases that
+do not drive the feature tree directly or through other cells; connect intended
+parameters or delete redundant ones.
 
 ### 1. Be Specific with Dimensions
 
@@ -428,9 +472,14 @@ For complex parts, build step by step:
 
 1. Create one logically reviewable feature.
 1. Recompute and inspect shape, Body Tip, solid count, dimensions, and volume effect.
-1. Use an equivalent-view screenshot when visual evidence is useful.
+1. For drawing reconstruction, compare the equivalent reference and candidate
+   views with `compare_images` after every major feature.
 1. Rework invalid or clearly incorrect geometry before adding dependent features.
-1. Immediately before the final response, call `validate_parametric_model` and summarize its findings.
+1. Use `inspect_object(include_properties=False)` for routine checks; enable full
+   properties only for a specific diagnosis.
+1. Immediately before the final response, call `validate_parametric_model`. For
+   drawing/sketch input include all saved dimension identifiers, then resolve any
+   missing/unlinked dimensions or unused Spreadsheet aliases before completion.
 
 ### 5. Save Frequently
 

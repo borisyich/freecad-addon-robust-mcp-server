@@ -33,9 +33,14 @@ The Skill covers:
 - editable Body/Sketch/PartDesign structure;
 - feature dependency/order guidance;
 - drawing-view identification, FreeCAD plane/axis mapping, and dimension-axis evidence;
-- same-view and multi-view visual comparison;
+- saved inventories of every explicit non-starred source dimension;
+- mandatory same-view `compare_images` checkpoints after major features and
+  before patterning a seed;
+- sketch arc construction by endpoints/radius and by tangent fillet between lines;
+- the 50% ceiling for Fix/Block constraints;
 - existing-model modification;
 - lightweight intermediate validation;
-- mandatory final `validate_parametric_model` reporting.
+- mandatory final `validate_parametric_model` reporting, including source-
+  dimension usage and Spreadsheet connectivity/cleanliness.
 
 Detailed content is intentionally not copied into this documentation page.

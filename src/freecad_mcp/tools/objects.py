@@ -197,7 +197,7 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
     async def inspect_object(
         object_name: str,
         doc_name: str | None = None,
-        include_properties: bool = True,
+        include_properties: bool = False,
         include_shape: bool = True,
     ) -> dict[str, Any]:
         """Get detailed information about a FreeCAD object.
@@ -205,7 +205,10 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
         Args:
             object_name: Name of the object to inspect.
             doc_name: Document containing the object. Uses active document if None.
-            include_properties: Whether to include property values.
+            include_properties: Whether to include the full property-value map.
+                Prefer ``False`` for routine structural inspection and set it to
+                ``True`` only when exact properties are needed for diagnosis or
+                editing; full property output can be large.
             include_shape: Whether to include shape geometry details.
 
         Returns:

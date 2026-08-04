@@ -32,6 +32,10 @@ Use stable datums, constrained sketches, semantic PartDesign features, and a
 feature order that preserves design intent. Holes, patterns, small details, and
 edge treatments should normally be delayed until the supporting form is stable.
 
+For drawing/sketch input, extract and save every explicit non-starred dimension
+before modeling. Give each value a stable identifier and realize it as a named
+driving constraint or a Spreadsheet alias connected to the feature tree.
+
 ## Verification
 
 Use lightweight checks proportional to risk rather than a mandatory state
@@ -39,11 +43,16 @@ machine after every operation:
 
 - `get_sketch_info` for sketch solver/profile state;
 - `validate_object` and `validate_document` for geometry health;
-- screenshots after the default GUI-settling delay and equivalent-view comparisons;
+- `compare_images` after every major feature in drawing reconstruction; a saved
+  screenshot alone is not a completed visual checkpoint;
+- comparison of one accepted seed element before any pattern operation;
 - a drawing view map: Front=XZ/normal Y, Top=XY/normal Z, Side=YZ/normal X;
 - multi-view fallback when one visual comparison is uncertain;
-- `validate_parametric_model` for the mandatory final structural report.
+- `validate_parametric_model(required_dimension_names=[...])` for the mandatory
+  final structural report when a source dimension inventory exists.
 
 The validator is informative. It reports actual Bodies, Tips, history, sketches,
 constraints, and direct solids, but does not prove that the model matches a
-reference drawing or is manufacturable.
+reference drawing or is manufacturable. It also reports required source
+dimensions that are missing/unlinked and Spreadsheet aliases that do not connect
+directly or transitively to the feature tree.

@@ -431,6 +431,9 @@ class TestFreecadResources:
         assert "Sheet-metal" in result
         assert "flat pattern/developed blank" in result
         assert "fixed/moving panels" in result
+        assert "required_dimension_names" in result
+        assert "compare_images" in result
+        assert "tangent_fillet" in result
 
     @pytest.mark.asyncio
     async def test_resource_best_practices(
@@ -453,6 +456,8 @@ class TestFreecadResources:
         assert "$freecad-engineering" in result
         assert "Reconstruct from drawings or images" in result
         assert "validate_parametric_model" in result
+        assert "non-starred" in result
+        assert "compare_images" in result
 
     @pytest.mark.asyncio
     async def test_resource_model_modification_workflow(

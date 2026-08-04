@@ -1,5 +1,6 @@
 """Tests for deterministic model checkpoint decisions."""
 
+import inspect
 from unittest.mock import MagicMock
 
 import pytest
@@ -32,9 +33,7 @@ async def test_checkpoint_allows_continue_when_all_gates_pass(registered_tools):
         geometry_valid=True,
         solid_count=1,
         expected_solid_count=1,
-        dimension_checks_passed=True,
         visual_comparison_performed=True,
-        view_match_confirmed=True,
         discrepancies=[
             {
                 "category": "rendering_difference",
@@ -50,6 +49,17 @@ async def test_checkpoint_allows_continue_when_all_gates_pass(registered_tools):
     assert result["decision"] == "continue"
     assert result["can_continue"] is True
     assert result["warnings"]
+
+
+def test_checkpoint_does_not_accept_self_attested_dimension_or_view_flags(
+    registered_tools,
+):
+    parameters = inspect.signature(
+        registered_tools["evaluate_model_checkpoint"]
+    ).parameters
+
+    assert "dimension_checks_passed" not in parameters
+    assert "view_match_confirmed" not in parameters
 
 
 @pytest.mark.asyncio

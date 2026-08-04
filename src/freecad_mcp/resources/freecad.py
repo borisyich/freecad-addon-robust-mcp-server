@@ -473,8 +473,12 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                         },
                         {
                             "name": "inspect_object",
-                            "description": "Get detailed info about an object",
-                            "key_params": ["object_name", "doc_name"],
+                            "description": "Inspect an object; keep include_properties false unless exact values are needed",
+                            "key_params": [
+                                "object_name",
+                                "doc_name",
+                                "include_properties",
+                            ],
                         },
                         {
                             "name": "create_object",
@@ -976,7 +980,7 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                         },
                         {
                             "name": "compare_images",
-                            "description": "Side-by-side reference/candidate image for qualitative review",
+                            "description": "Mandatory major-feature and pre-pattern seed comparison for drawing reconstruction",
                             "key_params": ["reference_path", "candidate_path", "view_context"],
                         },
                         {
@@ -1111,11 +1115,12 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                         },
                         {
                             "name": "validate_parametric_model",
-                            "description": "Informative document scan of Bodies, Tips, history, sketches, solver state, and solids outside Bodies",
+                            "description": "Scan editable history, required dimension usage, Spreadsheet connectivity, and solids outside Bodies",
                             "key_params": [
                                 "doc_name",
                                 "recompute",
                                 "include_sketch_constraints",
+                                "required_dimension_names",
                             ],
                         },
                         {

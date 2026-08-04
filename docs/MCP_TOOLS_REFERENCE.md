@@ -241,6 +241,10 @@ inspect_object(
 ) -> dict
 ```
 
+For routine structure, dependency, bounds, or shape inspection, explicitly use
+`include_properties=False`. Set it to `True` only when exact property values are
+needed for a specific diagnosis or edit; the complete property map can be large.
+
 #### create_object
 
 Create a generic FreeCAD object by type ID.
@@ -492,6 +496,45 @@ edit_sketch_geometry(
 
 `add_regular_polygon` creates a center/radius-based regular polygon inside an existing Sketcher sketch. `add_polyline` creates an explicit open or closed chain of Sketcher line segments. They are intentionally separate operations; the former does not accept arbitrary vertices.
 
+`add_arc` supports three modes. `center_angles` remains the default legacy form.
+The two radius-driven forms are:
+
+```python
+# Arc through two endpoints with known radius. arc_side chooses the side of the
+# directed chord (x1, y1) -> (x2, y2) that contains the minor arc.
+edit_sketch_geometry(
+    sketch_name="Sketch",
+    operations=[{
+        "op": "add_arc",
+        "arc_mode": "endpoints_radius",
+        "x1": 0,
+        "y1": 0,
+        "x2": 20,
+        "y2": 0,
+        "radius": 15,
+        "arc_side": "left",  # or "right"
+    }],
+)
+
+# Tangent arc between two existing line segments with known radius. The native
+# Sketcher fillet operation trims both lines and inserts the connecting arc.
+edit_sketch_geometry(
+    sketch_name="Sketch",
+    operations=[{
+        "op": "add_arc",
+        "arc_mode": "tangent_fillet",
+        "line1_index": 0,
+        "line2_index": 1,
+        "radius": 4,
+    }],
+)
+```
+
+For `endpoints_radius`, the chord may not exceed the diameter. For
+`tangent_fillet`, create or identify both line segments first and pass their
+current geometry indices; an impossible radius is rejected rather than silently
+approximated.
+
 These do not duplicate the standalone Part tools: `create_regular_polygon` creates a `Part::RegularPolygon` document object, while `make_wire` creates a 3D `Part::Feature` wire from `[x, y, z]` points. Use the sketch operations for PartDesign profiles and the standalone tools for Part workbench geometry.
 
 The result contains one entry per operation and the final sketch solver/profile
@@ -514,6 +557,10 @@ edit_sketch_constraints(
     doc_name: str | None = None,
 ) -> dict
 ```
+
+The total number of `fix`/generic `Block` constraints may not exceed 50% of
+`sketch.GeometryCount`. If the next Fix would exceed the limit, use geometric or
+dimensional constraints, or delete existing Fix/Block constraints first.
 
 Example:
 
@@ -734,6 +781,11 @@ chamfer_edges(
 
 Repeat one non-pattern feature in a linear direction. The result is rolled back when Shape is null/invalid, does not contain exactly one solid, or is not the Body Tip.
 
+When reconstructing from a drawing/image, first compare the single seed feature
+with the corresponding reference view using `compare_images`. Do not multiply a
+seed whose profile, placement, orientation, or dimensions have not been visually
+accepted.
+
 ```python
 linear_pattern(
     feature_name: str,
@@ -748,6 +800,9 @@ linear_pattern(
 #### polar_pattern
 
 Repeat one non-pattern feature around an axis. The result is rolled back when Shape is null/invalid, does not contain exactly one solid, or is not the Body Tip.
+
+The same mandatory seed comparison applies before polar, mirrored, and combined
+multi-transform patterns.
 
 ```python
 polar_pattern(
@@ -983,9 +1038,11 @@ compare_images(
 ```
 
 This is a visual comparison aid; it does not perform geometric alignment or
-calculate a correctness score. Reference and candidate must show equivalent
-views. Crop a complete drawing sheet to the matching target view before
-comparison; a full sheet versus one model screenshot is weak evidence. Use
+calculate a correctness score. For drawing/image reconstruction it is mandatory
+after every major feature; saving or opening a screenshot alone is not a complete
+visual checkpoint. Reference and candidate must show equivalent views. Crop a
+complete drawing sheet to the matching target view before comparison; a full
+sheet versus one model screenshot is weak evidence. Use
 `view_context`, for example `"Left / YZ plane / normal X"`, so the panel labels
 carry the active view/plane contract.
 
@@ -993,6 +1050,11 @@ A match in one projection does not prove depth or feature-axis orientation. If
 similarity is uncertain, repeat same-view comparisons for every principal target
 view available: front, matching left/right side, top, then isometric. A formal
 discrepancy ledger and `evaluate_model_checkpoint` remain optional.
+
+Before `linear_pattern`, `polar_pattern`, `mirrored_feature`, or
+`multi_transform_pattern`, compare the single seed element first. A pattern
+multiplies any error in the seed and must not be used as a substitute for
+verifying that element.
 
 #### evaluate_model_checkpoint
 
@@ -1004,9 +1066,7 @@ evaluate_model_checkpoint(
     geometry_valid: bool,
     solid_count: int | None = None,
     expected_solid_count: int | None = 1,
-    dimension_checks_passed: bool = True,
     visual_comparison_performed: bool = False,
-    view_match_confirmed: bool = True,
     unresolved_dimensions: list[str] | None = None,
     discrepancies: list[dict] | None = None,
 ) -> dict
@@ -1140,8 +1200,17 @@ validate_parametric_model(
     doc_name: str | None = None,
     recompute: bool = True,
     include_sketch_constraints: bool = False,
+    required_dimension_names: list[str] | None = None,
 ) -> dict
 ```
+
+When the input is a drawing or sketch, first extract and save every explicit
+source dimension except dimensions marked with an asterisk. Assign stable unique
+identifiers, implement them as named driving sketch constraints or connected
+Spreadsheet aliases, and pass the complete identifier list through
+`required_dimension_names`. The validator can verify only identifiers supplied
+by the caller; it cannot discover a dimension omitted from the source-image
+inventory.
 
 The report includes:
 
@@ -1154,6 +1223,11 @@ The report includes:
   degrees of freedom, solver-reported conflicting/redundant constraint indices,
   profile state, supports, expressions, and constraint counts;
 - standalone sketches, Spreadsheets, and solid objects outside Bodies;
+- required-dimension usage, including `missing` and `defined_but_unlinked`
+  identifiers;
+- each Spreadsheet alias, its direct and transitive dependencies, whether it is
+  connected to a feature-tree expression, and an error finding for aliases that
+  remain unused;
 - findings with `error` or `warning` severity;
 - limitations: it does not prove drawing correspondence, manufacturing process,
   tolerances, design intent, or that a valid feature changed the expected amount
@@ -1161,6 +1235,11 @@ The report includes:
 
 Set `include_sketch_constraints=True` only when individual constraint details are
 needed; it can make the response large.
+
+Before final completion, investigate every unused Spreadsheet alias: connect it
+to the tree if it was intended to drive geometry, or remove it if it is
+redundant. A clean final report must not contain missing/unlinked required
+dimensions or unused Spreadsheet parameters.
 
 ### Other validation tools
 

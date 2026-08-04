@@ -544,6 +544,10 @@ def register_image_tools(mcp: Any) -> None:
 
         This does not claim pixel-perfect alignment or compute a correctness score;
         it gives the vision model both images in one unambiguous visual context.
+        When reconstructing from a drawing, use it after every major feature and
+        before accepting a seed feature for any linear, polar, mirror, or combined
+        pattern. A pattern multiplies a seed error, so verify the single element
+        first and only then create the repetition.
         If the reference is a complete drawing sheet, crop the matching target
         view first; comparing a full sheet with one model screenshot is weak evidence.
         One apparently good pair does not prove depth or axis orientation. If the
@@ -628,7 +632,6 @@ def register_image_tools(mcp: Any) -> None:
                 "height": comparison.height,
                 "saved_path": saved_path,
                 "view_context": normalized_view_context,
-                "assessment_status": "not_evaluated",
                 "comparison_preconditions": [
                     "Crop a whole drawing sheet to the matching target view first.",
                     "Orient the candidate to the same orthographic or isometric projection.",

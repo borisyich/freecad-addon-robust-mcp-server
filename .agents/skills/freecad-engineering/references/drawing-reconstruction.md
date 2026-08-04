@@ -97,6 +97,12 @@ Create an axis-aware evidence table:
 - explicit, derived, or assumed status;
 - confidence and alternatives.
 
+Before any modeling, also create and save a complete dimension inventory. It
+must include every explicit source dimension except dimensions marked with an
+asterisk. Give each item a stable unique identifier that can become a named
+driving sketch constraint or Spreadsheet alias. Do not discard apparently
+redundant values silently; use them as cross-checks or record a real conflict.
+
 Rules:
 
 1. A dimension shown in a projection plane usually controls one of the two axes
@@ -118,7 +124,8 @@ Rules:
 2. Use `open_image_tiles` or focused crops for local dimensions and small
    geometry.
 3. Record features, counts, radii/diameters, center locations, thicknesses,
-   offsets, hidden boundaries, and section evidence.
+   offsets, hidden boundaries, section evidence, and every non-starred dimension
+   in the saved inventory.
 4. Reconcile every feature across all applicable views before committing it to
    the feature plan.
 5. Treat isometric views as a spatial cross-check, not the source of exact
@@ -156,6 +163,12 @@ or compute correctness. Explicitly inspect:
 - visible thickness/depth;
 - openings, pockets, bends, and local radii;
 - whether a match in one view hides a mismatch in another.
+
+Despite being qualitative, this comparison is mandatory after every major
+feature in drawing reconstruction. A screenshot that was merely captured or
+opened is not a completed visual checkpoint. Before any linear, polar, mirrored,
+or multi-transform pattern, compare the single seed element first; repeating an
+unverified seed multiplies its error.
 
 When one pair is inconclusive or suspicious, compare every principal target view
 that exists:

@@ -159,7 +159,7 @@ async def test_compare_images_returns_optional_review_guidance(registered_tools,
     )
 
     metadata = result.structuredContent
-    assert metadata["assessment_status"] == "not_evaluated"
+    assert "assessment_status" not in metadata
     assert metadata["view_context"] == "VIEW NOT SPECIFIED"
     assert "whole drawing sheet" in metadata["comparison_preconditions"][0]
     review = metadata["recommended_review"]

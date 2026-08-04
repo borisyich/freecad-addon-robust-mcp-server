@@ -27,6 +27,10 @@ third.
 - `profile=invalid`: inspect self-intersections, duplicate/zero-length geometry,
   and overlapping edges.
 
+Fix/Block constraints are not a substitute for design intent. Their count may
+not exceed 50% of sketch geometry; use geometric or dimensional constraints, or
+remove existing fixes.
+
 ## Interpreting Body and Tip findings
 
 Review when:
@@ -52,6 +56,21 @@ Datum planes, lines, points, and coordinate systems are reference geometry. Thei
 
 Use `linear_pattern` or `polar_pattern` only for one transformation of a non-pattern seed. Do not apply one pattern directly to another. Use `multi_transform_pattern` with the original seed and ordered linear/polar stages, then verify Shape, Body Tip, solid count, volume change, and the expected instance layout.
 
+For drawing reconstruction, accept the single seed with `compare_images` before
+creating the pattern.
+
+## Source dimensions and Spreadsheet cleanliness
+
+For drawing/sketch input, call the final validator with the complete saved list
+of non-starred source-dimension identifiers. Each identifier must be used by a
+named driving sketch constraint or by a Spreadsheet alias that connects directly
+or transitively to a feature-tree expression.
+
+Review every unused Spreadsheet alias before completion. Determine why it was
+created; connect it to the tree when it represents required design intent, or
+delete it when it is redundant. A final model is not clean while required
+dimensions are missing/unlinked or Spreadsheet parameters remain orphaned.
+
 ## Final report pattern
 
 Report the validator output in engineering terms:
@@ -61,6 +80,8 @@ Document: Bracket.FCStd
 Body: BracketBody — valid; Tip=Fillet002 — valid
 History: BaseSketch → Pad → Pocket → HolePattern → Fillet002
 Sketches: 4 total; 3 fully constrained; 1 under-constrained (2 DoF)
+Source dimensions: 18/18 used
+Spreadsheet: 7 aliases; all connected to feature history
 Outside solids: none
 Action: model is geometrically healthy; constrain SK_HolePattern before treating
 it as fully production-ready.

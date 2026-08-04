@@ -376,12 +376,26 @@ class TestValidationTools:
             doc_name="Bracket",
             recompute=True,
             include_sketch_constraints=True,
+            required_dimension_names=["Width", "HoleDiameter"],
         )
 
         assert result == report
         generated_code = mock_bridge.execute_python.call_args[0][0]
         assert "Bracket" in generated_code
         assert "if True:" in generated_code
+        assert "['Width', 'HoleDiameter']" in generated_code
+
+    @pytest.mark.asyncio
+    async def test_validate_parametric_model_rejects_duplicate_dimension_ids(
+        self, register_tools, mock_bridge
+    ):
+        """Dimension inventory identifiers must be stable and unique."""
+        tool = register_tools["validate_parametric_model"]
+
+        with pytest.raises(ValueError, match="duplicate identifier"):
+            await tool(required_dimension_names=["Width", " Width "])
+
+        mock_bridge.execute_python.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_validate_parametric_model_failure_is_informative(

@@ -90,8 +90,8 @@ Geometry-changing operations are transaction-backed where applicable. Use `histo
 | `create_partdesign_body` | Create a new PartDesign Body. |
 | `set_body_tip` | Set and validate the active Tip of a PartDesign Body. |
 | `create_sketch` | Create a Sketch using a typed `support` selector for an origin plane, Body Tip face, explicit feature face, or datum plane. |
-| `edit_sketch_geometry` | Apply geometry edits to one sketch in a single transaction. |
-| `edit_sketch_constraints` | Apply constraint edits to one sketch in a single transaction. |
+| `edit_sketch_geometry` | Apply geometry edits to one sketch in a single transaction, including endpoint/radius arcs and tangent line fillets. |
+| `edit_sketch_constraints` | Apply constraint edits in one transaction; Fix/Block may cover at most 50% of sketch geometry. |
 | `pad_sketch` | Create a Pad (extrusion) from a sketch. |
 | `pocket_sketch` | Create a validated Pocket with explicit direction and optional base feature. |
 | `fillet_edges` | Add fillet (rounded edges) to an object. |
@@ -149,7 +149,7 @@ Geometry-changing operations are transaction-backed where applicable. Use `histo
 |---|---|
 | `open_image` | Open a local PNG/JPEG/WebP and return its pixels as MCP ImageContent. |
 | `open_image_tiles` | Deliver a drawing overview plus enlarged, labelled, overlapping tiles. |
-| `compare_images` | Return a labelled side-by-side comparison as one MCP image. |
+| `compare_images` | Return a labelled side-by-side comparison; mandatory after major drawing-reconstruction features and before patterning a seed. |
 
 ## Checkpoints
 
@@ -177,7 +177,7 @@ Geometry-changing operations are transaction-backed where applicable. Use `histo
 |---|---|
 | `validate_object` | Check the health and validity of a FreeCAD object. |
 | `validate_document` | Check the health of all objects in a FreeCAD document. |
-| `validate_parametric_model` | Inspect the document's editable parametric structure before completion. |
+| `validate_parametric_model` | Inspect editable structure, required source-dimension usage, and Spreadsheet connectivity before completion. |
 | `undo_if_invalid` | Check document health and undo the last operation if invalid objects exist. |
 | `safe_execute` | Execute Python code with automatic validation and rollback on failure. |
 

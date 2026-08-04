@@ -316,6 +316,112 @@ class TestPartDesignTools:
         mock_bridge.execute_python.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_edit_sketch_geometry_supports_endpoint_radius_arc(
+        self, register_tools, mock_bridge
+    ):
+        """Endpoint/radius arcs should generate deterministic minor-arc code."""
+        mock_bridge.execute_python = AsyncMock(
+            return_value=ExecutionResult(
+                success=True,
+                result={
+                    "name": "Sketch",
+                    "operations_applied": 1,
+                    "operation_results": [],
+                    "sketch_status": {},
+                },
+                stdout="",
+                stderr="",
+                execution_time_ms=10.0,
+            )
+        )
+
+        await register_tools["edit_sketch_geometry"](
+            "Sketch",
+            [
+                {
+                    "op": "add_arc",
+                    "arc_mode": "endpoints_radius",
+                    "x1": 0,
+                    "y1": 0,
+                    "x2": 20,
+                    "y2": 0,
+                    "radius": 15,
+                    "arc_side": "left",
+                }
+            ],
+        )
+
+        generated_code = mock_bridge.execute_python.await_args.args[0]
+        assert '"endpoints_radius"' in generated_code
+        assert "Part.Arc(start, arc_midpoint, end)" in generated_code
+        assert 'operation["arc_side"]' in generated_code
+
+    @pytest.mark.asyncio
+    async def test_edit_sketch_geometry_supports_tangent_fillet_arc(
+        self, register_tools, mock_bridge
+    ):
+        """A radius fillet between two lines should use SketchObject.fillet."""
+        mock_bridge.execute_python = AsyncMock(
+            return_value=ExecutionResult(
+                success=True,
+                result={
+                    "name": "Sketch",
+                    "operations_applied": 1,
+                    "operation_results": [],
+                    "sketch_status": {},
+                },
+                stdout="",
+                stderr="",
+                execution_time_ms=10.0,
+            )
+        )
+
+        await register_tools["edit_sketch_geometry"](
+            "Sketch",
+            [
+                {
+                    "op": "add_arc",
+                    "arc_mode": "tangent_fillet",
+                    "line1_index": 0,
+                    "line2_index": 1,
+                    "radius": 4,
+                }
+            ],
+        )
+
+        generated_code = mock_bridge.execute_python.await_args.args[0]
+        assert '"tangent_fillet"' in generated_code
+        assert "sketch.fillet(" in generated_code
+        assert "ref1 = (line1.StartPoint + line1.EndPoint) * 0.5" in generated_code
+        assert "ref2 = (line2.StartPoint + line2.EndPoint) * 0.5" in generated_code
+        assert "endpoint_pairs" not in generated_code
+        assert "fillet_status" not in generated_code
+        assert "after_count <= before_count" in generated_code
+        assert '"trimmed_line_indices"' in generated_code
+
+    @pytest.mark.asyncio
+    async def test_edit_sketch_geometry_rejects_impossible_endpoint_radius_arc(
+        self, register_tools, mock_bridge
+    ):
+        """A chord longer than the diameter must fail before FreeCAD execution."""
+        with pytest.raises(ValueError, match="farther apart than the diameter"):
+            await register_tools["edit_sketch_geometry"](
+                "Sketch",
+                [
+                    {
+                        "op": "add_arc",
+                        "arc_mode": "endpoints_radius",
+                        "x1": 0,
+                        "y1": 0,
+                        "x2": 20,
+                        "y2": 0,
+                        "radius": 5,
+                    }
+                ],
+            )
+        mock_bridge.execute_python.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_edit_sketch_constraints_batches_named_generic_and_delete(
         self, register_tools, mock_bridge
     ):
@@ -426,6 +532,36 @@ class TestPartDesignTools:
         generated_code = mock_bridge.execute_python.await_args.args[0]
         for operation in operations:
             assert f'"{operation["op"]}"' in generated_code
+
+    @pytest.mark.asyncio
+    async def test_edit_sketch_constraints_embeds_fix_ratio_guard(
+        self, register_tools, mock_bridge
+    ):
+        """Fix/Block edits must enforce the 50-percent geometry ceiling."""
+        mock_bridge.execute_python = AsyncMock(
+            return_value=ExecutionResult(
+                success=True,
+                result={
+                    "name": "Sketch",
+                    "operations_applied": 1,
+                    "operation_results": [],
+                    "sketch_status": {},
+                },
+                stdout="",
+                stderr="",
+                execution_time_ms=10.0,
+            )
+        )
+
+        await register_tools["edit_sketch_constraints"](
+            "Sketch", [{"op": "fix", "geometry1": 0}]
+        )
+
+        generated_code = mock_bridge.execute_python.await_args.args[0]
+        assert 'getattr(existing_constraint, "Type", "") == "Block"' in generated_code
+        assert "projected_fix_count > geometry_count * 0.5" in generated_code
+        assert "Cannot apply Fix/Block constraints" in generated_code
+        assert "sketch geometry" in generated_code
 
     @pytest.mark.asyncio
     async def test_edit_sketch_constraints_rejects_missing_semantic_arguments(

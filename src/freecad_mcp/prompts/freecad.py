@@ -85,17 +85,24 @@ mechanical model, activate `$freecad-engineering`. The canonical policy is
   solid can still be the wrong part.
 - Follow the Skill's ACT → OBSERVE → REACT loop after each major feature.
   Establish the drawing-view/FreeCAD-plane contract before modeling, capture a
-  settled screenshot in the equivalent view, and rework the causal feature when
-  the available views disagree. A formal discrepancy ledger/checkpoint is
-  optional rather than a universal gate.
+  settled screenshot in the equivalent view, and for drawing reconstruction run
+  `compare_images` after every major feature. A screenshot alone is not a
+  completed comparison. Compare and accept one seed element before any pattern,
+  then rework the causal feature when the available views disagree. A formal
+  discrepancy ledger/checkpoint is optional rather than a universal gate.
 - Preserve native editable design intent: Body, sketches, constraints, and
   semantic PartDesign history unless the user explicitly asks for direct B-rep.
 - `execute_python`, `safe_execute`, and `run_macro` are always available. Using
   them does not waive the parametric/editability expectations in the Skill.
 - Resolve drawing ambiguity autonomously using the most consistent evidence and
   disclose assumptions.
+- Before modeling from a drawing/sketch, save every explicit non-starred source
+  dimension with a stable identifier. Implement each identifier as a named
+  driving sketch constraint or a connected Spreadsheet alias.
 - Immediately before the final user-facing response after any geometry change,
   call `{FINAL_PARAMETRIC_VALIDATION_TOOL}` and summarize significant findings.
+  For drawing/sketch input, pass the complete saved identifier list as
+  `required_dimension_names`.
 
 ## Quick Reference
 
@@ -244,12 +251,16 @@ validate_object(object_name="Pad")
 - Modifiers: `fillet_edges`, `chamfer_edges`, `draft_feature`, `thickness_feature`.
 - Patterns: `linear_pattern`, `polar_pattern`, `multi_transform_pattern`, `mirrored_feature`.
   Do not chain one pattern directly onto another; use `multi_transform_pattern`.
+  For drawing reconstruction, compare the single seed with `compare_images`
+  before applying any pattern.
 - Datums: `create_datum_plane`, `create_datum_line`, `create_datum_point`.
 
 ## Sketch Editing
 Use `edit_sketch_geometry` for ordered geometry edits and
 `edit_sketch_constraints` for ordered constraint edits. Each batch is one
-transaction and one recompute. Use `get_sketch_info` after editing.
+transaction and one recompute. Use `get_sketch_info` after editing. Fix/Block
+constraints may cover at most 50% of sketch geometry; prefer geometric and
+dimensional constraints.
 
 ## Common Mistakes
 - Creating sketch without a body (will fail on pad).
@@ -285,11 +296,35 @@ edit_sketch_geometry(
 )
 ```
 
+Radius-defined arc examples:
+```
+# Arc through two endpoints; arc_side selects the side of the directed chord.
+edit_sketch_geometry(
+    sketch_name="Sketch",
+    operations=[{
+        "op": "add_arc", "arc_mode": "endpoints_radius",
+        "x1": 0, "y1": 0, "x2": 20, "y2": 0,
+        "radius": 15, "arc_side": "left",
+    }],
+)
+
+# Tangent arc joining and trimming two existing lines.
+edit_sketch_geometry(
+    sketch_name="Sketch",
+    operations=[{
+        "op": "add_arc", "arc_mode": "tangent_fillet",
+        "line1_index": 0, "line2_index": 1, "radius": 4,
+    }],
+)
+```
+
 ## Constraint Operations
 `edit_sketch_constraints(sketch_name, operations)` supports named operations
 such as `horizontal`, `vertical`, `coincident`, `parallel`, `perpendicular`,
 `tangent`, `equal`, `distance`, `distance_x`, `distance_y`, `radius`, `angle`,
 `fix`, plus generic `add_constraint` and `delete_constraint`.
+The resulting number of Fix/Block constraints must never exceed 50% of
+`GeometryCount`; use other constraints or delete existing fixes.
 
 For `create_hole`, use non-construction circles in a dedicated sketch attached
 to an actual planar solid face. Use `create_cylindrical_cut` for radial or
@@ -490,10 +525,13 @@ safe_execute(
 - Shape existence - Object has geometry
 - Recompute state - Object up to date
 
-### validate_parametric_model(doc_name, recompute, include_sketch_constraints)
+### validate_parametric_model(doc_name, recompute, include_sketch_constraints, required_dimension_names)
 Mandatory final informative scan after creating or changing geometry:
 - reports Bodies, Tips, ordered history, and shape validity;
 - reports sketches, solver/profile status, remaining DoF, supports, and expressions;
+- verifies that every supplied required dimension identifier drives the model;
+- reports Spreadsheet aliases that are not directly or transitively connected
+  to the feature tree so they can be linked or removed;
 - reports standalone/direct solids and significant warnings;
 - does not by itself prove drawing correspondence or manufacturability.
 
@@ -564,7 +602,8 @@ Add additional features as needed:
 
 ### 6. Verify and Export
 When complete:
-- Use `inspect_object` to verify dimensions
+- Use `inspect_object(include_properties=False)` for routine verification. Set
+  `include_properties=True` only when exact object properties are needed.
 - Use `get_screenshot` to visualize the result
 - Export with `export(file_format=...)` using the required target format
 

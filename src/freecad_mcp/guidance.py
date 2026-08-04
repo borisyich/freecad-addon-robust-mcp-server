@@ -70,7 +70,9 @@ model modification, lightweight verification, and completion criteria.
 After any model creation or geometry change, call
 `{FINAL_PARAMETRIC_VALIDATION_TOOL}` immediately before the final user-facing
 response and summarize its significant findings. The report is informative, not
-a rigid pass/fail workflow.
+a rigid pass/fail workflow. For drawing/sketch reconstruction, first save every
+explicit non-starred source dimension under a stable identifier and pass the
+complete identifier list as `required_dimension_names`.
 
 `execute_python`, `safe_execute`, and `run_macro` remain available. Their use
 does not waive editable/parametric model expectations.
@@ -79,7 +81,9 @@ does not waive editable/parametric model expectations.
 DRAWING_RECONSTRUCTION_WORKFLOW: Final[str] = (
     _SKILL_ROUTER
     + "\nFor drawing reconstruction, also read the skill section "
-    "'Reconstruct from drawings or images' and its referenced guidance.\n"
+    "'Reconstruct from drawings or images' and its referenced guidance. "
+    "Use `compare_images` after every major feature and before patterning a "
+    "single seed element.\n"
 )
 
 MODEL_MODIFICATION_WORKFLOW: Final[str] = (
@@ -92,7 +96,10 @@ VISUAL_CHECKPOINT_PROTOCOL: Final[str] = (
     _SKILL_ROUTER
     + "\nFollow the Skill's ACT → OBSERVE → REACT loop. Before modeling from a "
     "drawing, establish the front/top/side view map and its FreeCAD XZ/XY/YZ "
-    "plane and normal-axis correspondence. Compare equivalent views. If one "
-    "pair is uncertain, compare every principal target view available before "
-    "continuing; a formal checkpoint ledger remains optional.\n"
+    "plane and normal-axis correspondence. After every major feature, compare "
+    "the equivalent source and candidate views with `compare_images`; creating "
+    "a screenshot alone is not a completed visual checkpoint. Compare a single "
+    "seed feature before applying any pattern. If one pair is uncertain, compare "
+    "every principal target view available before continuing; a formal checkpoint "
+    "ledger remains optional.\n"
 )

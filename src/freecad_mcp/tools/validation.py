@@ -318,6 +318,7 @@ else:
         doc_name: str | None = None,
         recompute: bool = True,
         include_sketch_constraints: bool = False,
+        required_dimension_names: list[str] | None = None,
     ) -> dict[str, Any]:
         """Inspect the document's editable parametric structure before completion.
 
@@ -325,6 +326,7 @@ else:
         FreeCAD model. It is intentionally informative rather than a rigid gate:
         it reports Bodies and Tips, ordered Body history, shape validity, sketch
         solver/profile state, expressions, direct solid objects outside Bodies,
+        Spreadsheet parameter connectivity, required drawing-dimension usage,
         and actionable findings. Call it before the final user-facing response
         and summarize significant findings instead of merely saying "done".
 
@@ -338,6 +340,11 @@ else:
             include_sketch_constraints: Include every individual sketch constraint
                 with name, type, datum, driving/reference state, and index. Defaults
                 to False because large sketches can make the response very long.
+            required_dimension_names: Stable identifiers extracted from every
+                explicit non-starred drawing dimension before modeling. Each name
+                must appear as a named driving sketch constraint or as a Spreadsheet
+                alias connected directly or transitively to an expression in the
+                feature tree.
 
         Returns:
             Informative report containing:
@@ -346,15 +353,33 @@ else:
                 - each PartDesign Body, its validity, shape, Tip, and ordered history
                 - each sketch with solver state, remaining DoF, profile state,
                   support, expressions, and constraint type counts
+                - required dimension identifiers and whether they drive geometry
+                - Spreadsheet cells, aliases, expression bindings, and unused parameters
                 - standalone sketches and solid objects outside Bodies
                 - findings with error/warning severity
                 - explicit limitations of the diagnostic
         """
+        normalized_required_dimensions = []
+        seen_required_dimensions = set()
+        for raw_name in required_dimension_names or []:
+            name = str(raw_name).strip()
+            if not name:
+                raise ValueError(
+                    "required_dimension_names must not contain empty values"
+                )
+            if name in seen_required_dimensions:
+                raise ValueError(
+                    f"required_dimension_names contains duplicate identifier: {name!r}"
+                )
+            seen_required_dimensions.add(name)
+            normalized_required_dimensions.append(name)
+
         bridge = await get_bridge()
         code = build_parametric_validation_code(
             doc_name=doc_name,
             recompute=recompute,
             include_sketch_constraints=include_sketch_constraints,
+            required_dimension_names=normalized_required_dimensions,
         )
         result = await bridge.execute_python(code)
         if result.success and result.result:
@@ -371,9 +396,20 @@ else:
                 "sketches": 0,
                 "standalone_sketches": 0,
                 "spreadsheets": 0,
+                "spreadsheet_parameters": 0,
+                "required_dimensions": len(normalized_required_dimensions),
                 "uncontained_shape_objects": 0,
             },
             "sketch_solver_status_counts": {},
+            "expression_bindings": [],
+            "dimension_inventory": {
+                "provided": bool(normalized_required_dimensions),
+                "required_names": normalized_required_dimensions,
+                "usage": [],
+                "all_used": False,
+                "named_dimension_constraints": [],
+                "spreadsheet_parameters": [],
+            },
             "bodies": [],
             "standalone_sketches": [],
             "uncontained_shape_objects": [],

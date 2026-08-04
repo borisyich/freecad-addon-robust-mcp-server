@@ -88,6 +88,14 @@
 - Fixed the documented `create_hole(thread_type="ISO_FINE")` spelling and made
   `edit_object` require/apply `ThreadSize` together with a Hole thread-profile
   change so FreeCAD cannot silently reset the size to its first enumeration.
+- Made `compare_images` mandatory in drawing-reconstruction guidance after every
+  major feature and before any pattern multiplies a seed.
+- Added a hard 50% ceiling for Sketcher Fix/Block constraints.
+- Added drawing-dimension inventories to `validate_parametric_model`, including
+  missing/unlinked required dimensions and direct/transitive Spreadsheet
+  connectivity with unused-alias findings.
+- Extended `edit_sketch_geometry(add_arc)` with endpoint/radius arcs and native
+  tangent fillets between two existing lines.
 
 This project uses **component-specific versioning**. Each component has its own
 release notes and version history.
