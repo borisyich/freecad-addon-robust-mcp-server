@@ -108,7 +108,7 @@ class TestObjectTools:
         mock_bridge.get_object = AsyncMock(return_value=mock_object)
 
         inspect_object = register_tools["inspect_object"]
-        result = await inspect_object(object_name="Box")
+        result = await inspect_object(object_name="Box", include_properties=True)
 
         assert result["name"] == "Box"
         assert result["type_id"] == "Part::Box"
@@ -137,7 +137,9 @@ class TestObjectTools:
         )
         mock_bridge.get_object = AsyncMock(return_value=mock_object)
 
-        result = await register_tools["inspect_object"]("Pad")
+        result = await register_tools["inspect_object"](
+            "Pad", include_properties=True
+        )
 
         assert result["properties"]["Shape"]["value"] == {"summary_ref": "shape_info"}
         assert result["shape_info"]["volume"] == 100.0
@@ -165,6 +167,155 @@ class TestObjectTools:
         assert result["name"] == "Box"
         assert "properties" not in result
         assert "shape_info" not in result
+
+    @pytest.mark.asyncio
+    async def test_select_subshapes_filters_and_sorts_faces(
+        self, register_tools, mock_bridge
+    ):
+        """Semantic face selection should return consumable FaceN references."""
+        mock_bridge.get_object = AsyncMock(
+            return_value=ObjectInfo(
+                name="Pad",
+                label="Pad",
+                type_id="PartDesign::Feature",
+                shape_info={
+                    "shape_type": "Solid",
+                    "is_null": False,
+                    "faces": [
+                        {
+                            "name": "Face1",
+                            "index": 1,
+                            "surface_type": "Plane",
+                            "normal": {"x": 0.0, "y": 0.0, "z": -1.0},
+                            "area": 200.0,
+                            "center": {"x": 0.0, "y": 0.0, "z": 0.0},
+                            "adjacent_faces": ["Face3"],
+                            "convexity": "flat",
+                        },
+                        {
+                            "name": "Face2",
+                            "index": 2,
+                            "surface_type": "Plane",
+                            "normal": {"x": 0.0, "y": 0.0, "z": 1.0},
+                            "area": 200.0,
+                            "center": {"x": 0.0, "y": 0.0, "z": 10.0},
+                            "adjacent_faces": ["Face3"],
+                            "convexity": "flat",
+                        },
+                    ],
+                    "edges": [],
+                },
+            )
+        )
+
+        result = await register_tools["select_subshapes"](
+            object_name="Pad",
+            criteria={
+                "kind": "face",
+                "surface_types": ["Plane"],
+                "normal": [0, 0, 1],
+                "sort_by": "center_z",
+                "sort_order": "desc",
+                "limit": 1,
+            },
+        )
+
+        assert result["references"] == ["Face2"]
+        assert result["matches"][0]["center"]["z"] == 10.0
+
+    @pytest.mark.asyncio
+    async def test_select_subshapes_filters_edges_by_direction_and_adjacency(
+        self, register_tools, mock_bridge
+    ):
+        """Edge direction is undirected and adjacent surfaces are semantic filters."""
+        mock_bridge.get_object = AsyncMock(
+            return_value=ObjectInfo(
+                name="Pad",
+                label="Pad",
+                type_id="PartDesign::Feature",
+                shape_info={
+                    "shape_type": "Solid",
+                    "is_null": False,
+                    "faces": [
+                        {"name": "Face1", "surface_type": "Plane"},
+                        {"name": "Face2", "surface_type": "Cylinder"},
+                    ],
+                    "edges": [
+                        {
+                            "name": "Edge1",
+                            "index": 1,
+                            "curve_type": "Line",
+                            "direction": {"x": -1.0, "y": 0.0, "z": 0.0},
+                            "length": 20.0,
+                            "radius": None,
+                            "center": {"x": 10.0, "y": 0.0, "z": 0.0},
+                            "adjacent_faces": ["Face1", "Face2"],
+                        },
+                        {
+                            "name": "Edge2",
+                            "index": 2,
+                            "curve_type": "Circle",
+                            "direction": None,
+                            "length": 12.0,
+                            "radius": 2.0,
+                            "center": {"x": 0.0, "y": 0.0, "z": 0.0},
+                            "adjacent_faces": ["Face1"],
+                        },
+                    ],
+                },
+            )
+        )
+
+        result = await register_tools["select_subshapes"](
+            object_name="Pad",
+            criteria={
+                "kind": "edge",
+                "curve_types": ["Line"],
+                "direction": [1, 0, 0],
+                "adjacent_surface_types": ["Plane", "Cylinder"],
+            },
+        )
+
+        assert result["references"] == ["Edge1"]
+
+    @pytest.mark.asyncio
+    async def test_select_subshapes_rejects_zero_direction(
+        self, register_tools, mock_bridge
+    ):
+        with pytest.raises(ValueError, match="direction must be a non-zero vector"):
+            await register_tools["select_subshapes"](
+                object_name="Pad",
+                criteria={"kind": "edge", "direction": [0, 0, 0]},
+            )
+        mock_bridge.get_object.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_select_subshapes_accepts_common_type_aliases_and_sorts_missing_last(
+        self, register_tools, mock_bridge
+    ):
+        mock_bridge.get_object = AsyncMock(
+            return_value=ObjectInfo(
+                name="Pad", label="Pad", type_id="PartDesign::Feature",
+                shape_info={
+                    "shape_type": "Solid", "is_null": False,
+                    "faces": [],
+                    "edges": [
+                        {"name": "Edge1", "index": 1, "curve_type": "LineSegment",
+                         "length": None, "adjacent_faces": []},
+                        {"name": "Edge2", "index": 2, "curve_type": "Line",
+                         "length": 30.0, "adjacent_faces": []},
+                    ],
+                },
+            )
+        )
+
+        result = await register_tools["select_subshapes"](
+            object_name="Pad",
+            criteria={"kind": "edge", "curve_types": ["linear"],
+                      "sort_by": "length", "sort_order": "desc"},
+        )
+
+        assert result["references"] == ["Edge2", "Edge1"]
 
     @pytest.mark.asyncio
     async def test_create_object(self, register_tools, mock_bridge):

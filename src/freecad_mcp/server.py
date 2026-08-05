@@ -61,12 +61,16 @@ INSTANCE_ID: str = str(uuid.uuid4())
 MCP_INSTRUCTIONS = """Use the FreeCAD engineering workflow for mechanical modeling.
 Before modifying geometry:
 - inspect the intended document and existing feature history;
+- use select_subshapes rather than manual Face/Edge enumeration when choosing
+  sketch supports or topology-sensitive feature references;
 - reuse one explicit document and one PartDesign Body;
 - establish drawing-view to FreeCAD-plane correspondence;
 - for drawing/sketch input, save every explicit non-starred dimension under a
   stable identifier before modeling.
 Prefer standard MCP tools. Use execute_python or safe_execute only when
 a required operation is unavailable or broken.
+For Spreadsheet-driven sketch dimensions, bind the alias to the dimensional
+constraint expression path and verify it with get_sketch_info.
 After every major feature:
 - recompute;
 - inspect the result;

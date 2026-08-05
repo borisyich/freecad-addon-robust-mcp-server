@@ -52,6 +52,7 @@ This document describes the architecture for a Model Context Protocol (MCP) serv
       - [`import`](#import)
     - [Debugging Tools](#debugging-tools)
       - [`inspect_object`](#inspect_object)
+      - [`select_subshapes`](#select_subshapes)
       - [`validate_model`](#validate_model)
     - [Workbench Tools](#workbench-tools)
       - [`activate_workbench`](#activate_workbench)
@@ -255,7 +256,7 @@ freecad_mcp/
 │   ├── xmlrpc.py            # XML-RPC bridge (recommended)
 │   └── protocol.py          # Wire protocol for socket communication
 │
-├── tools/                    # MCP tool implementations (115 tools)
+├── tools/                    # MCP tool implementations (116 tools)
 │   ├── __init__.py
 │   ├── execution.py         # Python execution & debugging (5 tools)
 │   ├── documents.py         # Document management (7 tools)
@@ -1177,24 +1178,32 @@ async def import_file(
 async def inspect_object(
     object_name: str,
     doc_name: str | None = None,
+    include_properties: bool = False,
     include_shape: bool = True,
 ) -> dict:
-    """Get detailed information about an object.
+    """Inspect identity, dependencies, properties, and semantic topology.
 
-    Args:
-        object_name: Name of the object
-        doc_name: Document name
-        include_shape: Include shape geometry details
-
-    Returns:
-        Comprehensive object information including:
-        - All properties and their values
-        - Shape information (if applicable)
-        - Parent/child relationships
-        - Placement/position data
+    Shape records include face surface type/normal/area/adjacency/local
+    convexity and edge curve type/endpoints/length/adjacent faces.
     """
     pass
 ```
+
+#### `select_subshapes`
+
+```python
+@mcp.tool()
+async def select_subshapes(
+    object_name: str,
+    criteria: FaceSelectionCriteria | EdgeSelectionCriteria,
+    doc_name: str | None = None,
+) -> dict:
+    """Return semantic matches and consumable FaceN/EdgeN references."""
+    pass
+```
+
+Use it to filter the topology returned by `inspect_object` for sketch support
+and Fillet/Chamfer/Draft/Thickness operations.
 
 #### `validate_model`
 

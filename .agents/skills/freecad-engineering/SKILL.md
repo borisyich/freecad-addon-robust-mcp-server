@@ -155,6 +155,13 @@ Read the detailed strategy in
   line when features belong together.
 - Prefer geometric constraints (`Horizontal`, `Vertical`, `Coincident`,
   `Tangent`, `Equal`, symmetry) plus a minimal set of driving dimensions.
+- For Spreadsheet-driven dimensions, create a cell alias first and attach the
+  expression to the dimensional constraint path (`Constraints[index]`). In
+  `edit_sketch_constraints`, supply `expression` when creating the constraint,
+  or use `set_expression`/`clear_expression` for an existing index. A readable
+  `constraint_name` documents intent but does not replace the expression path.
+- After constraint edits, use `get_sketch_info` to confirm geometry endpoints,
+  referenced elements, datum/name/driving state, and exact expression bindings.
 - Avoid broad `Fix`/`Block` constraints as a substitute for design intent.
   They may constrain at most 50% of the sketch geometry. When the next Fix
   would exceed that limit, use geometric/dimensional constraints or delete
@@ -382,9 +389,15 @@ After a major feature or any suspicious result, use the smallest relevant check:
 - `validate_object` for one feature;
 - `validate_document` for overall geometric health;
 - `inspect_object(include_properties=False)` for routine placement, bounds,
-  volume, expressions, and dependency inspection. Set `include_properties=True`
-  only when exact property values are needed to diagnose or edit a specific
-  object; do not request the full property dump by default;
+  volume, expressions, dependency inspection, and semantic face/edge topology.
+  Set `include_properties=True` only when exact property values are needed to
+  diagnose or edit a specific object; do not request the full property dump by
+  default;
+- `select_subshapes` before face-supported sketches and topology-sensitive
+  Fillet, Chamfer, Draft, or Thickness operations. Express intent through
+  surface/curve type, normal/direction, size, adjacency, convexity, and location;
+  do not manually enumerate every `FaceN`/`EdgeN` unless the selector cannot
+  represent a genuinely necessary criterion;
 - feature responses for `base_volume`, `result_volume`, retained/change ratios, and resolved Body Tip/base;
 - screenshots/crops for visual correspondence;
 - `evaluate_model_checkpoint` only when a formal discrepancy ledger is useful.

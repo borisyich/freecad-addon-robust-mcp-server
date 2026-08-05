@@ -67,6 +67,66 @@ class _Shape:
         return "<Solid object at 000001B68E6ABD40>"
 
 
+class _SameShape:
+    def __init__(self, token: str) -> None:
+        self.token = token
+
+    def isSame(self, other) -> bool:  # noqa: N802
+        return getattr(other, "token", None) == self.token
+
+
+class Line:
+    pass
+
+
+class Plane:
+    def parameter(self, _point):
+        return 0.5, 0.5
+
+
+class _Vertex:
+    def __init__(self, point: _Vector) -> None:
+        self.Point = point
+
+
+class _Edge(_SameShape):
+    def __init__(self, token: str, start: _Vector, end: _Vector) -> None:
+        super().__init__(token)
+        self.Curve = Line()
+        self.Vertexes = (_Vertex(start), _Vertex(end))
+        self.Length = 10.0
+        self.CenterOfMass = _Vector(
+            (start.x + end.x) / 2,
+            (start.y + end.y) / 2,
+            (start.z + end.z) / 2,
+        )
+        self.BoundBox = _BoundBox()
+
+
+class _Face:
+    Orientation = "Forward"
+
+    def __init__(self, edges) -> None:
+        self.Surface = Plane()
+        self.Edges = edges
+        self.Area = 100.0
+        self.CenterOfMass = _Vector(5.0, 5.0, 0.0)
+        self.BoundBox = _BoundBox()
+
+    def normalAt(self, _u, _v):  # noqa: N802
+        return _Vector(0.0, 0.0, 1.0)
+
+    def curvatureAt(self, _u, _v):  # noqa: N802
+        return 0.0, 0.0
+
+
+class _TopologicalShape(_Shape):
+    edge1 = _Edge("edge-1", _Vector(0, 0, 0), _Vector(10, 0, 0))
+    edge2 = _Edge("edge-2", _Vector(10, 0, 0), _Vector(10, 10, 0))
+    Faces = (_Face((edge1, edge2)), _Face((edge1,)))
+    Edges = (edge1, edge2)
+
+
 class _LinkedObject:
     Name = "Sketch001"
     Label = "Hole profile"
@@ -115,6 +175,10 @@ def test_structured_serializer_replaces_pointer_reprs() -> None:
         "y": 20.0,
         "z": 30.0,
     }
+    assert "faces" not in shape["value"]
+    assert "edges" not in shape["value"]
+    assert "faces" in result["shape_info"]
+    assert "edges" in result["shape_info"]
 
     placement = result["properties"]["Placement"]["value"]
     assert placement["position"] == {"x": 1.0, "y": 2.0, "z": 3.0}
@@ -139,3 +203,21 @@ def test_all_bridges_can_share_one_inspection_script() -> None:
     assert "getTypeIdOfProperty" in code
     assert "FreeCAD.getDocument('Model')" in code
     assert "doc.getObject('Pad')" in code
+
+
+def test_shape_topology_contains_semantic_faces_and_edges() -> None:
+    runtime = _load_runtime()
+    shape_value = runtime["_shape_value"]
+
+    result = shape_value(_TopologicalShape())
+
+    assert result["faces"][0]["surface_type"] == "Plane"
+    assert result["faces"][0]["normal"] == {"x": 0.0, "y": 0.0, "z": 1.0}
+    assert result["faces"][0]["area"] == 100.0
+    assert result["faces"][0]["adjacent_faces"] == ["Face2"]
+    assert result["faces"][0]["convexity"] == "flat"
+    assert result["edges"][0]["curve_type"] == "Line"
+    assert result["edges"][0]["start_point"] == {"x": 0.0, "y": 0.0, "z": 0.0}
+    assert result["edges"][0]["end_point"] == {"x": 10.0, "y": 0.0, "z": 0.0}
+    assert result["edges"][0]["length"] == 10.0
+    assert result["edges"][0]["adjacent_faces"] == ["Face1", "Face2"]

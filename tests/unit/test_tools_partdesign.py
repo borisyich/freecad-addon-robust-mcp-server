@@ -534,6 +534,98 @@ class TestPartDesignTools:
             assert f'"{operation["op"]}"' in generated_code
 
     @pytest.mark.asyncio
+    async def test_edit_sketch_constraints_supports_spreadsheet_expressions(
+        self, register_tools, mock_bridge
+    ):
+        """Constraint expressions should be created, changed, and cleared in one API."""
+        mock_bridge.execute_python = AsyncMock(
+            return_value=ExecutionResult(
+                success=True,
+                result={
+                    "name": "Sketch",
+                    "operations_applied": 3,
+                    "operation_results": [],
+                    "sketch_status": {},
+                    "geometry": [],
+                    "constraints": [],
+                    "expressions": [],
+                },
+                stdout="",
+                stderr="",
+                execution_time_ms=10.0,
+            )
+        )
+
+        await register_tools["edit_sketch_constraints"](
+            "Sketch",
+            [
+                {
+                    "op": "distance",
+                    "geometry1": 0,
+                    "value": 20,
+                    "constraint_name": "PlateWidth",
+                    "expression": "Dimensions.PlateWidth",
+                },
+                {
+                    "op": "set_expression",
+                    "constraint_index": 0,
+                    "expression": "Dimensions.PlateWidth * 0.5",
+                },
+                {"op": "clear_expression", "constraint_index": 0},
+            ],
+        )
+
+        generated_code = mock_bridge.execute_python.await_args.args[0]
+        assert 'rename_constraint(constraint_index, constraint_name)' in generated_code
+        assert 'sketch.setExpression(expression_path, expression)' in generated_code
+        assert 'f"Constraints[{constraint_index}]"' in generated_code
+        assert '"set_expression"' in generated_code
+        assert '"clear_expression"' in generated_code
+        assert "existing_type not in dimensional_types" in generated_code
+        assert "Expressions can be assigned only to dimensional" in generated_code
+        assert "**_sketch_detailed_info(sketch)" in generated_code
+
+    @pytest.mark.asyncio
+    async def test_edit_sketch_constraints_rejects_incomplete_expression_edits(
+        self, register_tools, mock_bridge
+    ):
+        with pytest.raises(ValueError, match="set_expression requires expression"):
+            await register_tools["edit_sketch_constraints"](
+                "Sketch", [{"op": "set_expression", "constraint_index": 0}]
+            )
+        with pytest.raises(ValueError, match="clear_expression requires"):
+            await register_tools["edit_sketch_constraints"](
+                "Sketch", [{"op": "clear_expression"}]
+            )
+        mock_bridge.execute_python.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_edit_sketch_constraints_rejects_expression_on_geometric_constraint(
+        self, register_tools, mock_bridge
+    ):
+        with pytest.raises(
+            ValueError, match="expression is supported only for dimensional constraints"
+        ):
+            await register_tools["edit_sketch_constraints"](
+                "Sketch",
+                [{"op": "horizontal", "geometry1": 0,
+                  "expression": "Dimensions.Width"}],
+            )
+        with pytest.raises(
+            ValueError, match="expression is supported only for dimensional constraints"
+        ):
+            await register_tools["edit_sketch_constraints"](
+                "Sketch",
+                [{
+                    "op": "add_constraint",
+                    "constraint_type": "Horizontal",
+                    "geometry1": 0,
+                    "expression": "Dimensions.Width",
+                }],
+            )
+        mock_bridge.execute_python.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_edit_sketch_constraints_embeds_fix_ratio_guard(
         self, register_tools, mock_bridge
     ):
@@ -1562,6 +1654,29 @@ class TestPartDesignTools:
                 result={
                     "name": "Sketch",
                     "label": "Sketch",
+                    "geometry": [
+                        {
+                            "index": 0,
+                            "geometry_type": "LineSegment",
+                            "start_point": {"x": 0.0, "y": 0.0, "z": 0.0},
+                            "end_point": {"x": 20.0, "y": 0.0, "z": 0.0},
+                            "geometry": {},
+                        }
+                    ],
+                    "constraints": [
+                        {
+                            "index": 0,
+                            "constraint_type": "Distance",
+                            "expression_path": "Constraints[0]",
+                            "expression": "Dimensions.Width",
+                        }
+                    ],
+                    "expressions": [
+                        {
+                            "path": "Constraints[0]",
+                            "expression": "Dimensions.Width",
+                        }
+                    ],
                     "sketch_status": {
                         "geometry_count": 4,
                         "constraint_count": 8,
@@ -1588,9 +1703,14 @@ class TestPartDesignTools:
         assert status["geometry_count"] == 4
         assert status["constraint_count"] == 8
         assert status["solver"]["fully_constrained"] is True
+        assert result["geometry"][0]["start_point"]["x"] == 0.0
+        assert result["geometry"][0]["end_point"]["x"] == 20.0
+        assert result["constraints"][0]["expression"] == "Dimensions.Width"
+        assert result["expressions"][0]["path"] == "Constraints[0]"
         generated_code = mock_bridge.execute_python.await_args.args[0]
         assert "sketch.solve()" in generated_code
         assert "sketch.DoF" in generated_code
+        assert "_sketch_detailed_info(sketch)" in generated_code
         mock_bridge.execute_python.assert_called_once()
 
 

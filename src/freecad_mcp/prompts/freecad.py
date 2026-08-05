@@ -258,13 +258,17 @@ validate_object(object_name="Pad")
 ## Sketch Editing
 Use `edit_sketch_geometry` for ordered geometry edits and
 `edit_sketch_constraints` for ordered constraint edits. Each batch is one
-transaction and one recompute. Use `get_sketch_info` after editing. Fix/Block
-constraints may cover at most 50% of sketch geometry; prefer geometric and
-dimensional constraints.
+transaction and one recompute. Dimensional operations may include an
+`expression` such as `Dimensions.PlateWidth`; use `set_expression` or
+`clear_expression` for an existing constraint index. Use `get_sketch_info` after
+editing to inspect geometry endpoints, constraint references/datums, and exact
+expression bindings. Fix/Block constraints may cover at most 50% of sketch
+geometry; prefer geometric and dimensional constraints.
 
 ## Common Mistakes
 - Creating sketch without a body (will fail on pad).
-- Guessing transient `FaceN` values instead of identifying the intended face.
+- Guessing transient `FaceN` values or manually enumerating topology instead
+  of using `select_subshapes` with semantic criteria.
 - Not closing sketch contour (pad requires closed profile).
 - Not constraining sketches (use get_sketch_info to check degrees of freedom).
 
@@ -322,8 +326,10 @@ edit_sketch_geometry(
 `edit_sketch_constraints(sketch_name, operations)` supports named operations
 such as `horizontal`, `vertical`, `coincident`, `parallel`, `perpendicular`,
 `tangent`, `equal`, `distance`, `distance_x`, `distance_y`, `radius`, `angle`,
-`fix`, plus generic `add_constraint` and `delete_constraint`.
-The resulting number of Fix/Block constraints must never exceed 50% of
+`fix`, plus generic `add_constraint` and `delete_constraint`. Dimensional
+operations may include `constraint_name` and a Spreadsheet expression. Use
+`set_expression`/`clear_expression` with `constraint_index` to change existing
+bindings. The resulting number of Fix/Block constraints must never exceed 50% of
 `GeometryCount`; use other constraints or delete existing fixes.
 
 For `create_hole`, use non-construction circles in a dedicated sketch attached
@@ -864,21 +870,23 @@ Use the `{info["tool"]}` tool:
 
 ## Quick Analysis
 Use `inspect_object` with `include_shape=True` to get:
-- Volume
-- Surface area
-- Bounding box
-- Vertex/edge/face counts
-- Validity status
+- Volume, surface area, bounding box, and validity
+- Faces: surface type, oriented normal, area, adjacency, and local convexity
+- Edges: curve type, endpoints, length, direction/radius, and adjacent faces
+
+Use `select_subshapes` to turn those properties into candidate `FaceN`/`EdgeN`
+references; do not write manual topology loops for ordinary selection tasks.
 
 ## Detailed Analysis with Typed Tools
 
 1. Call `inspect_object(object_name="ObjectName", include_shape=True)`.
-2. Read the returned bounding box, volume, area, topology counts, placement,
+2. Read the returned bounding box, volume, area, semantic topology, placement,
    dependencies, and readable properties.
-3. Call `validate_object(object_name="ObjectName")` for geometric validity.
-4. Call `validate_document()` when downstream features or Body Tip state may be
+3. Use `select_subshapes` when an operation needs a face or edge reference.
+4. Call `validate_object(object_name="ObjectName")` for geometric validity.
+5. Call `validate_document()` when downstream features or Body Tip state may be
    affected.
-5. Use `get_screenshot` only after the geometric checks and compare an equivalent
+6. Use `get_screenshot` only after the geometric checks and compare an equivalent
    reference view.
 
 Do not replace these typed inspections with direct Python. If a required physical

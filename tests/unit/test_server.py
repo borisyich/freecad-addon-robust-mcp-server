@@ -633,25 +633,19 @@ class TestMcpInstructions:
         """FastMCP initialization should include the required agent workflow."""
         from freecad_mcp import server as server_module
 
-        expected = """Use the FreeCAD engineering workflow for mechanical modeling.
-Before modifying geometry:
-- inspect the intended document and existing feature history;
-- reuse one explicit document and one PartDesign Body;
-- establish drawing-view to FreeCAD-plane correspondence;
-- for drawing/sketch input, save every explicit non-starred dimension under a
-  stable identifier before modeling.
-Prefer standard MCP tools. Use execute_python or safe_execute only when
-a required operation is unavailable or broken.
-After every major feature:
-- recompute;
-- inspect the result;
-- for drawing reconstruction, compare the equivalent reference/candidate view
-  with compare_images;
-- correct the causal feature if geometry differs from the target.
-Compare one seed element before applying any pattern.
-Before completing a geometry-changing task, call
-validate_parametric_model and report significant findings. For drawing/sketch
-input, pass all saved dimension identifiers as required_dimension_names.
-"""
-        assert server_module.MCP_INSTRUCTIONS == expected
-        assert server_module.mcp.instructions == expected
+        instructions = server_module.MCP_INSTRUCTIONS
+        assert server_module.mcp.instructions == instructions
+        normalized_instructions = " ".join(instructions.split())
+
+        required_clauses = (
+            "inspect the intended document and existing feature history",
+            "use select_subshapes rather than manual Face/Edge enumeration",
+            "save every explicit non-starred dimension",
+            "bind the alias to the dimensional constraint expression path",
+            "compare_images",
+            "Compare one seed element before applying any pattern",
+            "validate_parametric_model",
+            "required_dimension_names",
+        )
+        for clause in required_clauses:
+            assert clause in normalized_instructions

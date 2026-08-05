@@ -41,6 +41,7 @@ TOOL_SCENARIOS: dict[str, str] = {
     # Generic objects and Part operations.
     "list_objects": "objects",
     "inspect_object": "objects",
+    "select_subshapes": "objects",
     "create_object": "objects",
     "create_primitive": "objects",
     "edit_object": "objects",
@@ -169,6 +170,7 @@ DOCUMENTED_CHOICES: dict[tuple[str, str], tuple[str, ...]] = {
         "add_constraint", "horizontal", "vertical", "coincident", "parallel",
         "perpendicular", "tangent", "equal", "distance", "distance_x",
         "distance_y", "radius", "angle", "fix", "delete_constraint",
+        "set_expression", "clear_expression",
     ),
     ("pocket_sketch", "type"): ("Length", "ThroughAll", "UpToFirst", "UpToFace"),
     ("pocket_sketch", "direction"): ("normal", "reversed"),
@@ -270,12 +272,12 @@ _result_ = True
     )
 
 
-def test_runtime_registry_has_explicit_115_tool_coverage() -> None:
+def test_runtime_registry_has_explicit_116_tool_coverage() -> None:
     async def registered() -> set[str]:
         return {tool.name for tool in await production_mcp.list_tools()}
 
     actual = asyncio.run(registered())
-    assert len(actual) == 115
+    assert len(actual) == 116
     assert set(TOOL_SCENARIOS) == actual
 
 
@@ -441,6 +443,21 @@ _result_ = True
                 result_name="PartSweep", doc_name=doc)
     await _call(tools, "list_objects", doc_name=doc)
     await _call(tools, "inspect_object", object_name="Extrusion", doc_name=doc)
+    selected = await _call(
+        tools,
+        "select_subshapes",
+        object_name="Extrusion",
+        criteria={
+            "kind": "face",
+            "surface_types": ["Plane"],
+            "normal": [0, 0, 1],
+            "sort_by": "center_z",
+            "sort_order": "desc",
+            "limit": 1,
+        },
+        doc_name=doc,
+    )
+    assert selected["match_count"] == 1
     for action in ("set", "get", "clear"):
         kwargs = {"object_names": ["Extrusion"]} if action == "set" else {}
         await _call(tools, "selection", action=action, doc_name=doc, **kwargs)

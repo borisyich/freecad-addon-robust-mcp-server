@@ -1,6 +1,6 @@
 # FreeCAD Robust MCP Server Tools Reference
 
-This document provides detailed signatures and examples for core MCP tools. It is not the exact inventory of all registered tools. Use [Tools Overview](guide/tools.md) or the MCP client's discovered tool list for the authoritative 115-tool inventory.
+This document provides detailed signatures and examples for core MCP tools. It is not the exact inventory of all registered tools. Use [Tools Overview](guide/tools.md) or the MCP client's discovered tool list for the authoritative 116-tool inventory.
 
 ---
 
@@ -14,7 +14,7 @@ The exact generated inventory is grouped as follows:
 | --- | ---: |
 | Execution | 5 |
 | Documents | 7 |
-| Objects / Part | 32 |
+| Objects / Part | 33 |
 | PartDesign / Sketcher | 28 |
 | Spreadsheet | 11 |
 | Draft | 6 |
@@ -24,7 +24,7 @@ The exact generated inventory is grouped as follows:
 | Validation | 5 |
 | Export / Import | 2 |
 | Macros | 6 |
-| **Total** | **115** |
+| **Total** | **116** |
 
 The sections below retain deeper examples for commonly used tools; they do not repeat every generated entry.
 
@@ -236,7 +236,7 @@ Get detailed information about an object.
 inspect_object(
     object_name: str,
     doc_name: str | None = None,
-    include_properties: bool = True,
+    include_properties: bool = False,
     include_shape: bool = True
 ) -> dict
 ```
@@ -244,6 +244,55 @@ inspect_object(
 For routine structure, dependency, bounds, or shape inspection, explicitly use
 `include_properties=False`. Set it to `True` only when exact property values are
 needed for a specific diagnosis or edit; the complete property map can be large.
+
+With `include_shape=True`, `shape_info.faces` includes `surface_type`, an
+oriented normal sampled at a representative point, `area`, `center`, adjacent
+`FaceN` references, local `convexity`, and
+participating edges. `shape_info.edges` includes `curve_type`, start/end points,
+length, radius when available, direction, and adjacent faces. `convexity` describes
+the local surface curvature at a representative point (`flat`, `convex`,
+`concave`, `saddle`, or `unknown`); it is not an assertion about manufacturability.
+
+#### select_subshapes
+
+Select topology without writing manual loops over `Shape.Faces` or `Shape.Edges`.
+The result contains semantic records plus ready-to-use `FaceN`/`EdgeN` references.
+Use it before face-supported sketches, Fillet, Chamfer, Draft, or Thickness.
+
+```python
+select_subshapes(
+    object_name="Pad",
+    criteria={
+        "kind": "face",
+        "surface_types": ["Plane"],
+        "normal": [0, 0, 1],
+        "normal_tolerance_deg": 2,
+        "sort_by": "center_z",
+        "sort_order": "desc",
+        "limit": 1,
+    },
+)
+
+select_subshapes(
+    object_name="Pad",
+    criteria={
+        "kind": "edge",
+        "curve_types": ["Line"],
+        "direction": [1, 0, 0],
+        "length_min": 20,
+        "adjacent_surface_types": ["Plane"],
+        "sort_by": "length",
+        "sort_order": "desc",
+        "limit": 4,
+    },
+)
+```
+
+Line direction is treated as undirected, so `[1, 0, 0]` also matches an edge
+stored from right to left. Type names are case-insensitive and accept common
+forms such as `planar`/`Plane`, `circular`/`Circle`, and
+`LineSegment`/`Line`. When `adjacent_surface_types` contains several entries,
+every listed type must occur among the edge's adjacent faces.
 
 #### create_object
 
@@ -548,6 +597,7 @@ and one recompute. Supported `op` values are:
 - `horizontal`, `vertical`, `coincident`, `parallel`, `perpendicular`;
 - `tangent`, `equal`, `distance`, `distance_x`, `distance_y`;
 - `radius`, `angle`, `fix`, `delete_constraint`;
+- `set_expression` and `clear_expression` for existing constraints;
 - `add_constraint` for a Sketcher constraint type not covered above.
 
 ```python
@@ -570,10 +620,60 @@ edit_sketch_constraints(
     operations=[
         {"op": "horizontal", "geometry1": 0},
         {"op": "vertical", "geometry1": 1},
-        {"op": "distance", "geometry1": 0, "value": 80},
+        {
+            "op": "distance",
+            "geometry1": 0,
+            "value": 80,
+            "constraint_name": "PlateWidth",
+            "expression": "Dimensions.PlateWidth",
+        },
     ],
 )
 ```
+
+The Spreadsheet cell must have an alias before it can be referenced. Bind a
+constraint by its generated path, not by assigning the Spreadsheet to geometry:
+
+```text
+Spreadsheet cell A1 = 80 mm; alias = PlateWidth
+Sketch expression path = Constraints[2]
+Expression = Dimensions.PlateWidth
+```
+
+`constraint_name` improves readability, while the tool attaches the expression
+through `Constraints[index]`. FreeCAD may later report the same binding through
+a canonical named path in `ExpressionEngine`. To edit an existing binding:
+
+```python
+edit_sketch_constraints(
+    sketch_name="BaseSketch",
+    operations=[
+        {"op": "set_expression", "constraint_index": 2,
+         "expression": "Dimensions.PlateWidth - 2 mm"},
+        {"op": "clear_expression", "constraint_index": 5},
+    ],
+)
+```
+
+Use explicit units in constants inside expressions (`2 mm`, `15 deg`). The
+Spreadsheet alias itself may already carry units.
+
+#### get_sketch_info
+
+```python
+get_sketch_info(sketch_name="BaseSketch", doc_name="Model")
+```
+
+The result includes:
+
+- `geometry`: indexed geometry with `geometry_type`, `start_point`, `end_point`,
+  construction state, and type-specific data such as center/radius;
+- `constraints`: indexed constraint type, referenced geometry/points, datum,
+  name, driving state, and attached expression;
+- `expressions`: stable path/expression pairs; constraint bindings use
+  `Constraints[index]`, with FreeCAD's original path preserved as optional
+  `source_path` when it differs;
+- `sketch_status`: solver, remaining degrees of freedom, and profile closure.
 
 ### Additive Features
 

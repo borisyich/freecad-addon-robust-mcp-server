@@ -6,14 +6,15 @@ This is the prioritized TODO list for making FreeCAD MCP reliable for autonomous
 
 - [ ] Add atomic `edit_sketch` to replace most `add_sketch_*` and one-by-one constraint tools.
 - [ ] Give sketch geometry stable semantic IDs so constraints reference `left_wall` or `mount_hole_1`, not numeric indexes.
-- [ ] Support grouped geometry, grouped constraints, named constraints, Spreadsheet expressions, dry-run solver diagnostics, and full rollback on conflicts.
+- [x] Support named constraints and Spreadsheet expressions in atomic constraint batches.
+- [ ] Support grouped geometry/constraints, dry-run solver diagnostics, and full rollback on conflicts.
 - [ ] Add profile intent checks: expected contour count, closed/open wires, self-intersections, construction geometry, and regions suitable for Pad/Pocket.
 - [ ] Add higher-level primitives: centered rectangle, rounded rectangle, bolt-circle pattern, slot, symmetric trapezoid, and constrained hole layout.
 
 ## Topology and attachment
 
-- [ ] Add semantic face selectors using surface type, normal, centroid, area, bounds, orientation, and adjacency.
-- [ ] Add semantic edge selectors using curve type, endpoints, tangent, length/radius, adjacent faces, convexity, and location.
+- [x] Add semantic face selectors using surface type, normal, centroid, area, bounds, local convexity, and adjacency.
+- [x] Add semantic edge selectors using curve type, endpoints/direction, length/radius, adjacent faces/surface types, and location.
 - [ ] Return selector confidence and ambiguity instead of silently choosing the first match.
 - [ ] Add persistent selection recipes that are re-evaluated after recompute to reduce dependence on transient `FaceN`/`EdgeN` names.
 - [ ] Add robust `attach_sketch` for origin planes, datum planes, planar faces, offsets, rotations, and support verification.

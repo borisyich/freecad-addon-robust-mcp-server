@@ -71,6 +71,14 @@ created; connect it to the tree when it represents required design intent, or
 delete it when it is redundant. A final model is not clean while required
 dimensions are missing/unlinked or Spreadsheet parameters remain orphaned.
 
+For a sketch dimension, the dependency is attached to the constraint expression
+path accepted by the tool as `Constraints[index]`; FreeCAD may later report a
+canonical named path. Create the dimensional constraint with an
+initial numeric value, then set its expression to `SpreadsheetName.Alias`; use
+`get_sketch_info` to verify that the same path appears in `expressions` and on
+the corresponding constraint record. Constraint names improve readability but
+are not the linkage mechanism.
+
 ## Final report pattern
 
 Report the validator output in engineering terms:

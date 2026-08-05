@@ -1854,7 +1854,8 @@ The MCP server provides a `freecad://capabilities` resource with a curated JSON 
 | Tool                      | Description                                                     |
 | ------------------------- | --------------------------------------------------------------- |
 | `list_objects`            | List all objects in a document with their types and properties. |
-| `inspect_object`          | Get detailed information about a specific object.               |
+| `inspect_object`          | Inspect properties plus semantic face/edge topology.             |
+| `select_subshapes`        | Select `FaceN`/`EdgeN` references by geometric criteria.         |
 | `create_object`           | Create a generic FreeCAD object.                                |
 | `create_primitive`        | Create a Box, Cylinder, Sphere, Cone, Torus, Wedge, or Helix.  |
 | `create_line`             | Create a Part::Line between two points.                         |
@@ -1959,8 +1960,8 @@ The MCP server provides a `freecad://capabilities` resource with a curated JSON 
 | Tool                      | Description |
 | ------------------------- | ----------- |
 | `edit_sketch_geometry`    | Apply ordered geometry edits, including endpoint/radius and tangent-fillet arcs, in one transaction. |
-| `edit_sketch_constraints` | Apply ordered constraints with a maximum 50% Fix/Block ratio. |
-| `get_sketch_info`         | Inspect geometry, constraints, closure, and solver status. |
+| `edit_sketch_constraints` | Apply ordered constraints, names, and Spreadsheet expressions; maximum 50% Fix/Block ratio. |
+| `get_sketch_info`         | Inspect geometry/endpoints, constraints, expressions, closure, and solver status. |
 
 `edit_sketch_geometry` supports `add_rectangle`, `add_circle`, `add_line`,
 `add_arc`, `add_point`, `add_ellipse`, `add_regular_polygon`, `add_polyline`, `add_slot`, `add_bspline`,

@@ -476,10 +476,84 @@ For complex parts, build step by step:
    views with `compare_images` after every major feature.
 1. Rework invalid or clearly incorrect geometry before adding dependent features.
 1. Use `inspect_object(include_properties=False)` for routine checks; enable full
-   properties only for a specific diagnosis.
+   properties only for a specific diagnosis. Its shape output exposes semantic
+   face/edge data. Use `select_subshapes` instead of manually iterating every
+   face or edge when choosing sketch support, Fillet, Chamfer, Draft, or Thickness.
 1. Immediately before the final response, call `validate_parametric_model`. For
    drawing/sketch input include all saved dimension identifiers, then resolve any
    missing/unlinked dimensions or unused Spreadsheet aliases before completion.
+
+### Semantic face and edge selection
+
+`inspect_object(include_shape=True)` returns a topology catalogue. Faces include
+surface type, a representative oriented normal, area, adjacent faces, and local
+convexity. Edges
+include curve type, endpoints, length, direction/radius, and adjacent faces.
+Use `select_subshapes` to convert engineering intent into `FaceN` or `EdgeN`:
+
+```python
+# Highest upward planar face for sketch support.
+select_subshapes(
+    object_name="Pad",
+    criteria={
+        "kind": "face", "surface_types": ["Plane"],
+        "normal": [0, 0, 1], "sort_by": "center_z",
+        "sort_order": "desc", "limit": 1,
+    },
+)
+
+# Four longest X-parallel straight edges for a fillet/chamfer candidate set.
+select_subshapes(
+    object_name="Pad",
+    criteria={
+        "kind": "edge", "curve_types": ["Line"],
+        "direction": [1, 0, 0], "sort_by": "length",
+        "sort_order": "desc", "limit": 4,
+    },
+)
+```
+
+The selector narrows candidates but does not replace geometric verification.
+Inspect the returned records and confirm the selected references on the current
+Body Tip before creating topology-sensitive downstream features.
+
+### Spreadsheet expressions for sketch constraints
+
+Create the Spreadsheet cell and alias first, then bind the dimensional
+constraint through its expression path:
+
+```python
+edit_sketch_constraints(
+    sketch_name="BaseSketch",
+    operations=[{
+        "op": "distance", "geometry1": 0, "value": 80,
+        "constraint_name": "PlateWidth",
+        "expression": "Dimensions.PlateWidth",
+    }],
+)
+```
+
+The tool binds through `Constraints[index]`; the readable constraint name does
+not choose the target. FreeCAD may report the same binding using a canonical
+named path after the constraint is renamed. Existing links can be changed or
+removed atomically:
+
+```python
+edit_sketch_constraints(
+    sketch_name="BaseSketch",
+    operations=[
+        {"op": "set_expression", "constraint_index": 2,
+         "expression": "Dimensions.PlateWidth - 2 mm"},
+        {"op": "clear_expression", "constraint_index": 5},
+    ],
+)
+```
+
+Use `get_sketch_info` to inspect geometry endpoints and type-specific data,
+constraint references/datums/names, and expression bindings. Constraint
+expression entries expose a stable `Constraints[index]` path; when FreeCAD
+reports a different canonical source path, it is preserved as `source_path`.
+Use explicit units for literal constants inside expressions.
 
 ### 5. Save Frequently
 

@@ -90,7 +90,211 @@ OBJECT_INSPECTION_RUNTIME = dedent(
         }
 
 
-    def _shape_value(shape):
+    def _shape_is_same(left, right):
+        for method_name in ("isSame", "isEqual"):
+            method = getattr(left, method_name, None)
+            if callable(method):
+                try:
+                    return bool(method(right))
+                except Exception:
+                    pass
+        return left is right
+
+
+    def _shape_name(values, target, prefix):
+        for index, value in enumerate(values or []):
+            if _shape_is_same(value, target):
+                return f"{prefix}{index + 1}"
+        return None
+
+
+    def _normalized_vector_between(start, end):
+        if start is None or end is None:
+            return None
+        try:
+            dx = float(end.x) - float(start.x)
+            dy = float(end.y) - float(start.y)
+            dz = float(end.z) - float(start.z)
+            length = math.sqrt(dx * dx + dy * dy + dz * dz)
+        except Exception:
+            return None
+        if length <= 1e-12:
+            return None
+        return {"x": dx / length, "y": dy / length, "z": dz / length}
+
+
+    def _representative_face_parameters(face):
+        center = _safe_attr(face, "CenterOfMass")
+        surface = _safe_attr(face, "Surface")
+        parameter = getattr(surface, "parameter", None)
+        if center is not None and callable(parameter):
+            try:
+                uv = parameter(center)
+                return float(uv[0]), float(uv[1])
+            except Exception:
+                pass
+
+        parameter_range = _safe_attr(face, "ParameterRange")
+        try:
+            u_min, u_max, v_min, v_max = parameter_range
+            return (
+                (float(u_min) + float(u_max)) * 0.5,
+                (float(v_min) + float(v_max)) * 0.5,
+            )
+        except Exception:
+            return 0.0, 0.0
+
+
+    def _face_curvature_value(face, u, v):
+        try:
+            minimum, maximum = face.curvatureAt(u, v)
+            minimum = float(minimum)
+            maximum = float(maximum)
+        except Exception:
+            return {
+                "classification": "unknown",
+                "principal_curvatures": None,
+                "method": "oriented_principal_curvature",
+            }
+
+        orientation = str(_safe_attr(face, "Orientation", "")).lower()
+        if "reversed" in orientation:
+            minimum, maximum = -maximum, -minimum
+        minimum, maximum = sorted((minimum, maximum))
+
+        tolerance = 1e-9
+        if abs(minimum) <= tolerance and abs(maximum) <= tolerance:
+            classification = "flat"
+        elif minimum < -tolerance and maximum > tolerance:
+            classification = "saddle"
+        elif minimum >= -tolerance and maximum > tolerance:
+            classification = "convex"
+        elif maximum <= tolerance and minimum < -tolerance:
+            classification = "concave"
+        else:
+            classification = "unknown"
+
+        return {
+            "classification": classification,
+            "principal_curvatures": {
+                "minimum": _finite_number(minimum),
+                "maximum": _finite_number(maximum),
+            },
+            "method": "oriented_principal_curvature",
+        }
+
+
+    def _edge_endpoints(edge):
+        vertexes = list(_safe_attr(edge, "Vertexes", []) or [])
+        start = _safe_attr(vertexes[0], "Point") if vertexes else None
+        end = _safe_attr(vertexes[-1], "Point") if len(vertexes) > 1 else None
+
+        if start is None:
+            value_at = getattr(edge, "valueAt", None)
+            if callable(value_at):
+                try:
+                    start = value_at(float(edge.FirstParameter))
+                except Exception:
+                    pass
+        if end is None:
+            value_at = getattr(edge, "valueAt", None)
+            if callable(value_at):
+                try:
+                    end = value_at(float(edge.LastParameter))
+                except Exception:
+                    pass
+        return start, end
+
+
+    def _shape_topology_value(shape):
+        faces = list(_safe_attr(shape, "Faces", []) or [])
+        edges = list(_safe_attr(shape, "Edges", []) or [])
+
+        edge_faces = {}
+        for edge_index, edge in enumerate(edges):
+            names = []
+            for face_index, face in enumerate(faces):
+                if any(
+                    _shape_is_same(edge, face_edge)
+                    for face_edge in list(_safe_attr(face, "Edges", []) or [])
+                ):
+                    names.append(f"Face{face_index + 1}")
+            edge_faces[edge_index] = names
+
+        face_values = []
+        for face_index, face in enumerate(faces):
+            u, v = _representative_face_parameters(face)
+            normal = None
+            try:
+                normal = _vector_value(face.normalAt(u, v))
+            except Exception:
+                pass
+
+            face_edge_names = []
+            adjacent_faces = set()
+            for face_edge in list(_safe_attr(face, "Edges", []) or []):
+                edge_name = _shape_name(edges, face_edge, "Edge")
+                if edge_name is None:
+                    continue
+                if edge_name not in face_edge_names:
+                    face_edge_names.append(edge_name)
+                edge_index = int(edge_name[4:]) - 1
+                adjacent_faces.update(edge_faces.get(edge_index, []))
+            adjacent_faces.discard(f"Face{face_index + 1}")
+
+            surface = _safe_attr(face, "Surface")
+            curvature = _face_curvature_value(face, u, v)
+            face_values.append(
+                {
+                    "name": f"Face{face_index + 1}",
+                    "index": face_index + 1,
+                    "surface_type": (
+                        type(surface).__name__ if surface is not None else None
+                    ),
+                    "normal": normal,
+                    "area": _finite_number(_safe_attr(face, "Area")),
+                    "center": (
+                        _vector_value(_safe_attr(face, "CenterOfMass"))
+                        if _safe_attr(face, "CenterOfMass") is not None
+                        else None
+                    ),
+                    "adjacent_faces": sorted(adjacent_faces),
+                    "edges": face_edge_names,
+                    "convexity": curvature["classification"],
+                    "curvature": curvature,
+                    "bounding_box": _bounding_box_value(_safe_attr(face, "BoundBox")),
+                }
+            )
+
+        edge_values = []
+        for edge_index, edge in enumerate(edges):
+            start, end = _edge_endpoints(edge)
+            curve = _safe_attr(edge, "Curve")
+            radius = _finite_number(_safe_attr(curve, "Radius"))
+            edge_values.append(
+                {
+                    "name": f"Edge{edge_index + 1}",
+                    "index": edge_index + 1,
+                    "curve_type": type(curve).__name__ if curve is not None else None,
+                    "start_point": _vector_value(start) if start is not None else None,
+                    "end_point": _vector_value(end) if end is not None else None,
+                    "direction": _normalized_vector_between(start, end),
+                    "length": _finite_number(_safe_attr(edge, "Length")),
+                    "radius": radius,
+                    "center": (
+                        _vector_value(_safe_attr(edge, "CenterOfMass"))
+                        if _safe_attr(edge, "CenterOfMass") is not None
+                        else None
+                    ),
+                    "adjacent_faces": edge_faces.get(edge_index, []),
+                    "bounding_box": _bounding_box_value(_safe_attr(edge, "BoundBox")),
+                }
+            )
+
+        return {"faces": face_values, "edges": edge_values}
+
+
+    def _shape_value(shape, include_topology=True):
         try:
             is_null = bool(shape.isNull())
         except Exception:
@@ -130,6 +334,8 @@ OBJECT_INSPECTION_RUNTIME = dedent(
         center = _safe_attr(shape, "CenterOfMass")
         summary["center_of_mass"] = _vector_value(center) if center is not None else None
         summary["bounding_box"] = _bounding_box_value(_safe_attr(shape, "BoundBox"))
+        if include_topology:
+            summary.update(_shape_topology_value(shape))
         return summary
 
 
@@ -257,7 +463,7 @@ OBJECT_INSPECTION_RUNTIME = dedent(
         if hasattr(value, "Name") and hasattr(value, "TypeId"):
             return _document_object_ref(value)
         if hasattr(value, "ShapeType") and hasattr(value, "isNull"):
-            return _shape_value(value)
+            return _shape_value(value, include_topology=False)
         if "Placement" in property_type or type_name == "Placement":
             return _placement_value(value)
         if "Rotation" in property_type or type_name == "Rotation":

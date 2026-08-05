@@ -269,6 +269,8 @@ class SketchConstraintOperation(BaseModel):
         "radius",
         "angle",
         "fix",
+        "set_expression",
+        "clear_expression",
         "delete_constraint",
     ]
     constraint_type: str | None = None
@@ -278,15 +280,19 @@ class SketchConstraintOperation(BaseModel):
     point2: int = -1
     value: float | None = None
     constraint_index: int | None = None
+    expression: str | None = None
+    constraint_name: str | None = None
 
     @model_validator(mode="after")
     def validate_operation(self) -> "SketchConstraintOperation":
         """Reject incomplete constraint operations before touching FreeCAD."""
-        if self.op == "delete_constraint":
+        if self.op in {"delete_constraint", "set_expression", "clear_expression"}:
             if self.constraint_index is None or self.constraint_index < 0:
                 raise ValueError(
-                    "delete_constraint requires a non-negative constraint_index"
+                    f"{self.op} requires a non-negative constraint_index"
                 )
+            if self.op == "set_expression" and not (self.expression or "").strip():
+                raise ValueError("set_expression requires expression")
             return self
 
         if self.geometry1 is None:
@@ -308,6 +314,34 @@ class SketchConstraintOperation(BaseModel):
         if self.op in {"distance", "distance_x", "distance_y", "radius", "angle"}:
             if self.value is None:
                 raise ValueError(f"{self.op} requires value")
+        if self.constraint_name is not None and not self.constraint_name.strip():
+            raise ValueError("constraint_name must not be empty")
+        if self.expression is not None:
+            if not self.expression.strip():
+                raise ValueError("expression must not be empty; use clear_expression")
+            dimensional_types = {
+                "Distance",
+                "DistanceX",
+                "DistanceY",
+                "Radius",
+                "Diameter",
+                "Angle",
+            }
+            if self.op == "add_constraint":
+                if self.constraint_type not in dimensional_types:
+                    raise ValueError(
+                        "expression is supported only for dimensional constraints"
+                    )
+            elif self.op not in {
+                "distance",
+                "distance_x",
+                "distance_y",
+                "radius",
+                "angle",
+            }:
+                raise ValueError(
+                    "expression is supported only for dimensional constraints"
+                )
         return self
 
 
@@ -1158,6 +1192,10 @@ _result_ = {{
         Named operations cover the former constraint tools. ``add_constraint``
         retains the generic interface for less common Sketcher constraint types,
         while ``delete_constraint`` removes an existing constraint by index.
+        Dimensional constraints can receive an optional ``expression`` such as
+        ``Dimensions.PlateWidth`` when they are created. Use ``set_expression``
+        or ``clear_expression`` to update an existing ``Constraints[index]``
+        binding. ``constraint_name`` optionally assigns a stable readable name.
         Fix/Block constraints may not cover more than 50% of the sketch geometry;
         use geometric/dimensional constraints or remove existing Fix constraints
         instead of freezing most of the profile.
@@ -1208,6 +1246,40 @@ try:
                 "deleted_constraint_index": operation["constraint_index"],
             }})
             continue
+        if op in ["set_expression", "clear_expression"]:
+            constraint_index = operation["constraint_index"]
+            if constraint_index >= int(sketch.ConstraintCount):
+                raise ValueError(
+                    f"Constraint index out of range: {{constraint_index}}"
+                )
+            if op == "set_expression":
+                existing_constraint = sketch.Constraints[constraint_index]
+                existing_type = getattr(existing_constraint, "Type", "")
+                dimensional_types = {{
+                    "Distance",
+                    "DistanceX",
+                    "DistanceY",
+                    "Radius",
+                    "Diameter",
+                    "Angle",
+                }}
+                if existing_type not in dimensional_types:
+                    raise ValueError(
+                        "Expressions can be assigned only to dimensional "
+                        f"constraints, not {{existing_type!r}}"
+                    )
+            expression_path = f"Constraints[{{constraint_index}}]"
+            expression = (
+                operation["expression"] if op == "set_expression" else None
+            )
+            sketch.setExpression(expression_path, expression)
+            operation_results.append({{
+                "op": op,
+                "constraint_index": constraint_index,
+                "expression_path": expression_path,
+                "expression": expression,
+            }})
+            continue
 
         constraint_types = {{
             "horizontal": "Horizontal",
@@ -1234,6 +1306,8 @@ try:
         geometry2 = operation["geometry2"]
         point2 = operation["point2"]
         value = operation["value"]
+        expression = operation["expression"]
+        constraint_name = operation["constraint_name"]
 
         if constraint_type == "Block":
             geometry_count = int(sketch.GeometryCount)
@@ -1305,10 +1379,23 @@ try:
             raise ValueError(f"Unknown constraint type: {{constraint_type}}")
 
         constraint_index = sketch.addConstraint(constraint)
+        if constraint_name:
+            rename_constraint = getattr(sketch, "renameConstraint", None)
+            if not callable(rename_constraint):
+                raise ValueError(
+                    "This FreeCAD build does not support naming sketch constraints"
+                )
+            rename_constraint(constraint_index, constraint_name)
+        expression_path = f"Constraints[{{constraint_index}}]"
+        if expression:
+            sketch.setExpression(expression_path, expression)
         operation_results.append({{
             "op": op,
             "constraint_type": constraint_type,
             "constraint_index": constraint_index,
+            "constraint_name": constraint_name,
+            "expression_path": expression_path,
+            "expression": expression,
         }})
 
     doc.recompute()
@@ -1323,6 +1410,7 @@ _result_ = {{
     "operations_applied": len(operation_results),
     "operation_results": operation_results,
     "sketch_status": sketch_status,
+    **_sketch_detailed_info(sketch),
 }}
 """
         result = await bridge.execute_python(code)
@@ -4401,6 +4489,13 @@ _result_ = {{
         Returns:
             Dictionary with sketch information:
                 - name: Sketch name
+                - geometry: Ordered geometry records with index, geometry type,
+                  construction state, start/end points, and type-specific data
+                - constraints: Ordered constraints with geometry references,
+                  datum, name, driving state, and attached expression
+                - expressions: Stable expression bindings. Constraint paths
+                  use ``Constraints[index]``; FreeCAD's original path is kept
+                  as ``source_path`` when it differs
                 - sketch_status: Structured dict containing:
                     - geometry and constraint counts
                     - solver status, solve code, and remaining DoF
@@ -4424,6 +4519,7 @@ _result_ = {{
     "name": sketch.Name,
     "label": sketch.Label,
     "sketch_status": _analyze_sketch(sketch),
+    **_sketch_detailed_info(sketch),
 }}
 """
         result = await bridge.execute_python(code)

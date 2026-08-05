@@ -4,6 +4,7 @@ This module provides tools for managing FreeCAD objects:
 creating, editing, deleting, and inspecting objects.
 """
 
+import math
 from collections.abc import Awaitable, Callable
 from typing import Annotated, Any, Literal
 
@@ -102,6 +103,295 @@ PrimitiveSpec = Annotated[
     Field(discriminator="kind"),
 ]
 _PRIMITIVE_ADAPTER = TypeAdapter(PrimitiveSpec)
+
+
+class CoordinateRange(_PrimitiveBase):
+    """Optional center-point bounds used by semantic subshape selection."""
+
+    x_min: float | None = None
+    x_max: float | None = None
+    y_min: float | None = None
+    y_max: float | None = None
+    z_min: float | None = None
+    z_max: float | None = None
+
+    @model_validator(mode="after")
+    def validate_ranges(self) -> "CoordinateRange":
+        for axis in ("x", "y", "z"):
+            minimum = getattr(self, f"{axis}_min")
+            maximum = getattr(self, f"{axis}_max")
+            if minimum is not None and maximum is not None and minimum > maximum:
+                raise ValueError(f"{axis}_min must not exceed {axis}_max")
+        return self
+
+
+class FaceSelectionCriteria(_PrimitiveBase):
+    """Semantic criteria for selecting faces from an object's Shape."""
+
+    kind: Literal["face"]
+    surface_types: list[str] | None = None
+    normal: list[float] | None = Field(default=None, min_length=3, max_length=3)
+    normal_tolerance_deg: float = Field(default=10.0, ge=0, le=180)
+    area_min: float | None = Field(default=None, ge=0)
+    area_max: float | None = Field(default=None, ge=0)
+    convexity: Literal["flat", "convex", "concave", "saddle", "unknown"] | None = (
+        None
+    )
+    adjacent_face_count_min: int | None = Field(default=None, ge=0)
+    adjacent_face_count_max: int | None = Field(default=None, ge=0)
+    center: CoordinateRange | None = None
+    sort_by: Literal[
+        "index", "area", "center_x", "center_y", "center_z"
+    ] = "index"
+    sort_order: Literal["asc", "desc"] = "asc"
+    limit: int = Field(default=20, ge=1, le=200)
+
+    @model_validator(mode="after")
+    def validate_ranges(self) -> "FaceSelectionCriteria":
+        if (
+            self.area_min is not None
+            and self.area_max is not None
+            and self.area_min > self.area_max
+        ):
+            raise ValueError("area_min must not exceed area_max")
+        if (
+            self.adjacent_face_count_min is not None
+            and self.adjacent_face_count_max is not None
+            and self.adjacent_face_count_min > self.adjacent_face_count_max
+        ):
+            raise ValueError(
+                "adjacent_face_count_min must not exceed adjacent_face_count_max"
+            )
+        _validate_direction(self.normal, "normal")
+        return self
+
+
+class EdgeSelectionCriteria(_PrimitiveBase):
+    """Semantic criteria for selecting edges from an object's Shape."""
+
+    kind: Literal["edge"]
+    curve_types: list[str] | None = None
+    direction: list[float] | None = Field(default=None, min_length=3, max_length=3)
+    direction_tolerance_deg: float = Field(default=10.0, ge=0, le=90)
+    length_min: float | None = Field(default=None, ge=0)
+    length_max: float | None = Field(default=None, ge=0)
+    radius_min: float | None = Field(default=None, ge=0)
+    radius_max: float | None = Field(default=None, ge=0)
+    adjacent_face_count_min: int | None = Field(default=None, ge=0)
+    adjacent_face_count_max: int | None = Field(default=None, ge=0)
+    adjacent_surface_types: list[str] | None = None
+    center: CoordinateRange | None = None
+    sort_by: Literal[
+        "index", "length", "radius", "center_x", "center_y", "center_z"
+    ] = "index"
+    sort_order: Literal["asc", "desc"] = "asc"
+    limit: int = Field(default=20, ge=1, le=200)
+
+    @model_validator(mode="after")
+    def validate_ranges(self) -> "EdgeSelectionCriteria":
+        for name in ("length", "radius", "adjacent_face_count"):
+            minimum = getattr(self, f"{name}_min")
+            maximum = getattr(self, f"{name}_max")
+            if minimum is not None and maximum is not None and minimum > maximum:
+                raise ValueError(f"{name}_min must not exceed {name}_max")
+        _validate_direction(self.direction, "direction")
+        return self
+
+
+SubshapeSelectionCriteria = Annotated[
+    FaceSelectionCriteria | EdgeSelectionCriteria,
+    Field(discriminator="kind"),
+]
+_SUBSHAPE_CRITERIA_ADAPTER = TypeAdapter(SubshapeSelectionCriteria)
+
+
+def _validate_direction(value: list[float] | None, field_name: str) -> None:
+    """Reject zero vectors before semantic selection reaches FreeCAD."""
+    if value is None:
+        return
+    if math.sqrt(sum(float(item) ** 2 for item in value)) <= 1e-12:
+        raise ValueError(f"{field_name} must be a non-zero vector")
+
+
+def _normalized_type_name(value: Any) -> str:
+    """Normalize FreeCAD/Python type labels for case-insensitive matching."""
+    text = str(value or "").strip().lower().replace(" ", "")
+    text = text.rsplit(".", 1)[-1]
+    for suffix in ("surface", "curve"):
+        if text.endswith(suffix) and len(text) > len(suffix):
+            text = text[: -len(suffix)]
+    aliases = {
+        "planar": "plane",
+        "cylindrical": "cylinder",
+        "conical": "cone",
+        "spherical": "sphere",
+        "toroidal": "torus",
+        "linear": "line",
+        "linesegment": "line",
+        "circular": "circle",
+        "elliptical": "ellipse",
+        "bspline": "bspline",
+        "bezier": "bezier",
+    }
+    return aliases.get(text, text)
+
+
+def _matches_requested_type(value: Any, requested: list[str] | None) -> bool:
+    if not requested:
+        return True
+    candidate = _normalized_type_name(value)
+    return any(candidate == _normalized_type_name(item) for item in requested)
+
+
+def _vector_angle_deg(
+    actual: dict[str, Any] | None,
+    expected: list[float],
+    *,
+    undirected: bool,
+) -> float | None:
+    if not actual:
+        return None
+    try:
+        actual_values = [float(actual[axis]) for axis in ("x", "y", "z")]
+        expected_values = [float(item) for item in expected]
+        actual_length = math.sqrt(sum(item * item for item in actual_values))
+        expected_length = math.sqrt(sum(item * item for item in expected_values))
+        dot = sum(
+            left * right
+            for left, right in zip(actual_values, expected_values, strict=True)
+        ) / (actual_length * expected_length)
+    except Exception:
+        return None
+    dot = max(-1.0, min(1.0, abs(dot) if undirected else dot))
+    return math.degrees(math.acos(dot))
+
+
+def _inside_range(value: Any, minimum: Any, maximum: Any) -> bool:
+    if value is None:
+        return minimum is None and maximum is None
+    try:
+        number = float(value)
+    except Exception:
+        return False
+    return (minimum is None or number >= minimum) and (
+        maximum is None or number <= maximum
+    )
+
+
+def _center_matches(
+    center: dict[str, Any] | None, bounds: CoordinateRange | None
+) -> bool:
+    if bounds is None:
+        return True
+    if center is None:
+        return False
+    for axis in ("x", "y", "z"):
+        if not _inside_range(
+            center.get(axis),
+            getattr(bounds, f"{axis}_min"),
+            getattr(bounds, f"{axis}_max"),
+        ):
+            return False
+    return True
+
+
+def _semantic_matches(
+    shape_info: dict[str, Any], criteria: SubshapeSelectionCriteria
+) -> list[dict[str, Any]]:
+    """Filter enriched ``shape_info`` using typed semantic criteria."""
+    faces = list(shape_info.get("faces") or [])
+    face_by_name = {face.get("name"): face for face in faces}
+    source = faces if isinstance(criteria, FaceSelectionCriteria) else list(
+        shape_info.get("edges") or []
+    )
+    matches: list[dict[str, Any]] = []
+
+    for item in source:
+        adjacent_count = len(item.get("adjacent_faces") or [])
+        if isinstance(criteria, FaceSelectionCriteria):
+            if not _matches_requested_type(
+                item.get("surface_type"), criteria.surface_types
+            ):
+                continue
+            if criteria.normal is not None:
+                angle = _vector_angle_deg(
+                    item.get("normal"), criteria.normal, undirected=False
+                )
+                if angle is None or angle > criteria.normal_tolerance_deg:
+                    continue
+            if not _inside_range(
+                item.get("area"), criteria.area_min, criteria.area_max
+            ):
+                continue
+            if (
+                criteria.convexity is not None
+                and item.get("convexity") != criteria.convexity
+            ):
+                continue
+        else:
+            if not _matches_requested_type(
+                item.get("curve_type"), criteria.curve_types
+            ):
+                continue
+            if criteria.direction is not None:
+                angle = _vector_angle_deg(
+                    item.get("direction"), criteria.direction, undirected=True
+                )
+                if angle is None or angle > criteria.direction_tolerance_deg:
+                    continue
+            if not _inside_range(
+                item.get("length"), criteria.length_min, criteria.length_max
+            ):
+                continue
+            if not _inside_range(
+                item.get("radius"), criteria.radius_min, criteria.radius_max
+            ):
+                continue
+            if criteria.adjacent_surface_types:
+                adjacent_types = {
+                    _normalized_type_name(
+                        face_by_name.get(name, {}).get("surface_type")
+                    )
+                    for name in item.get("adjacent_faces") or []
+                }
+                requested_types = {
+                    _normalized_type_name(value)
+                    for value in criteria.adjacent_surface_types
+                }
+                if not requested_types.issubset(adjacent_types):
+                    continue
+
+        if not _inside_range(
+            adjacent_count,
+            criteria.adjacent_face_count_min,
+            criteria.adjacent_face_count_max,
+        ):
+            continue
+        if not _center_matches(item.get("center"), criteria.center):
+            continue
+        matches.append(item)
+
+    def sort_value(item: dict[str, Any]) -> tuple[bool, float]:
+        if criteria.sort_by == "index":
+            value = item.get("index")
+        elif criteria.sort_by.startswith("center_"):
+            axis = criteria.sort_by[-1]
+            value = (item.get("center") or {}).get(axis)
+        else:
+            value = item.get(criteria.sort_by)
+        try:
+            return False, float(value)
+        except Exception:
+            return True, 0.0
+
+    present = []
+    missing = []
+    for item in matches:
+        is_missing, value = sort_value(item)
+        (missing if is_missing else present).append((value, item))
+    present.sort(key=lambda pair: pair[0], reverse=criteria.sort_order == "desc")
+    ordered = [item for _, item in present] + [item for _, item in missing]
+    return ordered[: criteria.limit]
 
 
 def _primitive_definition(spec: PrimitiveSpec) -> tuple[str, dict[str, Any]]:
@@ -216,7 +506,10 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
                 - name, label, type_id: Object identity
                 - properties: Each property contains its FreeCAD type, group,
                   status flags, and a structured JSON-safe value
-                - shape_info: Topology, validity, dimensions, mass center, and bounds
+                - shape_info: Topology, validity, dimensions, mass center, and bounds;
+                  faces include surface type, normal, area, adjacency, and local
+                  convexity; edges include curve type, endpoints, length, and
+                  adjacent faces
                 - children, parents: Linked object names
                 - visibility: Current view visibility
 
@@ -259,6 +552,59 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
             result["shape_info"] = obj.shape_info
 
         return result
+
+    @mcp.tool()
+    async def select_subshapes(
+        object_name: str,
+        criteria: SubshapeSelectionCriteria,
+        doc_name: str | None = None,
+    ) -> dict[str, Any]:
+        """Select faces or edges by semantic geometric criteria.
+
+        Use this tool before creating a face-supported sketch or choosing edges
+        for Fillet/Chamfer. It avoids brittle manual loops over ``Shape.Faces``
+        and ``Shape.Edges`` and returns the same ``FaceN``/``EdgeN`` references
+        consumed by PartDesign tools.
+
+        Face criteria can filter by surface type, representative oriented
+        normal, area, local convexity, adjacency count, and center position.
+        Edge criteria can filter by curve type, undirected line direction,
+        length, radius, required adjacent surface types, adjacency count, and
+        center position. Every listed adjacent surface type must occur. Results
+        can be sorted by size or location and limited to the best candidates.
+
+        Args:
+            object_name: Object whose Shape contains the target subshapes.
+            criteria: Typed face or edge selection criteria.
+            doc_name: Document containing the object. Uses active document if None.
+
+        Returns:
+            Object identity, normalized criteria, match count, matching semantic
+            records, and a compact list of ``FaceN`` or ``EdgeN`` references.
+        """
+        normalized = (
+            criteria
+            if isinstance(criteria, (FaceSelectionCriteria, EdgeSelectionCriteria))
+            else _SUBSHAPE_CRITERIA_ADAPTER.validate_python(criteria)
+        )
+        bridge = await get_bridge()
+        obj = await bridge.get_object(object_name, doc_name)
+        if not obj:
+            raise ValueError(f"Object not found: {object_name!r}")
+        shape_info = obj.shape_info
+        if not isinstance(shape_info, dict) or shape_info.get("is_null") is True:
+            raise ValueError(f"Object {object_name!r} has no usable Shape")
+
+        matches = _semantic_matches(shape_info, normalized)
+        return {
+            "object_name": obj.name,
+            "object_label": obj.label,
+            "kind": normalized.kind,
+            "criteria": normalized.model_dump(exclude_none=True),
+            "match_count": len(matches),
+            "references": [item["name"] for item in matches],
+            "matches": matches,
+        }
 
     @mcp.tool()
     async def create_object(

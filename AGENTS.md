@@ -16,5 +16,9 @@ modifies, repairs, or validates a mechanical model in FreeCAD.
 7. For drawing/sketch input, save all explicit non-starred dimensions, compare
    every major feature and the pre-pattern seed with `compare_images`, and pass
    all dimension identifiers to final validation.
-8. Immediately before the final user-facing response after any geometry change,
+8. Use `select_subshapes` instead of manual Face/Edge enumeration when
+   choosing sketch support or topology-sensitive feature references.
+9. Bind Spreadsheet-driven sketch dimensions through constraint expressions and
+   verify the resulting paths with `get_sketch_info`.
+10. Immediately before the final user-facing response after any geometry change,
    call `validate_parametric_model` and summarize significant findings.

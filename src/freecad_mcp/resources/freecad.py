@@ -473,12 +473,18 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                         },
                         {
                             "name": "inspect_object",
-                            "description": "Inspect an object; keep include_properties false unless exact values are needed",
+                            "description": "Inspect an object plus semantic face/edge topology; keep include_properties false unless exact values are needed",
                             "key_params": [
                                 "object_name",
                                 "doc_name",
                                 "include_properties",
+                                "include_shape",
                             ],
+                        },
+                        {
+                            "name": "select_subshapes",
+                            "description": "Select FaceN/EdgeN references by semantic geometric criteria",
+                            "key_params": ["object_name", "criteria", "doc_name"],
                         },
                         {
                             "name": "create_object",
@@ -955,12 +961,12 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                     "tools": [
                         {
                             "name": "edit_sketch_constraints",
-                            "description": "Add or delete ordered sketch constraints",
+                            "description": "Edit ordered sketch constraints, names, and Spreadsheet expressions",
                             "key_params": ["sketch_name", "operations", "doc_name"],
                         },
                         {
                             "name": "get_sketch_info",
-                            "description": "Get sketch geometry, solver, and profile diagnostics",
+                            "description": "Get indexed geometry/endpoints, constraints, expressions, solver, and profile diagnostics",
                             "key_params": ["sketch_name", "doc_name"],
                         },
                     ],

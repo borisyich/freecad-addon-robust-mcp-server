@@ -92,6 +92,10 @@ box.Length = 10.0
 box.Width = 20.0
 box.Height = 30.0
 box.Placement.Base = FreeCAD.Vector(1.0, 2.0, 3.0)
+cylinder = doc.addObject("Part::Cylinder", "Cylinder")
+cylinder.Radius = 5.0
+cylinder.Height = 20.0
+cylinder.Placement.Base = FreeCAD.Vector(30.0, 0.0, 0.0)
 doc.recompute()
 _result_ = True
 """
@@ -99,7 +103,9 @@ _result_ = True
     assert setup.success, setup.error_traceback
 
     try:
-        result = await tools["inspect_object"]("Box", doc_name=doc_name)
+        result = await tools["inspect_object"](
+            "Box", doc_name=doc_name, include_properties=True
+        )
 
         assert result["properties"]["Length"]["value"]["value"] == 10.0
         assert result["properties"]["Placement"]["value"]["position"] == {
@@ -115,6 +121,70 @@ _result_ = True
             "y": 20.0,
             "z": 30.0,
         }
+        assert len(result["shape_info"]["faces"]) == 6
+        assert len(result["shape_info"]["edges"]) == 12
+        assert all(
+            face["surface_type"] == "Plane"
+            for face in result["shape_info"]["faces"]
+        )
+        assert all(
+            face["convexity"] == "flat"
+            for face in result["shape_info"]["faces"]
+        )
+        assert all(
+            edge["curve_type"] == "Line"
+            for edge in result["shape_info"]["edges"]
+        )
+        assert all(
+            len(edge["adjacent_faces"]) == 2
+            for edge in result["shape_info"]["edges"]
+        )
+
+        selected = await tools["select_subshapes"](
+            object_name="Box",
+            doc_name=doc_name,
+            criteria={
+                "kind": "face",
+                "surface_types": ["Plane"],
+                "normal": [0, 0, 1],
+                "sort_by": "center_z",
+                "sort_order": "desc",
+                "limit": 1,
+            },
+        )
+        assert selected["match_count"] == 1
+        assert selected["references"][0].startswith("Face")
+        assert selected["matches"][0]["normal"]["z"] == pytest.approx(1.0)
+
+        x_edges = await tools["select_subshapes"](
+            object_name="Box",
+            doc_name=doc_name,
+            criteria={
+                "kind": "edge",
+                "curve_types": ["LineSegment"],
+                "direction": [1, 0, 0],
+                "length_min": 9.9,
+                "length_max": 10.1,
+                "sort_by": "index",
+            },
+        )
+        assert x_edges["match_count"] == 4
+        assert all(item.startswith("Edge") for item in x_edges["references"])
+
+        cylinder_info = await tools["inspect_object"](
+            "Cylinder", doc_name=doc_name, include_properties=False
+        )
+        cylindrical_faces = [
+            face for face in cylinder_info["shape_info"]["faces"]
+            if face["surface_type"] == "Cylinder"
+        ]
+        assert len(cylindrical_faces) == 1
+        assert cylindrical_faces[0]["convexity"] in {"convex", "concave"}
+        assert cylindrical_faces[0]["normal"] is not None
+        assert any(
+            edge["curve_type"] == "Circle"
+            for edge in cylinder_info["shape_info"]["edges"]
+        )
 
         serialized = json.dumps(result)
         assert " object at " not in serialized
@@ -137,6 +207,13 @@ import Sketcher
 if {doc_name!r} in FreeCAD.listDocuments():
     FreeCAD.closeDocument({doc_name!r})
 doc = FreeCAD.newDocument({doc_name!r})
+sheet = doc.addObject("Spreadsheet::Sheet", "Dimensions")
+sheet.set("A1", "10 mm")
+sheet.setAlias("A1", "CenterX")
+sheet.set("A2", "5 mm")
+sheet.setAlias("A2", "CenterY")
+sheet.set("A3", "4 mm")
+sheet.setAlias("A3", "Radius")
 doc.addObject("Sketcher::SketchObject", "Sketch")
 doc.recompute()
 _result_ = True
@@ -145,11 +222,16 @@ _result_ = True
     assert setup.success, setup.error_traceback
 
     try:
-        added = await tools["add_sketch_circle"](
+        added = await tools["edit_sketch_geometry"](
             "Sketch",
-            center_x=10.0,
-            center_y=5.0,
-            radius=4.0,
+            operations=[
+                {
+                    "op": "add_circle",
+                    "center_x": 10.0,
+                    "center_y": 5.0,
+                    "radius": 4.0,
+                }
+            ],
             doc_name=doc_name,
         )
         status = added["sketch_status"]
@@ -158,27 +240,33 @@ _result_ = True
         assert status["solver"]["status"] == "under_constrained"
         assert status["solver"]["remaining_dof"] == 3
 
-        await tools["add_sketch_constraint"](
+        constrained = await tools["edit_sketch_constraints"](
             "Sketch",
-            "DistanceX",
-            0,
-            point1=3,
-            value=10.0,
-            doc_name=doc_name,
-        )
-        await tools["add_sketch_constraint"](
-            "Sketch",
-            "DistanceY",
-            0,
-            point1=3,
-            value=5.0,
-            doc_name=doc_name,
-        )
-        constrained = await tools["add_sketch_constraint"](
-            "Sketch",
-            "Radius",
-            0,
-            value=4.0,
+            operations=[
+                {
+                    "op": "distance_x",
+                    "geometry1": 0,
+                    "point1": 3,
+                    "value": 10.0,
+                    "constraint_name": "CenterX",
+                    "expression": "Dimensions.CenterX",
+                },
+                {
+                    "op": "distance_y",
+                    "geometry1": 0,
+                    "point1": 3,
+                    "value": 5.0,
+                    "constraint_name": "CenterY",
+                    "expression": "Dimensions.CenterY",
+                },
+                {
+                    "op": "radius",
+                    "geometry1": 0,
+                    "value": 4.0,
+                    "constraint_name": "Radius",
+                    "expression": "Dimensions.Radius",
+                },
+            ],
             doc_name=doc_name,
         )
 
@@ -187,5 +275,24 @@ _result_ = True
         assert final_status["solver"]["remaining_dof"] == 0
         assert final_status["profile"]["state"] == "closed"
         assert "issues" not in final_status
+        assert len(constrained["geometry"]) == 1
+        assert constrained["geometry"][0]["geometry"]["radius"] == pytest.approx(4.0)
+        assert constrained["constraints"][0]["expression"] == "Dimensions.CenterX"
+        assert constrained["constraints"][2]["expression"] == "Dimensions.Radius"
+
+        info = await tools["get_sketch_info"]("Sketch", doc_name=doc_name)
+        assert "start_point" in info["geometry"][0]
+        assert "end_point" in info["geometry"][0]
+        assert len(info["constraints"]) == 3
+        assert len(info["expressions"]) == 3
+        assert {item["expression"] for item in info["expressions"]} == {
+            "Dimensions.CenterX",
+            "Dimensions.CenterY",
+            "Dimensions.Radius",
+        }
+        assert all(
+            item["path"].startswith("Constraints")
+            for item in info["expressions"]
+        )
     finally:
         await _close_document(live_bridge, doc_name)

@@ -350,3 +350,117 @@ def test_sketch_analysis_reports_open_endpoints() -> None:
     ]
     assert result["profile_ready"] is False
     assert any("Coincident" in hint for hint in result["hints"])
+
+class _SketchVector:
+    def __init__(self, x: float, y: float, z: float = 0.0) -> None:
+        self.x = x
+        self.y = y
+        self.z = z
+
+
+class LineSegment:
+    StartPoint = _SketchVector(0.0, 0.0)
+    EndPoint = _SketchVector(20.0, 0.0)
+
+
+class _Constraint:
+    Type = "Distance"
+    First = 0
+    FirstPos = 1
+    Second = -2000
+    SecondPos = 0
+    Third = -2000
+    ThirdPos = 0
+    Value = 20.0
+    Name = "PlateWidth"
+    Label = "PlateWidth"
+
+
+class _Datum:
+    Value = 20.0
+    Unit = "mm"
+
+    def __str__(self) -> str:
+        return "20.00 mm"
+
+
+class _DetailedSketch:
+    Geometry = [LineSegment()]
+    Constraints = [_Constraint()]
+    ExpressionEngine = [("Constraints[0]", "Dimensions.PlateWidth")]
+
+    def getConstruction(self, _index: int) -> bool:
+        return False
+
+    def isDriving(self, _index: int) -> bool:
+        return True
+
+    def getDatum(self, _index: int) -> _Datum:
+        return _Datum()
+
+
+def test_sketch_details_include_geometry_constraints_and_expressions() -> None:
+    """Sketch inspection should expose editable geometry and Spreadsheet links."""
+    from freecad_mcp.tools._freecad_runtime_helpers import (
+        SKETCH_ANALYSIS_RUNTIME_HELPERS,
+    )
+
+    helpers = _load_helpers(SKETCH_ANALYSIS_RUNTIME_HELPERS)
+    result = helpers["_sketch_detailed_info"](_DetailedSketch())
+
+    assert result["geometry"] == [
+        {
+            "index": 0,
+            "geometry_type": "LineSegment",
+            "start_point": {"x": 0.0, "y": 0.0, "z": 0.0},
+            "end_point": {"x": 20.0, "y": 0.0, "z": 0.0},
+            "geometry": {},
+            "construction": False,
+        }
+    ]
+    assert result["expressions"] == [
+        {"path": "Constraints[0]", "expression": "Dimensions.PlateWidth"}
+    ]
+    assert result["constraints"][0]["constraint_type"] == "Distance"
+    assert result["constraints"][0]["first_geometry"] == 0
+    assert result["constraints"][0]["name"] == "PlateWidth"
+    assert result["constraints"][0]["driving"] is True
+    assert result["constraints"][0]["datum"]["display"] == "20.00 mm"
+    assert result["constraints"][0]["expression"] == "Dimensions.PlateWidth"
+
+
+class _NamedConstraint(_Constraint):
+    Name = "CenterX"
+    Label = "CenterX"
+
+
+class _NamedExpressionSketch(_DetailedSketch):
+    Constraints = [_NamedConstraint()]
+    ExpressionEngine = [("Sketch.Constraints.CenterX", "Dimensions.CenterX")]
+
+    def getIndexByName(self, name: str) -> int:  # noqa: N802
+        if name == "CenterX":
+            return 0
+        raise LookupError(name)
+
+
+def test_sketch_details_match_named_constraint_expression_paths() -> None:
+    """FreeCAD canonical named paths must map back to constraint entries."""
+    from freecad_mcp.tools._freecad_runtime_helpers import (
+        SKETCH_ANALYSIS_RUNTIME_HELPERS,
+    )
+
+    helpers = _load_helpers(SKETCH_ANALYSIS_RUNTIME_HELPERS)
+    result = helpers["_sketch_detailed_info"](_NamedExpressionSketch())
+
+    assert result["expressions"] == [
+        {
+            "path": "Constraints[0]",
+            "source_path": "Sketch.Constraints.CenterX",
+            "expression": "Dimensions.CenterX",
+        }
+    ]
+    constraint = result["constraints"][0]
+    assert constraint["name"] == "CenterX"
+    assert constraint["expression_path"] == "Constraints[0]"
+    assert constraint["expression"] == "Dimensions.CenterX"

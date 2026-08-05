@@ -130,6 +130,8 @@ class ShapeInfo:
         vertex_count: Number of vertices.
         edge_count: Number of edges.
         face_count: Number of faces.
+        faces: Semantic face records with surface, normal, area, adjacency, and curvature.
+        edges: Semantic edge records with curve, endpoints, length, and adjacency.
     """
 
     shape_type: str
@@ -144,6 +146,8 @@ class ShapeInfo:
     vertex_count: int = 0
     edge_count: int = 0
     face_count: int = 0
+    faces: list[dict[str, Any]] = field(default_factory=list)
+    edges: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass

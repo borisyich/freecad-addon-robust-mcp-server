@@ -1,6 +1,6 @@
 # Tools Reference
 
-The server currently registers **115 MCP tools**. This page is generated from the actual `@mcp.tool()` definitions in `src/freecad_mcp/tools` and is the exact inventory.
+The server currently registers **116 MCP tools**. This page is generated from the actual `@mcp.tool()` definitions in `src/freecad_mcp/tools` and is the exact inventory.
 
 Geometry-changing operations are transaction-backed where applicable. Use `history(action="undo")` for explicit recovery, `get_console_output` for console diagnostics, and `recompute_document` for document recomputation.
 
@@ -10,7 +10,7 @@ Geometry-changing operations are transaction-backed where applicable. Use `histo
 |---|---|---:|
 | [Execution](#execution) | `src/freecad_mcp/tools/execution.py` | 5 |
 | [Documents](#documents) | `src/freecad_mcp/tools/documents.py` | 7 |
-| [Objects / Part](#objects-part) | `src/freecad_mcp/tools/objects.py` | 32 |
+| [Objects / Part](#objects-part) | `src/freecad_mcp/tools/objects.py` | 33 |
 | [PartDesign / Sketcher](#partdesign-sketcher) | `src/freecad_mcp/tools/partdesign.py` | 28 |
 | [Spreadsheet](#spreadsheet) | `src/freecad_mcp/tools/spreadsheet.py` | 11 |
 | [Draft](#draft) | `src/freecad_mcp/tools/draft.py` | 6 |
@@ -20,7 +20,7 @@ Geometry-changing operations are transaction-backed where applicable. Use `histo
 | [Validation](#validation) | `src/freecad_mcp/tools/validation.py` | 5 |
 | [Export / Import](#export-import) | `src/freecad_mcp/tools/export.py` | 2 |
 | [Macros](#macros) | `src/freecad_mcp/tools/macros.py` | 6 |
-| **Total** |  | **115** |
+| **Total** |  | **116** |
 
 ## Execution
 
@@ -49,7 +49,8 @@ Geometry-changing operations are transaction-backed where applicable. Use `histo
 | Tool | Description |
 |---|---|
 | `list_objects` | List all objects in a FreeCAD document. |
-| `inspect_object` | Get detailed information about a FreeCAD object. |
+| `inspect_object` | Inspect an object, including semantic face and edge topology. |
+| `select_subshapes` | Select faces or edges by surface/curve type, direction, size, adjacency, convexity, and location. |
 | `create_object` | Create a new FreeCAD object. |
 | `create_primitive` | Create a Box, Cylinder, Sphere, Cone, Torus, Wedge, or Helix. |
 | `edit_object` | Edit object properties; string names are resolved for FreeCAD link properties. |
@@ -91,7 +92,7 @@ Geometry-changing operations are transaction-backed where applicable. Use `histo
 | `set_body_tip` | Set and validate the active Tip of a PartDesign Body. |
 | `create_sketch` | Create a Sketch using a typed `support` selector for an origin plane, Body Tip face, explicit feature face, or datum plane. |
 | `edit_sketch_geometry` | Apply geometry edits to one sketch in a single transaction, including endpoint/radius arcs and tangent line fillets. |
-| `edit_sketch_constraints` | Apply constraint edits in one transaction; Fix/Block may cover at most 50% of sketch geometry. |
+| `edit_sketch_constraints` | Apply constraint edits and Spreadsheet expressions in one transaction; Fix/Block may cover at most 50% of sketch geometry. |
 | `pad_sketch` | Create a Pad (extrusion) from a sketch. |
 | `pocket_sketch` | Create a validated Pocket with explicit direction and optional base feature. |
 | `fillet_edges` | Add fillet (rounded edges) to an object. |
@@ -114,7 +115,7 @@ Geometry-changing operations are transaction-backed where applicable. Use `histo
 | `thickness_feature` | Create a thickness (shell) feature in PartDesign. |
 | `subtractive_loft` | Create a subtractive loft (cut) through multiple sketches. |
 | `subtractive_pipe` | Create a subtractive pipe (sweep cut) along a spine path. |
-| `get_sketch_info` | Get detailed information about a sketch. |
+| `get_sketch_info` | Get sketch geometry with endpoints/type-specific data, constraints, expressions, and solver/profile diagnostics. |
 
 ## Spreadsheet
 

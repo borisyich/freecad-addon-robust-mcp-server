@@ -895,6 +895,260 @@ SKETCH_ANALYSIS_RUNTIME_HELPERS = _runtime_code(
         }
 
 
+    def _sketch_vector_value(value):
+        if value is None:
+            return None
+        try:
+            return {
+                "x": float(value.x),
+                "y": float(value.y),
+                "z": float(value.z),
+            }
+        except Exception:
+            return None
+
+
+    def _sketch_expression_entries(sketch):
+        entries = []
+        try:
+            raw_entries = list(sketch.ExpressionEngine or [])
+        except Exception:
+            raw_entries = []
+        try:
+            constraints = list(sketch.Constraints or [])
+        except Exception:
+            constraints = []
+
+        for item in raw_entries:
+            try:
+                raw_path, expression = item[0], item[1]
+            except Exception:
+                continue
+
+            source_path = str(raw_path)
+            canonical_path = source_path
+            constraint_index = _sketch_constraint_expression_index(
+                sketch,
+                source_path,
+                constraints,
+            )
+            if constraint_index is not None:
+                canonical_path = f"Constraints[{constraint_index}]"
+
+            entry = {
+                "path": canonical_path,
+                "expression": str(expression),
+            }
+            if source_path != canonical_path:
+                entry["source_path"] = source_path
+            entries.append(entry)
+        return entries
+
+
+    def _sketch_geometry_details(sketch):
+        values = []
+        try:
+            geometry_values = list(sketch.Geometry or [])
+        except Exception:
+            geometry_values = []
+        construction_getter = getattr(sketch, "getConstruction", None)
+
+        for index, geometry in enumerate(geometry_values):
+            start = _sketch_vector_value(getattr(geometry, "StartPoint", None))
+            end = _sketch_vector_value(getattr(geometry, "EndPoint", None))
+            detail = {
+                "index": index,
+                "geometry_type": type(geometry).__name__,
+                "start_point": start,
+                "end_point": end,
+                "geometry": {},
+            }
+            if callable(construction_getter):
+                try:
+                    detail["construction"] = bool(construction_getter(index))
+                except Exception:
+                    pass
+
+            nested = detail["geometry"]
+            for output_name, attribute in (
+                ("center", "Center"),
+                ("focus1", "Focus1"),
+                ("focus2", "Focus2"),
+            ):
+                value = _sketch_vector_value(getattr(geometry, attribute, None))
+                if value is not None:
+                    nested[output_name] = value
+            for output_name, attribute in (
+                ("radius", "Radius"),
+                ("major_radius", "MajorRadius"),
+                ("minor_radius", "MinorRadius"),
+                ("degree", "Degree"),
+            ):
+                try:
+                    value = getattr(geometry, attribute)
+                except Exception:
+                    continue
+                try:
+                    nested[output_name] = float(value)
+                except Exception:
+                    nested[output_name] = str(value)
+            for output_name, attribute in (
+                ("is_closed", "isClosed"),
+                ("is_periodic", "isPeriodic"),
+            ):
+                method = getattr(geometry, attribute, None)
+                if callable(method):
+                    try:
+                        nested[output_name] = bool(method())
+                    except Exception:
+                        pass
+            values.append(detail)
+        return values
+
+
+    def _sketch_constraint_expression_index(sketch, path, constraints):
+        """Resolve a canonical ExpressionEngine path to a constraint index."""
+        normalized = str(path).strip().lstrip(".")
+        marker = "Constraints"
+        marker_index = normalized.rfind(marker)
+        if marker_index < 0:
+            return None
+
+        suffix = normalized[marker_index + len(marker):]
+        constraint_name = None
+        if suffix.startswith("["):
+            closing = suffix.find("]")
+            if closing < 0:
+                return None
+            token = suffix[1:closing].strip()
+            if token.isdigit():
+                index = int(token)
+                return index if 0 <= index < len(constraints) else None
+            if (
+                len(token) >= 2
+                and token[0] == token[-1]
+                and token[0] in ("'", '"')
+            ):
+                constraint_name = token[1:-1]
+        elif suffix.startswith("."):
+            constraint_name = suffix[1:]
+
+        if not constraint_name:
+            return None
+
+        index_getter = getattr(sketch, "getIndexByName", None)
+        if callable(index_getter):
+            try:
+                index = int(index_getter(constraint_name))
+                if 0 <= index < len(constraints):
+                    return index
+            except Exception:
+                pass
+
+        for index, constraint in enumerate(constraints):
+            try:
+                name = str(getattr(constraint, "Name", "") or "")
+            except Exception:
+                name = ""
+            if name == constraint_name:
+                return index
+        return None
+
+
+    def _sketch_constraint_details(sketch, expressions):
+        expression_by_path = {
+            item["path"]: item["expression"] for item in expressions
+        }
+        values = []
+        try:
+            constraints = list(sketch.Constraints or [])
+        except Exception:
+            constraints = []
+
+        expression_by_index = {}
+        for item in expressions:
+            expression_index = _sketch_constraint_expression_index(
+                sketch,
+                item["path"],
+                constraints,
+            )
+            if expression_index is not None:
+                expression_by_index[expression_index] = item["expression"]
+
+        for index, constraint in enumerate(constraints):
+            path = f"Constraints[{index}]"
+            detail = {
+                "index": index,
+                "constraint_type": getattr(
+                    constraint, "Type", type(constraint).__name__
+                ),
+                "expression_path": path,
+            }
+            for output_name, attribute in (
+                ("first_geometry", "First"),
+                ("first_point", "FirstPos"),
+                ("second_geometry", "Second"),
+                ("second_point", "SecondPos"),
+                ("third_geometry", "Third"),
+                ("third_point", "ThirdPos"),
+                ("value", "Value"),
+                ("name", "Name"),
+                ("label", "Label"),
+            ):
+                try:
+                    item = getattr(constraint, attribute)
+                except Exception:
+                    continue
+                if item is None or (isinstance(item, str) and not item):
+                    continue
+                if output_name == "value":
+                    try:
+                        item = float(item)
+                    except Exception:
+                        item = str(item)
+                detail[output_name] = item
+
+            driving_getter = getattr(sketch, "isDriving", None)
+            if callable(driving_getter):
+                try:
+                    detail["driving"] = bool(driving_getter(index))
+                except Exception:
+                    pass
+
+            datum_getter = getattr(sketch, "getDatum", None)
+            if callable(datum_getter):
+                try:
+                    datum = datum_getter(index)
+                    detail["datum"] = {
+                        "value": float(datum.Value),
+                        "unit": str(datum.Unit),
+                        "display": str(datum),
+                    }
+                except Exception:
+                    pass
+
+            expression = expression_by_index.get(index)
+            if expression is None:
+                expression = expression_by_path.get(path)
+            if expression is None and detail.get("name"):
+                expression = expression_by_path.get(
+                    f"Constraints.{detail['name']}"
+                )
+            if expression is not None:
+                detail["expression"] = expression
+            values.append(detail)
+        return values
+
+
+    def _sketch_detailed_info(sketch):
+        expressions = _sketch_expression_entries(sketch)
+        return {
+            "geometry": _sketch_geometry_details(sketch),
+            "constraints": _sketch_constraint_details(sketch, expressions),
+            "expressions": expressions,
+        }
+
+
     def _analyze_sketch(sketch):
         geometry_count = int(getattr(sketch, "GeometryCount", 0))
         constraint_count = int(getattr(sketch, "ConstraintCount", 0))
