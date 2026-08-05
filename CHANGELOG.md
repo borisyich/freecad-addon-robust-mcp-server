@@ -101,6 +101,21 @@
 - Replaced the unsupported datum-line `ObjectXY` attachment with a deactivated datum aligned by Placement to the selected Body-local X/Y/Z axis, including direction/status validation.
 - Refined Body validation so datum-only/reference-only construction states without a Tip are reported as incomplete warnings, while a missing Tip after shape-bearing history remains an error; invalid non-Tip history items are now surfaced.
 - Added post-recompute validation, rollback, and Body Tip preservation to datum plane and datum point creation, and made the live datum workflow operate on a real padded Body.
+- Normalized sketch-constraint expression paths to stable `Constraints[index]` values while preserving FreeCAD's original named or prefixed path as `source_path`.
+- Fixed sketch-expression serialization for real FreeCAD canonical paths by resolving named `Constraints.<name>` bindings through `SketchObject.getIndexByName()`; prefixed and numeric paths are also supported.
+- Made the MCP instruction regression test verify required workflow clauses instead of duplicating the entire instruction block.
+- Expanded `get_sketch_info` and sketch-edit responses with indexed geometry,
+  start/end points, type-specific geometry data, constraint references/datums,
+  names/driving state, and stable ExpressionEngine bindings.
+- Expanded `inspect_object` Shape topology with semantic face and edge records:
+  surface/curve types, normals/directions, areas/lengths, endpoints, adjacency,
+  local surface convexity, centers, radii, and bounds, while keeping the Shape
+  property itself compact to avoid duplicate topology serialization.
+- Added `select_subshapes`, a typed semantic face/edge selector for sketch
+  support and topology-sensitive Fillet, Chamfer, Draft, and Thickness inputs.
+- Added named sketch constraints plus create/update/clear support for Spreadsheet
+  expressions through `edit_sketch_constraints`, with early rejection of
+  expressions on non-dimensional constraints.
 
 This project uses **component-specific versioning**. Each component has its own
 release notes and version history.
