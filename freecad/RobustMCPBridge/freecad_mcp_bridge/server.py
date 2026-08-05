@@ -147,6 +147,52 @@ def _get_qt_core() -> Any:
     return None
 
 
+def _get_qt_widgets() -> Any:
+    """Get QtWidgets when the bridge runs inside the FreeCAD GUI."""
+    if not (FREECAD_AVAILABLE and FreeCAD.GuiUp):
+        return None
+
+    with contextlib.suppress(ImportError):
+        from PySide2 import QtWidgets
+
+        return QtWidgets
+
+    with contextlib.suppress(ImportError):
+        from PySide6 import QtWidgets
+
+        return QtWidgets
+
+    return None
+
+
+_REPORT_ERROR_MARKERS = (
+    "<Exception>",
+    "The graph must be a DAG",
+    "No profile linked",
+    "Invalid edge link",
+    "missing element reference",
+    "No edges specified",
+    "Tool shape is not valid for boolean operation",
+    "Adding face failed",
+)
+
+
+def _extract_report_error_lines(text: str) -> list[str]:
+    """Return unique high-confidence FreeCAD errors from Report View output."""
+    errors: list[str] = []
+    seen: set[str] = set()
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        is_error = any(marker in line for marker in _REPORT_ERROR_MARKERS)
+        is_missing_property = "Property '" in line and " not found" in line
+        if (is_error or is_missing_property) and line not in seen:
+            seen.add(line)
+            errors.append(line)
+    return errors
+
+
 class ExecutionRequest:
     """Represents a code execution request."""
 
@@ -771,6 +817,80 @@ class FreecadMCPPlugin:
                 "execution_time_ms": timeout_ms,
             }
 
+    def _get_report_view_text(self) -> str | None:
+        """Read Report View text without clearing or changing the user's UI."""
+        qt_widgets = _get_qt_widgets()
+        if qt_widgets is None:
+            return None
+
+        try:
+            main_window = FreeCADGui.getMainWindow()
+            docks = main_window.findChildren(qt_widgets.QDockWidget)
+            report_dock = next(
+                (
+                    dock
+                    for dock in docks
+                    if "report"
+                    in (
+                        f"{dock.objectName()} {dock.windowTitle()}"
+                        .strip()
+                        .lower()
+                    )
+                ),
+                None,
+            )
+            if report_dock is None:
+                return None
+
+            editors = []
+            for editor_type_name in ("QPlainTextEdit", "QTextEdit"):
+                editor_type = getattr(qt_widgets, editor_type_name, None)
+                if editor_type is not None:
+                    editors.extend(report_dock.findChildren(editor_type))
+
+            unique_editors = []
+            seen_ids = set()
+            for editor in editors:
+                editor_id = id(editor)
+                if editor_id not in seen_ids:
+                    seen_ids.add(editor_id)
+                    unique_editors.append(editor)
+
+            if not unique_editors:
+                return None
+            return "\n".join(editor.toPlainText() for editor in unique_editors)
+        except Exception:
+            # Report capture is diagnostic only. It must never prevent code from
+            # executing when the GUI implementation differs between Qt builds.
+            return None
+
+    @staticmethod
+    def _report_view_delta(before: str | None, after: str | None) -> str:
+        """Return text appended to Report View during one bridge request."""
+        if after is None:
+            return ""
+        if before is not None and after.startswith(before):
+            return after[len(before) :]
+        if before:
+            # Report View may trim old text when its buffer grows. Compute the
+            # longest suffix(before) == prefix(after) in linear time, so a large
+            # Report View buffer cannot make bridge execution quadratic.
+            combined = after + "\x00" + before
+            prefix_lengths = [0] * len(combined)
+            for index in range(1, len(combined)):
+                candidate = prefix_lengths[index - 1]
+                while candidate and combined[index] != combined[candidate]:
+                    candidate = prefix_lengths[candidate - 1]
+                if combined[index] == combined[candidate]:
+                    candidate += 1
+                prefix_lengths[index] = candidate
+            overlap = min(prefix_lengths[-1], len(after))
+            if overlap >= 32:
+                return after[overlap:]
+        # The user or FreeCAD may clear Report View during execution. In that
+        # case all post-execution text is new from the bridge's perspective.
+        return after
+
     def _execute_code_sync(self, code: str) -> dict[str, Any]:
         """Execute Python code synchronously (call on main thread only).
 
@@ -794,12 +914,42 @@ class FreecadMCPPlugin:
             exec_globals["FreeCADGui"] = FreeCADGui
             exec_globals["Gui"] = FreeCADGui
 
+        report_before = self._get_report_view_text()
         try:
             with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
                 compiled = compile(code, "<mcp>", "exec")
                 exec(compiled, exec_globals)  # noqa: S102
 
+            if FREECAD_AVAILABLE and getattr(FreeCAD, "GuiUp", False):
+                with contextlib.suppress(Exception):
+                    FreeCADGui.updateGui()
+            report_after = self._get_report_view_text()
+            report_delta = self._report_view_delta(report_before, report_after)
+            report_errors = _extract_report_error_lines(report_delta)
+
             elapsed = (time.perf_counter() - start) * 1000
+            if report_errors:
+                report_message = (
+                    "FreeCAD Report View reported errors despite successful "
+                    "Python execution:\n"
+                    + "\n".join(report_errors)
+                )
+                captured_stderr = stderr_capture.getvalue()
+                return {
+                    "success": False,
+                    "result": None,
+                    "stdout": stdout_capture.getvalue(),
+                    "stderr": (
+                        captured_stderr
+                        + ("\n" if captured_stderr else "")
+                        + report_message
+                    ),
+                    "execution_time_ms": elapsed,
+                    "error_type": "FreeCADReportError",
+                    "error_message": report_message,
+                    "error_traceback": report_message,
+                }
+
             return {
                 "success": True,
                 "result": exec_globals.get("_result_"),
@@ -809,7 +959,18 @@ class FreecadMCPPlugin:
             }
 
         except Exception as e:
+            if FREECAD_AVAILABLE and getattr(FreeCAD, "GuiUp", False):
+                with contextlib.suppress(Exception):
+                    FreeCADGui.updateGui()
+            report_after = self._get_report_view_text()
+            report_delta = self._report_view_delta(report_before, report_after)
+            report_errors = _extract_report_error_lines(report_delta)
             elapsed = (time.perf_counter() - start) * 1000
+            error_traceback = traceback.format_exc()
+            if report_errors:
+                error_traceback += (
+                    "\nFreeCAD Report View:\n" + "\n".join(report_errors)
+                )
             return {
                 "success": False,
                 "result": None,
@@ -818,7 +979,7 @@ class FreecadMCPPlugin:
                 "execution_time_ms": elapsed,
                 "error_type": type(e).__name__,
                 "error_message": str(e),
-                "error_traceback": traceback.format_exc(),
+                "error_traceback": error_traceback,
             }
 
     # =========================================================================

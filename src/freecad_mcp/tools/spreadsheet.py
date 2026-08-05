@@ -72,6 +72,31 @@ SPREADSHEET_RUNTIME_HELPERS = dedent(
         return str(value)
 
 
+    def _spreadsheet_expression_dependencies(doc, sheet, cell, alias):
+        import re
+
+        references = [f"{sheet.Name}.{cell}"]
+        if alias:
+            references.append(f"{sheet.Name}.{alias}")
+        pattern = re.compile(
+            r"(?<![A-Za-z0-9_])(?:"
+            + "|".join(re.escape(reference) for reference in references)
+            + r")(?![A-Za-z0-9_])"
+        )
+
+        dependencies = []
+        for obj in doc.Objects:
+            for property_path, expression in getattr(obj, "ExpressionEngine", []):
+                expression_text = str(expression)
+                if pattern.search(expression_text):
+                    dependencies.append({
+                        "object": obj.Name,
+                        "property": str(property_path),
+                        "expression": expression_text,
+                    })
+        return dependencies
+
+
     def _spreadsheet_binding_expression(sheet, alias, target, property_name):
         cell = sheet.getCellFromAlias(alias)
         if not cell:
@@ -542,6 +567,7 @@ _result_ = {{
         spreadsheet_name: str,
         cell: str,
         doc_name: str | None = None,
+        clear_bindings: bool = False,
     ) -> dict[str, Any]:
         """Clear a cell in a spreadsheet.
 
@@ -550,12 +576,16 @@ _result_ = {{
         Args:
             spreadsheet_name: Name of the spreadsheet object.
             cell: Cell address to clear (e.g., "A1").
+            clear_bindings: Detach expressions that reference this cell or its
+                alias before clearing. Defaults to False so a parameter cannot
+                silently disconnect downstream model dimensions.
             doc_name: Document containing the spreadsheet. Uses active if None.
 
         Returns:
             Dictionary with result:
                 - success: Whether the operation succeeded
                 - cell: Cell address that was cleared
+                - cleared_bindings: Expressions detached from the cell
 
         Raises:
             ValueError: If no document is found.
@@ -565,14 +595,21 @@ _result_ = {{
         Example:
             Clear a cell::
 
-                await spreadsheet_clear_cell("Params", "A1")
+                await spreadsheet_clear_cell(
+                    "Params", "A1", clear_bindings=True
+                )
         """
         bridge = await get_bridge()
 
         code = f"""
 {SPREADSHEET_RUNTIME_HELPERS}
 
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
+requested_doc_name = {doc_name!r}
+doc = (
+    FreeCAD.ActiveDocument
+    if requested_doc_name is None
+    else FreeCAD.getDocument(requested_doc_name)
+)
 if doc is None:
     raise ValueError("No document found")
 
@@ -580,12 +617,42 @@ sheet = doc.getObject({spreadsheet_name!r})
 if sheet is None:
     raise ValueError(f"Spreadsheet not found: {spreadsheet_name!r}")
 
-# Wrap in transaction for undo support
+cell = {cell!r}
+clear_bindings = {clear_bindings!r}
+previous_alias = _spreadsheet_cell_alias(sheet, cell)
+previous_content = _spreadsheet_cell_content(sheet, cell)
+dependent_bindings = _spreadsheet_expression_dependencies(
+    doc, sheet, cell, previous_alias
+)
+if dependent_bindings and not clear_bindings:
+    targets = ", ".join(
+        f"{{item['object']}}.{{item['property']}}"
+        for item in dependent_bindings
+    )
+    raise ValueError(
+        f"Spreadsheet cell {{sheet.Name}}.{{cell}} is referenced by: "
+        f"{{targets}}. Pass clear_bindings=True to detach these "
+        "expressions explicitly before clearing the cell."
+    )
+
+# Resolve all targets before starting a transaction so preflight failures do
+# not mutate the document or trigger a rollback.
+expression_snapshot = []
+for item in dependent_bindings:
+    target = doc.getObject(item["object"])
+    if target is None:
+        raise ValueError(
+            f"Expression target not found: {{item['object']!r}}"
+        )
+    expression_snapshot.append(
+        (target, item["property"], item["expression"])
+    )
+
+# Wrap the actual mutation in one transaction for undo support.
 doc.openTransaction("Clear Spreadsheet Cell")
 try:
-    cell = {cell!r}
-    previous_alias = _spreadsheet_cell_alias(sheet, cell)
-    previous_content = _spreadsheet_cell_content(sheet, cell)
+    for target, property_path, _expression in expression_snapshot:
+        target.setExpression(property_path, None)
 
     # Clearing is idempotent. Do not suppress alias-removal failures: returning
     # success while an alias survives makes the cell impossible to reuse.
@@ -597,6 +664,14 @@ try:
 
     remaining_alias = _spreadsheet_cell_alias(sheet, cell)
     remaining_content = _spreadsheet_cell_content(sheet, cell)
+    remaining_dependencies = _spreadsheet_expression_dependencies(
+        doc, sheet, cell, previous_alias
+    )
+    if remaining_dependencies:
+        raise RuntimeError(
+            f"Cell {{cell}} still has dependent expressions after clearing: "
+            f"{{remaining_dependencies!r}}"
+        )
     if remaining_alias or remaining_content:
         raise RuntimeError(
             f"Cell {{cell}} was not fully cleared: "
@@ -609,9 +684,47 @@ try:
         "cell": cell,
         "removed_alias": previous_alias,
         "had_content": bool(previous_content),
+        "cleared_bindings": dependent_bindings,
     }}
 except Exception:
     doc.abortTransaction()
+    rollback_errors = []
+    try:
+        # The transaction normally restores everything. Detach the snapshot
+        # expressions again before any manual cell repair, so an alias is never
+        # removed while a property still references it.
+        for target, property_path, _expression in expression_snapshot:
+            target.setExpression(property_path, None)
+
+        current_alias = _spreadsheet_cell_alias(sheet, cell)
+        if current_alias:
+            sheet.setAlias(cell, "")
+        current_content = _spreadsheet_cell_content(sheet, cell)
+        if current_content:
+            sheet.clear(cell)
+        _spreadsheet_restore_content(sheet, cell, previous_content)
+        if previous_alias:
+            sheet.setAlias(cell, previous_alias)
+    except Exception as exc:
+        rollback_errors.append(f"restore cell: {{exc}}")
+
+    for target, property_path, expression in expression_snapshot:
+        try:
+            target.setExpression(property_path, expression)
+        except Exception as exc:
+            rollback_errors.append(
+                f"restore {{target.Name}}.{{property_path}}: {{exc}}"
+            )
+    try:
+        doc.recompute()
+    except Exception as exc:
+        rollback_errors.append(f"recompute: {{exc}}")
+
+    if rollback_errors:
+        raise RuntimeError(
+            "Spreadsheet cell clear failed and rollback was incomplete: "
+            + "; ".join(rollback_errors)
+        )
     raise
 """
         result = await bridge.execute_python(code)

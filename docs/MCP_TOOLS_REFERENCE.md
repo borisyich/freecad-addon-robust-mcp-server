@@ -1018,8 +1018,10 @@ the value by `1 deg`; a cell that already has an angle unit is bound directly.
 
 `spreadsheet_get_aliases` enumerates actual Spreadsheet cells (not ordinary
 FreeCAD object properties). `spreadsheet_clear_cell` is idempotent and reports
-the removed alias; it verifies that both content and alias are gone before
-returning success.
+the removed alias. By default it refuses to clear a cell referenced by any
+expression; pass `clear_bindings=True` to detach those expressions explicitly
+in the same transaction. The tool verifies that content, alias, and dependent
+bindings are gone before returning success.
 
 ---
 

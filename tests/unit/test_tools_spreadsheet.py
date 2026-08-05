@@ -1246,3 +1246,92 @@ async def test_spreadsheet_clear_cell_verifies_alias_and_content_removal() -> No
     result = await registered["spreadsheet_clear_cell"]("Params", "A1")
 
     assert result["removed_alias"] == "Length"
+
+
+@pytest.mark.asyncio
+async def test_spreadsheet_clear_cell_guards_and_detaches_dependencies() -> None:
+    """Clearing a parameter must preserve bindings unless explicitly detached."""
+    from freecad_mcp.bridge.base import ExecutionResult
+    from freecad_mcp.tools.spreadsheet import register_spreadsheet_tools
+
+    mcp = MagicMock()
+    registered = {}
+    mcp.tool = lambda: lambda fn: registered.setdefault(fn.__name__, fn) or fn
+    bridge = AsyncMock()
+    bridge.execute_python = AsyncMock(
+        return_value=ExecutionResult(
+            success=True,
+            result={
+                "success": True,
+                "cell": "A1",
+                "removed_alias": "PatternAngle",
+                "had_content": True,
+                "cleared_bindings": [
+                    {
+                        "object": "Pattern",
+                        "property": "Angle",
+                        "expression": "Parameters.PatternAngle",
+                    }
+                ],
+            },
+            stdout="",
+            stderr="",
+            execution_time_ms=1.0,
+        )
+    )
+
+    async def get_bridge():
+        return bridge
+
+    register_spreadsheet_tools(mcp, get_bridge)
+    result = await registered["spreadsheet_clear_cell"](
+        "Parameters", "A1", clear_bindings=True
+    )
+
+    assert result["cleared_bindings"][0]["property"] == "Angle"
+    code = bridge.execute_python.await_args.args[0]
+    assert "_spreadsheet_expression_dependencies" in code
+    assert "clear_bindings = True" in code
+    assert "Pass clear_bindings=True" in code
+    assert "target.setExpression(property_path, None)" in code
+    assert code.index("if dependent_bindings and not clear_bindings") < code.index(
+        'doc.openTransaction("Clear Spreadsheet Cell")'
+    )
+    assert '"cleared_bindings": dependent_bindings' in code
+
+
+@pytest.mark.asyncio
+async def test_spreadsheet_clear_cell_defaults_to_preserving_bindings() -> None:
+    """The default clear operation must not silently disconnect the model."""
+    from freecad_mcp.bridge.base import ExecutionResult
+    from freecad_mcp.tools.spreadsheet import register_spreadsheet_tools
+
+    mcp = MagicMock()
+    registered = {}
+    mcp.tool = lambda: lambda fn: registered.setdefault(fn.__name__, fn) or fn
+    bridge = AsyncMock()
+    bridge.execute_python = AsyncMock(
+        return_value=ExecutionResult(
+            success=True,
+            result={
+                "success": True,
+                "cell": "A1",
+                "removed_alias": None,
+                "had_content": False,
+                "cleared_bindings": [],
+            },
+            stdout="",
+            stderr="",
+            execution_time_ms=1.0,
+        )
+    )
+
+    async def get_bridge():
+        return bridge
+
+    register_spreadsheet_tools(mcp, get_bridge)
+    await registered["spreadsheet_clear_cell"]("Parameters", "A1", "Doc")
+
+    code = bridge.execute_python.await_args.args[0]
+    assert "requested_doc_name = 'Doc'" in code
+    assert "clear_bindings = False" in code

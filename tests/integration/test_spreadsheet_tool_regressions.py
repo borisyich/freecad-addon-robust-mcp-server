@@ -11,6 +11,7 @@ import pytest
 import pytest_asyncio
 
 from freecad_mcp.bridge.xmlrpc import XmlRpcBridge
+from freecad_mcp.tools.partdesign import register_partdesign_tools
 from freecad_mcp.tools.spreadsheet import register_spreadsheet_tools
 
 pytestmark = pytest.mark.integration
@@ -55,6 +56,18 @@ def spreadsheet_tools(live_bridge: XmlRpcBridge) -> dict[str, Any]:
     return collector.tools
 
 
+@pytest.fixture
+def partdesign_tools(live_bridge: XmlRpcBridge) -> dict[str, Any]:
+    """Return the real registered PartDesign tools."""
+    collector = _ToolCollector()
+
+    async def get_bridge() -> XmlRpcBridge:
+        return live_bridge
+
+    register_partdesign_tools(collector, get_bridge)
+    return collector.tools
+
+
 @pytest.mark.asyncio
 async def test_numeric_360_alias_retry_discovery_and_clear(
     live_bridge: XmlRpcBridge,
@@ -68,8 +81,8 @@ if {doc_name!r} in FreeCAD.listDocuments():
     FreeCAD.closeDocument({doc_name!r})
 doc = FreeCAD.newDocument({doc_name!r})
 sheet = doc.addObject("Spreadsheet::Sheet", "Parameters")
-body = doc.addObject("PartDesign::Body", "Body")
-pattern = body.newObject("PartDesign::PolarPattern", "Pattern")
+pattern = doc.addObject("App::FeaturePython", "Pattern")
+pattern.addProperty("App::PropertyAngle", "Angle")
 doc.recompute()
 _result_ = True
 """
@@ -137,11 +150,52 @@ _result_ = {{
             "expression": "Parameters.PatternAngle",
         }
 
+        with pytest.raises(ValueError, match="clear_bindings=True"):
+            await spreadsheet_tools["spreadsheet_clear_cell"](
+                "Parameters", "A1", doc_name=doc_name
+            )
+
+        preserved = await live_bridge.execute_python(
+            f"""
+doc = FreeCAD.getDocument({doc_name!r})
+sheet = doc.getObject("Parameters")
+pattern = doc.getObject("Pattern")
+_result_ = {{
+    "content": sheet.getContents("A1"),
+    "alias": sheet.getAlias("A1"),
+    "expression": dict(pattern.ExpressionEngine).get("Angle"),
+}}
+"""
+        )
+        assert preserved.success, preserved.error_traceback
+        assert preserved.result["alias"] == "PatternAngle"
+        assert preserved.result["expression"] == "Parameters.PatternAngle"
+
         cleared = await spreadsheet_tools["spreadsheet_clear_cell"](
-            "Parameters", "A1", doc_name=doc_name
+            "Parameters",
+            "A1",
+            clear_bindings=True,
+            doc_name=doc_name,
         )
         assert cleared["removed_alias"] == "PatternAngle"
         assert cleared["had_content"] is True
+        assert cleared["cleared_bindings"] == [
+            {
+                "object": "Pattern",
+                "property": "Angle",
+                "expression": "Parameters.PatternAngle",
+            }
+        ]
+
+        detached = await live_bridge.execute_python(
+            f"""
+pattern = FreeCAD.getDocument({doc_name!r}).getObject("Pattern")
+_result_ = dict(pattern.ExpressionEngine).get("Angle")
+"""
+        )
+        assert detached.success, detached.error_traceback
+        assert detached.result is None
+
         cleared_again = await spreadsheet_tools["spreadsheet_clear_cell"](
             "Parameters", "A1", doc_name=doc_name
         )
@@ -160,6 +214,7 @@ _result_ = {{
 @pytest.mark.asyncio
 async def test_edit_object_switches_hole_profile_and_size_together(
     live_bridge: XmlRpcBridge,
+    partdesign_tools: dict[str, Any],
 ) -> None:
     """The generic bridge edit should not leave FreeCAD's reset M1x0.2 size."""
     doc_name = "MCPHoleEditFineRegression"
@@ -167,17 +222,63 @@ async def test_edit_object_switches_hole_profile_and_size_together(
         f"""
 if {doc_name!r} in FreeCAD.listDocuments():
     FreeCAD.closeDocument({doc_name!r})
+import Part
+import Sketcher
+
 doc = FreeCAD.newDocument({doc_name!r})
 body = doc.addObject("PartDesign::Body", "Body")
-hole = body.newObject("PartDesign::Hole", "Hole")
-hole.ThreadType = "ISOMetricProfile"
-hole.ThreadSize = "M12"
-_result_ = True
+base = body.newObject("PartDesign::Feature", "BaseSolid")
+base.Shape = Part.makeBox(
+    40.0,
+    40.0,
+    12.0,
+    FreeCAD.Vector(-20.0, -20.0, 0.0),
+)
+body.Tip = base
+
+sketch = body.newObject("Sketcher::SketchObject", "HoleSketch")
+top_face_index = max(
+    range(1, len(base.Shape.Faces) + 1),
+    key=lambda index: base.Shape.Faces[index - 1].CenterOfMass.z,
+)
+top_face = f"Face{{top_face_index}}"
+if hasattr(sketch, "AttachmentSupport"):
+    sketch.AttachmentSupport = [(base, [top_face])]
+else:
+    sketch.Support = (base, [top_face])
+sketch.MapMode = "FlatFace"
+sketch.addGeometry(
+    Part.Circle(
+        FreeCAD.Vector(0.0, 0.0, 0.0),
+        FreeCAD.Vector(0.0, 0.0, 1.0),
+        6.0,
+    ),
+    False,
+)
+doc.recompute()
+_result_ = {{
+    "base_volume": float(base.Shape.Volume),
+    "sketch_geometry_count": int(sketch.GeometryCount),
+}}
 """
     )
     assert setup.success, setup.error_traceback
 
     try:
+        created = await partdesign_tools["create_hole"](
+            sketch_name="HoleSketch",
+            diameter=12.0,
+            depth=12.0,
+            hole_type="ThroughAll",
+            threaded=True,
+            thread_type="ISO",
+            thread_size="M12",
+            name="Hole",
+            doc_name=doc_name,
+        )
+        assert created["validated"] is True
+        assert created["removed_volume"] > 0.0
+
         with pytest.raises(ValueError, match="requires ThreadSize"):
             await live_bridge.edit_object(
                 "Hole", {"ThreadType": "ISO_FINE"}, doc_name
@@ -194,6 +295,9 @@ hole = FreeCAD.getDocument({doc_name!r}).getObject("Hole")
 _result_ = {{
     "thread_type": str(hole.ThreadType),
     "thread_size": str(hole.ThreadSize),
+    "shape_valid": bool(not hole.Shape.isNull() and hole.Shape.isValid()),
+    "solid_count": len(hole.Shape.Solids),
+    "tip": getattr(FreeCAD.getDocument({doc_name!r}).getObject("Body").Tip, "Name", None),
 }}
 """
         )
@@ -201,6 +305,9 @@ _result_ = {{
         assert state.result == {
             "thread_type": "ISOMetricFineProfile",
             "thread_size": "M12x1.25",
+            "shape_valid": True,
+            "solid_count": 1,
+            "tip": "Hole",
         }
     finally:
         await live_bridge.execute_python(

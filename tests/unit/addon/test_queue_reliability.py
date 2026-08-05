@@ -30,3 +30,73 @@ def test_cancelled_request_is_not_executed():
     assert request.completed.is_set()
     assert request.result is not None
     assert request.result["error_type"] == "CancelledError"
+
+
+def test_report_view_error_turns_successful_exec_into_failure(monkeypatch):
+    """A FreeCAD Report View exception must not be returned as success."""
+    plugin = MODULE.FreecadMCPPlugin(enable_xmlrpc=False)
+    snapshots = iter(
+        [
+            "",
+            "10:42:16  <Exception> Property 'A1' not found in 'Parameters.A1'\n",
+        ]
+    )
+    monkeypatch.setattr(plugin, "_get_report_view_text", lambda: next(snapshots))
+
+    result = plugin._execute_code_sync("_result_ = {'ok': True}")
+
+    assert result["success"] is False
+    assert result["error_type"] == "FreeCADReportError"
+    assert "Property 'A1' not found" in result["error_traceback"]
+
+
+def test_report_view_non_error_message_does_not_fail(monkeypatch):
+    """Informational Report View output must not make a request fail."""
+    plugin = MODULE.FreecadMCPPlugin(enable_xmlrpc=False)
+    snapshots = iter(["", "10:42:16  Recompute finished\n"])
+    monkeypatch.setattr(plugin, "_get_report_view_text", lambda: next(snapshots))
+
+    result = plugin._execute_code_sync("_result_ = 42")
+
+    assert result["success"] is True
+    assert result["result"] == 42
+
+def test_report_view_delta_uses_only_new_text():
+    """Old Report View errors must not poison later bridge requests."""
+    plugin = MODULE.FreecadMCPPlugin(enable_xmlrpc=False)
+
+    assert plugin._report_view_delta("old error\n", "old error\nnew line\n") == (
+        "new line\n"
+    )
+
+
+def test_report_view_delta_handles_trimmed_prefix():
+    """Buffer trimming must not re-report old messages as new failures."""
+    plugin = MODULE.FreecadMCPPlugin(enable_xmlrpc=False)
+
+    shared_tail = "shared tail with enough stable context\n"
+    before = "old line 1\nold line 2\n" + shared_tail
+    after = shared_tail + "new error\n"
+
+    assert plugin._report_view_delta(before, after) == "new error\n"
+
+
+def test_report_view_errors_are_deduplicated():
+    """Repeated recompute messages should produce one concise failure line."""
+    text = (
+        "10:00 <Exception> No profile linked\n"
+        "10:00 <Exception> No profile linked\n"
+    )
+
+    assert MODULE._extract_report_error_lines(text) == [
+        "10:00 <Exception> No profile linked"
+    ]
+
+
+def test_report_view_delta_ignores_tiny_accidental_overlap():
+    """A shared character must not strip the start of genuinely new output."""
+    plugin = MODULE.FreecadMCPPlugin(enable_xmlrpc=False)
+
+    assert plugin._report_view_delta("old x", "x<Exception> new") == (
+        "x<Exception> new"
+    )

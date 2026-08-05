@@ -877,8 +877,15 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                         },
                         {
                             "name": "spreadsheet_clear_cell",
-                            "description": "Idempotently clear and verify cell and alias",
-                            "key_params": ["spreadsheet_name", "cell"],
+                            "description": (
+                                "Safely clear a cell; dependent expressions "
+                                "require explicit detachment"
+                            ),
+                            "key_params": [
+                                "spreadsheet_name",
+                                "cell",
+                                "clear_bindings",
+                            ],
                         },
                         {
                             "name": "spreadsheet_bind_property",

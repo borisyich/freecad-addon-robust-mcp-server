@@ -127,7 +127,7 @@ Geometry-changing operations are transaction-backed where applicable. Use `histo
 | `spreadsheet_get_cell` | Get the value of a cell in a spreadsheet. |
 | `spreadsheet_set_alias` | Set an alias for a cell in a spreadsheet. |
 | `spreadsheet_get_aliases` | Get aliases by enumerating actual spreadsheet cells. |
-| `spreadsheet_clear_cell` | Idempotently clear cell content and its alias, then verify removal. |
+| `spreadsheet_clear_cell` | Safely clear a cell; preserve dependent expressions by default or detach them explicitly with `clear_bindings=True`. |
 | `spreadsheet_bind_property` | Bind a property; unitless angle values are interpreted as degrees. |
 | `spreadsheet_get_cell_range` | Get values from a range of cells in a spreadsheet. |
 | `spreadsheet_import_csv` | Import data from a CSV file into a spreadsheet. |

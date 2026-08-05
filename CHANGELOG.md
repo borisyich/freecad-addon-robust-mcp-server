@@ -116,6 +116,8 @@
 - Added named sketch constraints plus create/update/clear support for Spreadsheet
   expressions through `edit_sketch_constraints`, with early rejection of
   expressions on non-dimensional constraints.
+- Made FreeCAD GUI bridge execution fail with `FreeCADReportError` when Report View records high-confidence errors such as `<Exception>`, dangling property bindings, invalid topology links, missing Hole profiles, or invalid boolean tools despite Python `exec()` returning normally. Per-request delta extraction excludes old messages, and executed code cannot bypass the check.
+- Hardened `spreadsheet_clear_cell`: referenced parameter cells are preserved by default, `clear_bindings=True` detaches dependent expressions atomically, and rollback restores cell content, alias, and expressions.
 
 This project uses **component-specific versioning**. Each component has its own
 release notes and version history.
