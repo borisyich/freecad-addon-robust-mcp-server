@@ -28,6 +28,8 @@ freecad://skills/freecad-engineering
 
 The Skill covers:
 
+- selective MCP prompt/resource discovery without dumping the global client
+  tool registry;
 - stock and dominant-process classification;
 - milling, turning, and sheet-metal modeling strategies, including flat-pattern/developed-blank reconstruction;
 - editable Body/Sketch/PartDesign structure;

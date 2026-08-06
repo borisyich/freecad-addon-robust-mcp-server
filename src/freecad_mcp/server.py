@@ -87,18 +87,11 @@ validate_parametric_model and report significant findings. For drawing/sketch
 input, pass all saved dimension identifiers as required_dimension_names.
 """
 
-MAX_TOOL_DESCRIPTION_CHARS = 360
-
-
-def _compact_tool_description(func: Any) -> str:
-    """Keep tools/list small; full workflows belong in resources and prompts."""
+def _concise_tool_description(func: Any) -> str:
+    """Use the tool's purpose paragraph without arbitrary character clipping."""
     doc = inspect.getdoc(func) or func.__name__.replace("_", " ")
     first_paragraph = doc.split("\n\n", 1)[0]
-    compact = " ".join(first_paragraph.split())
-    if len(compact) <= MAX_TOOL_DESCRIPTION_CHARS:
-        return compact
-    clipped = compact[: MAX_TOOL_DESCRIPTION_CHARS - 1].rsplit(" ", 1)[0]
-    return f"{clipped}..."
+    return " ".join(first_paragraph.split())
 
 
 def _strip_schema_titles(value: Any) -> Any:
@@ -402,7 +395,7 @@ class FreecadFastMCP(FastMCP):
 
         def decorator(func: Any) -> Any:
             local_kwargs = dict(kwargs)
-            local_kwargs["description"] = _compact_tool_description(func)
+            local_kwargs["description"] = _concise_tool_description(func)
             return super(FreecadFastMCP, self).tool(*args, **local_kwargs)(func)
 
         return decorator

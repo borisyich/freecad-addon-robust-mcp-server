@@ -652,22 +652,55 @@ class TestMcpInstructions:
         for clause in required_clauses:
             assert clause in normalized_instructions
 
+    def test_tool_description_preserves_complete_first_paragraph(self):
+        """Purpose paragraphs are normalized but never clipped by character count."""
+        from freecad_mcp.server import _concise_tool_description
+
+        first_paragraph = "Purpose " + "engineering detail " * 30
+
+        def sample_tool() -> None:
+            pass
+
+        sample_tool.__doc__ = first_paragraph + "\n\nVerbose workflow details."
+
+        description = _concise_tool_description(sample_tool)
+
+        assert description == " ".join(first_paragraph.split())
+        assert len(description) > 360
+        assert "Verbose workflow details" not in description
+
     @pytest.mark.asyncio
     async def test_tools_list_does_not_duplicate_global_guidance_or_schema_titles(self):
-        """Global policy is delivered once; tool metadata stays context-efficient."""
+        """Global policy is delivered once; tool metadata stays within budgets."""
         from freecad_mcp import server as server_module
 
         listed = await server_module.mcp.list_tools()
         descriptions = "\n".join(tool.description or "" for tool in listed)
+        dumped_tools = [
+            tool.model_dump(by_alias=True, exclude_none=True) for tool in listed
+        ]
         payload = json.dumps(
-            [tool.model_dump(by_alias=True, exclude_none=True) for tool in listed],
+            dumped_tools,
             ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        description_bytes = len(descriptions.encode("utf-8"))
+        largest_tool_bytes = max(
+            len(
+                json.dumps(
+                    tool,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            )
+            for tool in dumped_tools
         )
 
         assert (
             "inspect the intended document and existing feature history"
             not in descriptions
         )
-        assert max(len(tool.description or "") for tool in listed) <= 360
         assert '"title":' not in payload
-        assert len(payload) < 90_000
+        assert description_bytes < 10_000
+        assert largest_tool_bytes < 8_000
+        assert len(payload.encode("utf-8")) < 90_000

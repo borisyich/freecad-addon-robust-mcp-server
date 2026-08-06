@@ -1,6 +1,7 @@
 """Tests for PartDesign tools module."""
 
 import inspect
+import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -539,6 +540,63 @@ class TestPartDesignTools:
         assert '"delete_constraint"' in generated_code
         assert '"constraint_number": constraint_index + 1' in generated_code
         assert '"deleted_constraint_number": constraint_index + 1' in generated_code
+
+    @pytest.mark.asyncio
+    async def test_edit_sketch_constraints_default_response_stays_within_budget(
+        self, register_tools, mock_bridge
+    ):
+        """Verbose sketch records must not leak into the default edit response."""
+        mock_bridge.execute_python = AsyncMock(
+            return_value=ExecutionResult(
+                success=True,
+                result={
+                    "name": "Sketch",
+                    "operations_applied": 1,
+                    "operation_results": [
+                        {"op": "horizontal", "constraint_index": 0}
+                    ],
+                    "sketch_status": {
+                        "geometry_count": 500,
+                        "constraint_count": 500,
+                        "solver": {"status": "fully_constrained"},
+                    },
+                    "geometry": [
+                        {"index": index, "geometry_type": "LineSegment"}
+                        for index in range(500)
+                    ],
+                    "constraints": [
+                        {"index": index, "constraint_type": "Coincident"}
+                        for index in range(500)
+                    ],
+                    "expressions": [
+                        {
+                            "path": f"Constraints[{index}]",
+                            "expression": "Parameters.Width",
+                        }
+                        for index in range(500)
+                    ],
+                },
+                stdout="",
+                stderr="",
+                execution_time_ms=10.0,
+            )
+        )
+
+        result = await register_tools["edit_sketch_constraints"](
+            "Sketch",
+            [{"op": "horizontal", "geometry1": 0}],
+        )
+
+        assert result["detail_level"] == "summary"
+        assert result["detail_counts"] == {
+            "geometry": 500,
+            "constraints": 500,
+            "expressions": 500,
+        }
+        assert "geometry" not in result
+        assert "constraints" not in result
+        assert "expressions" not in result
+        assert len(json.dumps(result).encode("utf-8")) < 8_000
 
     @pytest.mark.asyncio
     async def test_edit_sketch_constraints_supports_every_replaced_operation(
@@ -1810,6 +1868,10 @@ class TestPartDesignTools:
                             "end_point": {"x": 20.0, "y": 0.0, "z": 0.0},
                             "geometry": {},
                         }
+                    ]
+                    + [
+                        {"index": index, "geometry_type": "LineSegment"}
+                        for index in range(1, 251)
                     ],
                     "constraints": [
                         {
@@ -1818,12 +1880,23 @@ class TestPartDesignTools:
                             "expression_path": "Constraints[0]",
                             "expression": "Dimensions.Width",
                         }
+                    ]
+                    + [
+                        {"index": index, "constraint_type": "Coincident"}
+                        for index in range(1, 251)
                     ],
                     "expressions": [
                         {
                             "path": "Constraints[0]",
                             "expression": "Dimensions.Width",
                         }
+                    ]
+                    + [
+                        {
+                            "path": f"Constraints[{index}]",
+                            "expression": "Dimensions.Width",
+                        }
+                        for index in range(1, 251)
                     ],
                     "sketch_status": {
                         "geometry_count": 4,
@@ -1859,13 +1932,14 @@ class TestPartDesignTools:
         summary = await get_info(sketch_name="Sketch")
         assert summary["detail_level"] == "summary"
         assert summary["detail_counts"] == {
-            "geometry": 1,
-            "constraints": 1,
-            "expressions": 1,
+            "geometry": 251,
+            "constraints": 251,
+            "expressions": 251,
         }
         assert "geometry" not in summary
         assert "constraints" not in summary
         assert "expressions" not in summary
+        assert len(json.dumps(summary).encode("utf-8")) < 4_000
         generated_code = mock_bridge.execute_python.await_args.args[0]
         assert "sketch.solve()" in generated_code
         assert "sketch.DoF" in generated_code

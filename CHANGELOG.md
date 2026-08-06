@@ -131,6 +131,17 @@
   cylindrical cut, Groove, and Helix operations. Explicit directions remain
   strict, legacy `reversed` inputs remain compatible, and responses report the
   selected direction plus compact per-direction diagnostics.
+- Removed arbitrary runtime clipping of MCP tool descriptions; tools expose the
+  complete concise purpose paragraph while tests enforce aggregate protocol
+  budgets.
+- Added selective prompt/resource discovery guidance so agents do not dump broad
+  global `ALL_TOOLS` matches into context.
+- Hardened `spreadsheet_apply_batch` to validate every non-empty formula cell
+  after recompute, including unchanged dependent formulas, with rollback on any
+  encoded formula error.
+- Added live Spreadsheet regressions for dependent-formula rollback and the
+  rectangular `A1:B2` range, plus numeric response-size budgets for compact tool
+  modes.
 
 This project uses **component-specific versioning**. Each component has its own
 release notes and version history.

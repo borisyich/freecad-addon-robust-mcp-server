@@ -1071,6 +1071,7 @@ async def test_spreadsheet_apply_batch_uses_one_transaction_and_recompute() -> N
                 "cells_applied": 2,
                 "aliases_applied": 2,
                 "bindings_applied": 1,
+                "formula_cells_validated": 3,
                 "cells": [],
                 "bindings": [],
             },
@@ -1101,6 +1102,20 @@ async def test_spreadsheet_apply_batch_uses_one_transaction_and_recompute() -> N
     )
 
     assert result["cells_applied"] == 2
+    assert result["formula_cells_validated"] == 3
+    generated_code = bridge.execute_python.await_args.args[0]
+    assert "for formula_cell in _spreadsheet_nonempty_cells(sheet):" in generated_code
+    assert 'formula_content = _spreadsheet_cell_content(sheet, formula_cell)' in generated_code
+    assert '"formula_cells_validated": formula_cells_validated' in generated_code
+    failure_path = generated_code.split("except Exception as batch_error:", 1)[1]
+    explicit_restore = failure_path.index("for cell, previous in cell_snapshot.items():")
+    restored_commit = failure_path.index("doc.commitTransaction()")
+    emergency_abort = failure_path.index("doc.abortTransaction()")
+    assert explicit_restore < restored_commit < emergency_abort
+    assert 'if previous["content"]:' in failure_path
+    assert '_spreadsheet_restore_content(sheet, cell, previous["content"])' in failure_path
+    assert 'elif _spreadsheet_cell_content(sheet, cell):' in failure_path
+    assert "Bad dynamic_cast!" in failure_path
 
 
 def test_spreadsheet_runtime_detects_encoded_formula_errors() -> None:
@@ -1119,6 +1134,9 @@ def test_spreadsheet_runtime_detects_encoded_formula_errors() -> None:
     )
     assert detect("A1", "42", "#ERR: literal text") is None
     assert detect("A1", "=B1 * 2", 84) is None
+    assert detect("B1", "=10 / A1", "#DIV0!") == (
+        "Spreadsheet formula failed in B1: #DIV0!"
+    )
 
 
 @pytest.mark.asyncio
@@ -1213,20 +1231,33 @@ def test_spreadsheet_runtime_enumerates_real_cells_not_properties() -> None:
 
         @staticmethod
         def getAlias(cell):
-            return {"A1": "Length", "A2": "PatternAngle"}.get(cell)
+            return {
+                "A1": "Length",
+                "A2": "PatternAngle",
+                "A3": "XmlFallback",
+            }.get(cell)
 
         @staticmethod
         def getPropertyByName(_name):
             return SimpleNamespace(
-                Content='<Cells><Cell address="A1" alias="Length" /></Cells>'
+                Content=(
+                    '<Cells><Cell address="A1" alias="Length" />'
+                    '<Cell address="A3" alias="XmlFallback" /></Cells>'
+                )
             )
 
     namespace = {}
     exec(SPREADSHEET_RUNTIME_HELPERS, namespace)
 
+    assert namespace["_spreadsheet_nonempty_cells"](Sheet()) == [
+        "A1",
+        "A2",
+        "A3",
+    ]
     assert namespace["_spreadsheet_aliases"](Sheet()) == {
         "Length": "A1",
         "PatternAngle": "A2",
+        "XmlFallback": "A3",
     }
 
 

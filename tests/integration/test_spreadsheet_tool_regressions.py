@@ -417,3 +417,107 @@ _result_ = {{"content": sheet.getContents("A1"), "computed": sheet.get("A1")}}
         await live_bridge.execute_python(
             f"FreeCAD.closeDocument({doc_name!r}) if {doc_name!r} in FreeCAD.listDocuments() else None"
         )
+
+
+@pytest.mark.asyncio
+async def test_batch_validates_unchanged_dependent_formula_cells(
+    live_bridge: XmlRpcBridge,
+    spreadsheet_tools: dict[str, Any],
+) -> None:
+    """A batch must roll back when an unchanged dependent formula becomes invalid."""
+    doc_name = "MCPSpreadsheetDependentFormulaRegression"
+    setup = await live_bridge.execute_python(
+        f"""
+if {doc_name!r} in FreeCAD.listDocuments():
+    FreeCAD.closeDocument({doc_name!r})
+doc = FreeCAD.newDocument({doc_name!r})
+sheet = doc.addObject("Spreadsheet::Sheet", "Parameters")
+sheet.set("A1", "2")
+sheet.set("B1", "=10 / A1")
+doc.recompute()
+_result_ = {{"source": sheet.get("A1"), "dependent": sheet.get("B1")}}
+"""
+    )
+    assert setup.success, setup.error_traceback
+    assert setup.result == {"source": 2, "dependent": 5}
+
+    try:
+        with pytest.raises(
+            ValueError,
+            match=r"(?:Spreadsheet formula failed in|Failed to evaluate spreadsheet cell) B1",
+        ):
+            await spreadsheet_tools["spreadsheet_apply_batch"](
+                spreadsheet_name="Parameters",
+                cells=[{"cell": "A1", "value": 0}],
+                doc_name=doc_name,
+            )
+
+        state = await live_bridge.execute_python(
+            f"""
+sheet = FreeCAD.getDocument({doc_name!r}).getObject("Parameters")
+_result_ = {{
+    "source_content": sheet.getContents("A1"),
+    "source": sheet.get("A1"),
+    "dependent_content": sheet.getContents("B1"),
+    "dependent": sheet.get("B1"),
+}}
+"""
+        )
+        assert state.success, state.error_traceback
+        assert state.result == {
+            "source_content": "2",
+            "source": 2,
+            "dependent_content": "=10 / A1",
+            "dependent": 5,
+        }
+    finally:
+        await live_bridge.execute_python(
+            f"FreeCAD.closeDocument({doc_name!r}) "
+            f"if {doc_name!r} in FreeCAD.listDocuments() else None"
+        )
+
+
+@pytest.mark.asyncio
+async def test_get_cell_range_reads_rectangular_a1_b2(
+    live_bridge: XmlRpcBridge,
+    spreadsheet_tools: dict[str, Any],
+) -> None:
+    """The live range reader must include every cell in a rectangular A1:B2 range."""
+    doc_name = "MCPSpreadsheetRectangularRangeRegression"
+    setup = await live_bridge.execute_python(
+        f"""
+if {doc_name!r} in FreeCAD.listDocuments():
+    FreeCAD.closeDocument({doc_name!r})
+doc = FreeCAD.newDocument({doc_name!r})
+sheet = doc.addObject("Spreadsheet::Sheet", "Parameters")
+sheet.set("A1", "10")
+sheet.set("A2", "20")
+sheet.set("B1", "30")
+sheet.set("B2", "40")
+doc.recompute()
+_result_ = True
+"""
+    )
+    assert setup.success, setup.error_traceback
+
+    try:
+        result = await spreadsheet_tools["spreadsheet_get_cell_range"](
+            spreadsheet_name="Parameters",
+            start_cell="A1",
+            end_cell="B2",
+            doc_name=doc_name,
+        )
+
+        assert result["start"] == "A1"
+        assert result["end"] == "B2"
+        assert result["cells"] == {
+            "A1": 10,
+            "A2": 20,
+            "B1": 30,
+            "B2": 40,
+        }
+    finally:
+        await live_bridge.execute_python(
+            f"FreeCAD.closeDocument({doc_name!r}) "
+            f"if {doc_name!r} in FreeCAD.listDocuments() else None"
+        )

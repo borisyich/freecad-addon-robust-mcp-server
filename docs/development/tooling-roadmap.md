@@ -27,12 +27,32 @@ FreeCAD documents the topological naming problem and recommends modeling practic
 - [x] Validate positive volume increase for Pad, Revolution, Additive Loft, and Additive Pipe.
 - [ ] Extend postcondition contracts to additive primitives, patterns, mirrors, boolean unions, fillets, and chamfers.
 - [ ] Add `preview_feature` / `dry_run_feature` that reports direction, expected bounds, intersection volume, and resulting solid count before committing.
-- [ ] Add explicit world-space direction vectors and `direction="auto"` for Pad, Pocket, Revolution, Hole, and datum offsets.
+- [x] Add validated `direction="auto"` fallback for directional subtractive
+  tools, including Pocket, Groove, Hole, cylindrical cuts, and subtractive
+  helical cuts; explicit directions never silently fall back.
+- [ ] Extend world-space direction/preflight support to additive Pad/Revolution
+  and datum offsets where automatic side selection has a clear design meaning.
 - [ ] Add `create_simple_holes` for one or many circle centers and automatic support/direction selection.
 - [x] Add `create_cylindrical_cut` for radial or datum-plane holes where PartDesign Hole is unnecessarily fragile.
 - [x] Reject datum-plane `create_hole` calls early with an actionable alternative, validate each circle location by probe volume, and prefer actual planar-face support.
 - [ ] Add feature suppression, safe reordering, replace-feature, and checkpoint/restore operations.
 - [ ] Add design-history rules such as “all additive features before all holes” with configurable exceptions.
+- [ ] Add parameter sensitivity validation for required drawing dimensions. In
+  an isolated transaction, perturb each parameter by a small native-unit delta
+  (initially `+0.1`), recompute, record the geometric response, then restore the
+  exact original value. A zero volume change or a volume change above 10% of the
+  baseline should trigger review rather than automatic acceptance. Treat this
+  volume threshold only as triage: hole pitch, location, and angular parameters
+  can change the shape while preserving volume, while a legitimate thickness or
+  length change can exceed 10%. The durable implementation should therefore
+  compare volume together with bounds, center of mass, topology/section evidence,
+  and eventually a shape-difference metric before classifying a parameter as
+  solid-driving or suspicious.
+- [ ] Add structured failure diagnostics for fillet, chamfer, thickness, draft,
+  and similar dress-up operations. Return selected subshape evidence, adjacent
+  face/surface types, requested radius or distance, Shape/Body-Tip failure mode,
+  and rollback status. Add an optional non-committing diagnostic search for a
+  feasible fillet/chamfer size; never silently substitute a smaller value.
 
 ## Measurement and geometric evidence
 
@@ -70,6 +90,9 @@ OCCT exposes both ordinary and optimal bounding-box algorithms; the tool should 
 - [ ] Add canonical integration parts for revolution, loft, sweep, patterns, mirrors, fillets, chamfers, datum attachments, and multi-body references.
 - [ ] Store expected feature graphs and geometric invariants rather than relying only on screenshots or object existence.
 - [ ] Add mutation tests: change Spreadsheet values and prove that geometry, selectors, and downstream features update correctly.
+- [ ] Add negative sensitivity regressions for non-construction points, isolated
+  open helper geometry, volume-preserving location parameters, and genuinely
+  profile-driving constraints.
 
 ## Research references
 

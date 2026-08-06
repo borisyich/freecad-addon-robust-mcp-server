@@ -1088,9 +1088,11 @@ Retries are idempotent, including aliases that already point to the requested
 cell. When a unitless Spreadsheet value is bound to an `App::PropertyAngle`
 such as `PartDesign::PolarPattern.Angle`, the generated expression multiplies
 the value by `1 deg`; a cell that already has an angle unit is bound directly.
-After recompute the batch verifies every updated formula. Encoded values such as
-`ERR:`, `#ERR`, `#REF!`, or an invalid-expression diagnostic cause rollback
-rather than a successful response. In GUI mode the bridge flushes posted Qt
+After recompute the batch verifies every non-empty formula cell on the sheet,
+including unchanged formulas that depend on a modified cell or alias. Encoded
+values such as `ERR:`, `#ERR`, `#REF!`, or an invalid-expression diagnostic
+cause rollback rather than a successful response. The result reports
+`formula_cells_validated`. In GUI mode the bridge flushes posted Qt
 events before reading the per-request Report View delta; high-confidence Spreadsheet errors
 are returned as `FreeCADReportError` even when FreeCAD's Python API did not
 raise an exception.

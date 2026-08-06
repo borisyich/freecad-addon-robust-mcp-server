@@ -1,5 +1,6 @@
 """Tests for validation tools module."""
 
+import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -408,7 +409,8 @@ class TestValidationTools:
                     }
                 ],
             },
-            "bodies": [{"history": ["verbose"]}],
+            "bodies": [{"history": ["verbose"] * 1_000}],
+            "spreadsheets": [{"cells": ["A1"] * 1_000}],
             "findings": [
                 {"severity": "warning", "category": f"finding_{index}"}
                 for index in range(25)
@@ -439,6 +441,7 @@ class TestValidationTools:
             "sketch_match_count": 1,
             "spreadsheet_match_count": 0,
         }
+        assert len(json.dumps(result).encode("utf-8")) < 8_000
 
     @pytest.mark.asyncio
     async def test_validate_parametric_model_rejects_duplicate_dimension_ids(

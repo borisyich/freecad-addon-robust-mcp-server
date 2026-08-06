@@ -26,7 +26,7 @@ SPREADSHEET_RUNTIME_HELPERS = dedent(
             return None
 
 
-    def _spreadsheet_aliases(sheet):
+    def _spreadsheet_nonempty_cells(sheet):
         cells = set()
         try:
             cells.update(sheet.getNonEmptyCells())
@@ -47,8 +47,14 @@ SPREADSHEET_RUNTIME_HELPERS = dedent(
         except Exception:
             pass
 
+        return sorted(cells)
+
+
+    def _spreadsheet_aliases(sheet):
+        cells = _spreadsheet_nonempty_cells(sheet)
+
         aliases = {}
-        for cell in sorted(cells):
+        for cell in cells:
             alias = _spreadsheet_cell_alias(sheet, cell)
             if alias:
                 aliases[alias] = cell
@@ -85,6 +91,9 @@ SPREADSHEET_RUNTIME_HELPERS = dedent(
             "#value",
             "#name",
             "#div/0",
+            "#div0",
+            "division by zero",
+            "divide by zero",
             "invalid expression",
             "expression error",
             "parse error",
@@ -867,9 +876,12 @@ except Exception:
     ) -> dict[str, Any]:
         """Apply cell values, aliases and property bindings atomically.
 
-        All changes use one FreeCAD transaction and one final recompute. This is
-        the preferred tool when building a parameter table because it avoids one
-        MCP round trip and one recompute per individual operation.
+        All changes use one FreeCAD transaction and one final recompute. After
+        recompute, every non-empty formula cell on the sheet is evaluated, not
+        only cells changed by the batch. Any encoded formula failure rolls back
+        the affected cells, aliases, and expressions. This is the preferred tool
+        when building a parameter table because it avoids one MCP round trip and
+        one recompute per individual operation.
 
         Args:
             spreadsheet_name: Existing Spreadsheet object.
@@ -879,7 +891,8 @@ except Exception:
             doc_name: Document containing the objects. Uses active if None.
 
         Returns:
-            Applied counts, computed cell values and created expressions.
+            Applied counts, number of validated formula cells, computed values,
+            and created expressions.
         """
         normalized_cells = [
             (
@@ -1029,6 +1042,26 @@ try:
         }})
 
     doc.recompute()
+    formula_cells_validated = 0
+    for formula_cell in _spreadsheet_nonempty_cells(sheet):
+        formula_content = _spreadsheet_cell_content(sheet, formula_cell)
+        if not str(formula_content or "").lstrip().startswith("="):
+            continue
+        try:
+            formula_computed = sheet.get(formula_cell)
+        except Exception as exc:
+            raise ValueError(
+                f"Failed to evaluate spreadsheet cell {{formula_cell}}: {{exc}}"
+            ) from exc
+        formula_error = _spreadsheet_formula_error(
+            formula_cell,
+            formula_content,
+            formula_computed,
+        )
+        if formula_error:
+            raise ValueError(formula_error)
+        formula_cells_validated += 1
+
     computed_cells = []
     for item in cells:
         try:
@@ -1037,13 +1070,6 @@ try:
             raise ValueError(
                 f"Failed to evaluate spreadsheet cell {{item['cell']}}: {{exc}}"
             ) from exc
-        formula_error = _spreadsheet_formula_error(
-            item["cell"],
-            _spreadsheet_cell_content(sheet, item["cell"]),
-            computed,
-        )
-        if formula_error:
-            raise ValueError(formula_error)
         computed_cells.append({{
             "cell": item["cell"],
             "value": item["value"],
@@ -1051,22 +1077,30 @@ try:
         }})
     doc.commitTransaction()
 except Exception as batch_error:
-    doc.abortTransaction()
     rollback_errors = []
 
-    # abortTransaction() does not restore already-mutated Spreadsheet cells in
-    # FreeCAD 1.0, so restore every touched value, alias and expression.
-    for cell in touched_cells:
+    # Do not call abortTransaction() before restoring Spreadsheet cells.
+    # FreeCAD 1.0 can emit ``Bad dynamic_cast!`` while its transaction engine
+    # tries to restore a cell whose internal value type changed (for example,
+    # a numeric literal replaced by an invalid formula). Restore the explicit
+    # snapshots while the transaction remains open, recompute the valid state,
+    # then commit that restored no-op state to close the transaction cleanly.
+    for cell, previous in cell_snapshot.items():
         try:
             if _spreadsheet_cell_alias(sheet, cell):
                 sheet.setAlias(cell, "")
-            if _spreadsheet_cell_content(sheet, cell):
+
+            # Overwrite an existing cell directly when it had previous
+            # content. Clearing and recreating a Spreadsheet cell inside the
+            # same transaction can leave its dynamic property registration in
+            # an invalid state in FreeCAD 1.0 (later get/getContents calls then
+            # fail with "Invalid cell address or property"). Only clear cells
+            # that were genuinely absent before the batch.
+            if previous["content"]:
+                _spreadsheet_restore_content(sheet, cell, previous["content"])
+            elif _spreadsheet_cell_content(sheet, cell):
                 sheet.clear(cell)
-        except Exception as exc:
-            rollback_errors.append(f"clear {{cell}}: {{exc}}")
-    for cell, previous in cell_snapshot.items():
-        try:
-            _spreadsheet_restore_content(sheet, cell, previous["content"])
+
             if previous["alias"]:
                 sheet.setAlias(cell, previous["alias"])
         except Exception as exc:
@@ -1083,7 +1117,20 @@ except Exception as batch_error:
     except Exception as exc:
         rollback_errors.append(f"recompute: {{exc}}")
 
+    if not rollback_errors:
+        try:
+            doc.commitTransaction()
+        except Exception as exc:
+            rollback_errors.append(f"finalize restored transaction: {{exc}}")
+
     if rollback_errors:
+        # Emergency fallback only. It may still produce a FreeCAD diagnostic,
+        # but is preferable to leaving an open transaction after an incomplete
+        # explicit rollback.
+        try:
+            doc.abortTransaction()
+        except Exception as exc:
+            rollback_errors.append(f"abort failed transaction: {{exc}}")
         raise RuntimeError(
             "Spreadsheet batch failed and rollback was incomplete: "
             + "; ".join(rollback_errors)
@@ -1096,6 +1143,7 @@ _result_ = {{
     "cells_applied": len(cells),
     "aliases_applied": len(aliases),
     "bindings_applied": len(bindings),
+    "formula_cells_validated": formula_cells_validated,
     "cells": computed_cells,
     "bindings": expression_results,
 }}

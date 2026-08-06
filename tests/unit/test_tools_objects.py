@@ -1,5 +1,6 @@
 """Tests for object tools module."""
 
+import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -183,6 +184,7 @@ class TestObjectTools:
                 name="Body",
                 label="Body",
                 type_id="PartDesign::Body",
+                properties={"LargeIgnoredProperty": "x" * 100_000},
                 shape_info={"volume": 42.0, "face_count": 80},
             )
         )
@@ -191,6 +193,7 @@ class TestObjectTools:
 
         assert result["detail_level"] == "summary"
         assert result["shape_info"]["face_count"] == 80
+        assert len(json.dumps(result).encode("utf-8")) < 4_000
         mock_bridge.get_object.assert_awaited_once_with(
             "Body",
             None,

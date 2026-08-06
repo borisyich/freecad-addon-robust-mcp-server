@@ -37,6 +37,37 @@ Schema, while cosmetic schema `title` fields are removed to keep `tools/list`
 within a practical context budget. Full workflows and large-response warnings
 belong in documentation, resources, prompts, and the Skill.
 
+## Selective client discovery
+
+Client-side discovery must not print every entry matching broad terms such as
+`resource`, `prompt`, or `mcp` from a global `ALL_TOOLS` registry. Such a query
+includes unrelated platform tools and can be much larger than FreeCAD's own
+`tools/list` response.
+
+Use the canonical server ID `freecad-mcp`, list prompt/resource names first,
+then read or invoke only the item required for the current workflow. Start with
+`freecad://skills/freecad-engineering`; use a workflow resource or
+`freecad_guidance(task_type=...)` only when the task needs that narrower
+guidance. When inspecting tools in a client registry, filter by an exact tool
+name or the `mcp__freecad_mcp__` namespace and output a compact count/size
+summary instead of complete schemas.
+
+## Regression budgets
+
+The server does not truncate tool descriptions at runtime. Instead, tests guard
+the actual protocol and compact-response sizes:
+
+- complete compact `tools/list` payload: less than 90 KB;
+- aggregate tool descriptions: less than 10 KB;
+- largest single serialized tool definition: less than 8 KB;
+- representative compact `inspect_object` and `get_sketch_info` responses: less
+  than 4 KB;
+- representative compact `validate_parametric_model` and
+  `edit_sketch_constraints` responses: less than 8 KB.
+
+These are regression budgets for compact/default modes, not clipping rules.
+Explicit topology, full validation, and paged sketch detail may be larger.
+
 ## What is mandatory
 
 For any task that creates or changes FreeCAD geometry:

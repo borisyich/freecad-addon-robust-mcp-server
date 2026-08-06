@@ -16,6 +16,40 @@ Use this skill as the engineering policy for model creation and modification.
 It is guidance, not a rigid state machine: choose the smallest reliable sequence
 for the actual part, but preserve editable design intent and verify the result.
 
+## Load MCP guidance selectively
+
+Do not dump the global client tool registry with a broad search such as:
+
+```javascript
+const names = ALL_TOOLS.filter(
+  x => /freecad|resource|prompt|mcp/i.test(x.name + " " + x.description)
+);
+text(names);
+```
+
+That query also matches unrelated platform tools and prints their complete
+descriptions and schemas, which can consume a large part of the model context.
+
+Discover only the guidance needed for the current step:
+
+1. Use the exact MCP server ID `freecad-mcp` when listing prompts or resources.
+2. List names/URIs first; do not print every description or schema.
+3. Read one targeted resource, starting with
+   `freecad://skills/freecad-engineering` for modeling policy. Use
+   `freecad://capabilities`, `freecad://best-practices`, or one workflow resource
+   only when the current task needs it.
+4. Invoke one relevant prompt such as `freecad_startup`,
+   `reproduce_from_drawing`, `modify_existing_model`, or
+   `freecad_guidance(task_type=...)`; do not load the entire prompt catalogue.
+5. Inspect an exact tool definition only when its typed arguments remain
+   unclear. In clients exposing `ALL_TOOLS`, filter by the exact name or the
+   `mcp__freecad_mcp__` prefix and print a compact name/size summary rather than
+   complete definitions.
+
+Stop discovery as soon as the current operation has enough guidance. Re-read a
+resource or prompt later only when the task enters a different workflow or a
+specific tool contract is unclear.
+
 ## First rule for every engineer: feedback loop (ACT → OBSERVE → REACT)
 
 Use an ACT → OBSERVE → REACT loop throughout model creation and modification.
