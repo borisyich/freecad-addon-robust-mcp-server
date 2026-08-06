@@ -32,6 +32,7 @@ Example:
 """
 
 import argparse
+import inspect
 import json
 import logging
 import os
@@ -69,6 +70,9 @@ Before modifying geometry:
   stable identifier before modeling.
 Prefer standard MCP tools. Use execute_python or safe_execute only when
 a required operation is unavailable or broken.
+Use compact/default detail levels first. Request full topology, properties,
+sketch records, or validation structure only for a specific diagnosis, and page
+large face/edge/constraint collections instead of loading them all at once.
 For Spreadsheet-driven sketch dimensions, bind the alias to the dimensional
 constraint expression path and verify it with get_sketch_info.
 After every major feature:
@@ -82,6 +86,33 @@ Before completing a geometry-changing task, call
 validate_parametric_model and report significant findings. For drawing/sketch
 input, pass all saved dimension identifiers as required_dimension_names.
 """
+
+MAX_TOOL_DESCRIPTION_CHARS = 360
+
+
+def _compact_tool_description(func: Any) -> str:
+    """Keep tools/list small; full workflows belong in resources and prompts."""
+    doc = inspect.getdoc(func) or func.__name__.replace("_", " ")
+    first_paragraph = doc.split("\n\n", 1)[0]
+    compact = " ".join(first_paragraph.split())
+    if len(compact) <= MAX_TOOL_DESCRIPTION_CHARS:
+        return compact
+    clipped = compact[: MAX_TOOL_DESCRIPTION_CHARS - 1].rsplit(" ", 1)[0]
+    return f"{clipped}..."
+
+
+def _strip_schema_titles(value: Any) -> Any:
+    """Remove cosmetic JSON-Schema titles that bloat tools/list responses."""
+    if isinstance(value, dict):
+        return {
+            key: _strip_schema_titles(item)
+            for key, item in value.items()
+            if key != "title"
+        }
+    if isinstance(value, list):
+        return [_strip_schema_titles(item) for item in value]
+    return value
+
 
 # Global bridge instance (initialized on startup via lifespan)
 _bridge: Any = None
@@ -325,9 +356,7 @@ def _build_transport_security(config: Any) -> TransportSecuritySettings:
             msg = "FREECAD_PUBLIC_HOST must be a hostname without scheme or path"
             raise ValueError(msg)
         allowed_hosts.extend([public_host, f"{public_host}:*"])
-        allowed_origins.extend(
-            [f"https://{public_host}", f"https://{public_host}:*"]
-        )
+        allowed_origins.extend([f"https://{public_host}", f"https://{public_host}:*"])
 
     return TransportSecuritySettings(
         enable_dns_rebinding_protection=True,
@@ -365,12 +394,26 @@ class FreecadFastMCP(FastMCP):
         super().__init__(*args, **kwargs)
 
     def tool(self, *args: Any, **kwargs: Any) -> Any:
+        """Register a tool with compact metadata and configured output mode."""
         if kwargs.get("structured_output") is None:
             kwargs["structured_output"] = self._default_structured_output
-        return super().tool(*args, **kwargs)
+        if kwargs.get("description") is not None:
+            return super().tool(*args, **kwargs)
+
+        def decorator(func: Any) -> Any:
+            local_kwargs = dict(kwargs)
+            local_kwargs["description"] = _compact_tool_description(func)
+            return super(FreecadFastMCP, self).tool(*args, **local_kwargs)(func)
+
+        return decorator
 
     async def list_tools(self) -> list[Any]:
+        """List tools after removing context-heavy cosmetic schema titles."""
         tools = await super().list_tools()
+        for tool in tools:
+            tool.inputSchema = _strip_schema_titles(tool.inputSchema)
+            if getattr(tool, "outputSchema", None) is not None:
+                tool.outputSchema = _strip_schema_titles(tool.outputSchema)
         logger.info("MCP tools/list completed: count=%d", len(tools))
         return tools
 
@@ -379,6 +422,7 @@ class FreecadFastMCP(FastMCP):
         name: str,
         arguments: dict[str, Any],
     ) -> Any:
+        """Call a registered tool with optional argument/result diagnostics."""
         started_at = time.perf_counter()
         logger.info("MCP tools/call started: tool=%s", name)
         if self._log_tool_arguments:
@@ -402,8 +446,7 @@ class FreecadFastMCP(FastMCP):
                     ),
                 )
             logger.info(
-                "MCP tools/call completed: tool=%s result_type=%s "
-                "duration_ms=%.1f",
+                "MCP tools/call completed: tool=%s result_type=%s duration_ms=%.1f",
                 name,
                 type(result).__name__,
                 duration_ms,
@@ -417,6 +460,7 @@ class FreecadFastMCP(FastMCP):
                 duration_ms,
             )
             raise
+
 
 # Create the Robust MCP Server instance with explicit DNS-rebinding protection.
 _initial_config = get_config()
@@ -536,9 +580,7 @@ async def check_freecad_connection(
             )
             print(f"  Queue latency: {queue_latency_ms:.1f} ms")
             try:
-                version_info = await xmlrpc_bridge.get_freecad_version(
-                    timeout_ms=3000
-                )
+                version_info = await xmlrpc_bridge.get_freecad_version(timeout_ms=3000)
             except Exception as exc:
                 print(f"  Warning: version lookup failed: {exc}")
                 version_info = {

@@ -1,5 +1,6 @@
 """Tests for the main server module."""
 
+import json
 import os
 import queue
 import sys
@@ -626,6 +627,7 @@ class TestHttpToolResultCompatibility:
         assert getattr(result[0], "type", None) == "text"
         assert "Document1" in getattr(result[0], "text", "")
 
+
 class TestMcpInstructions:
     """Tests for protocol-level server instructions."""
 
@@ -649,3 +651,23 @@ class TestMcpInstructions:
         )
         for clause in required_clauses:
             assert clause in normalized_instructions
+
+    @pytest.mark.asyncio
+    async def test_tools_list_does_not_duplicate_global_guidance_or_schema_titles(self):
+        """Global policy is delivered once; tool metadata stays context-efficient."""
+        from freecad_mcp import server as server_module
+
+        listed = await server_module.mcp.list_tools()
+        descriptions = "\n".join(tool.description or "" for tool in listed)
+        payload = json.dumps(
+            [tool.model_dump(by_alias=True, exclude_none=True) for tool in listed],
+            ensure_ascii=False,
+        )
+
+        assert (
+            "inspect the intended document and existing feature history"
+            not in descriptions
+        )
+        assert max(len(tool.description or "") for tool in listed) <= 360
+        assert '"title":' not in payload
+        assert len(payload) < 90_000

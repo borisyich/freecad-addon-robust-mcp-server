@@ -124,20 +124,16 @@ _result_ = True
         assert len(result["shape_info"]["faces"]) == 6
         assert len(result["shape_info"]["edges"]) == 12
         assert all(
-            face["surface_type"] == "Plane"
-            for face in result["shape_info"]["faces"]
+            face["surface_type"] == "Plane" for face in result["shape_info"]["faces"]
         )
         assert all(
-            face["convexity"] == "flat"
-            for face in result["shape_info"]["faces"]
+            face["convexity"] == "flat" for face in result["shape_info"]["faces"]
         )
         assert all(
-            edge["curve_type"] == "Line"
-            for edge in result["shape_info"]["edges"]
+            edge["curve_type"] == "Line" for edge in result["shape_info"]["edges"]
         )
         assert all(
-            len(edge["adjacent_faces"]) == 2
-            for edge in result["shape_info"]["edges"]
+            len(edge["adjacent_faces"]) == 2 for edge in result["shape_info"]["edges"]
         )
 
         selected = await tools["select_subshapes"](
@@ -151,6 +147,7 @@ _result_ = True
                 "sort_order": "desc",
                 "limit": 1,
             },
+            detail_level="summary",
         )
         assert selected["match_count"] == 1
         assert selected["references"][0].startswith("Face")
@@ -172,10 +169,11 @@ _result_ = True
         assert all(item.startswith("Edge") for item in x_edges["references"])
 
         cylinder_info = await tools["inspect_object"](
-            "Cylinder", doc_name=doc_name, include_properties=False
+            "Cylinder", doc_name=doc_name, detail_level="topology"
         )
         cylindrical_faces = [
-            face for face in cylinder_info["shape_info"]["faces"]
+            face
+            for face in cylinder_info["shape_info"]["faces"]
             if face["surface_type"] == "Cylinder"
         ]
         assert len(cylindrical_faces) == 1
@@ -268,6 +266,7 @@ _result_ = True
                 },
             ],
             doc_name=doc_name,
+            detail_level="full",
         )
 
         final_status = constrained["sketch_status"]
@@ -280,7 +279,9 @@ _result_ = True
         assert constrained["constraints"][0]["expression"] == "Dimensions.CenterX"
         assert constrained["constraints"][2]["expression"] == "Dimensions.Radius"
 
-        info = await tools["get_sketch_info"]("Sketch", doc_name=doc_name)
+        info = await tools["get_sketch_info"](
+            "Sketch", doc_name=doc_name, detail_level="full"
+        )
         assert "start_point" in info["geometry"][0]
         assert "end_point" in info["geometry"][0]
         assert len(info["constraints"]) == 3
@@ -291,8 +292,7 @@ _result_ = True
             "Dimensions.Radius",
         }
         assert all(
-            item["path"].startswith("Constraints")
-            for item in info["expressions"]
+            item["path"].startswith("Constraints") for item in info["expressions"]
         )
     finally:
         await _close_document(live_bridge, doc_name)

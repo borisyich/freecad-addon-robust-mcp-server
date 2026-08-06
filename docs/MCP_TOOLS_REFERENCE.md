@@ -230,28 +230,36 @@ list_objects(doc_name: str | None = None) -> list[dict]
 
 #### inspect_object
 
-Get detailed information about an object.
+Inspect an object. The default response is deliberately compact.
 
 ```python
 inspect_object(
     object_name: str,
     doc_name: str | None = None,
-    include_properties: bool = False,
-    include_shape: bool = True
+    detail_level: str = "summary",  # summary | shape | topology | full
+    face_offset: int = 0,
+    face_limit: int = 20,
+    edge_offset: int = 0,
+    edge_limit: int = 20,
 ) -> dict
 ```
 
-For routine structure, dependency, bounds, or shape inspection, explicitly use
-`include_properties=False`. Set it to `True` only when exact property values are
-needed for a specific diagnosis or edit; the complete property map can be large.
+Use `summary` for identity, relationships, and compact shape metrics. Use `shape`
+when only bounds, volume, area, validity, and topology counts are needed. The
+`topology` and `full` modes return independently paged face and edge records;
+`full` additionally serializes every property and can still be very large. Use
+it only after a compact response identifies a specific property-level question.
+The legacy `include_properties`/`include_shape` arguments remain accepted.
 
-With `include_shape=True`, `shape_info.faces` includes `surface_type`, an
-oriented normal sampled at a representative point, `area`, `center`, adjacent
+With `detail_level="topology"`, `shape_info.faces` includes `surface_type`, an
+oriented normal sampled at a representative point, `area`, `centroid`, adjacent
 `FaceN` references, local `convexity`, and
 participating edges. `shape_info.edges` includes `curve_type`, start/end points,
 length, radius when available, direction, and adjacent faces. `convexity` describes
 the local surface curvature at a representative point (`flat`, `convex`,
 `concave`, `saddle`, or `unknown`); it is not an assertion about manufacturability.
+The location field is named `centroid`: for faces it is the surface-area
+centroid and for edges it is the curve-length centroid, in global coordinates.
 
 #### select_subshapes
 
@@ -271,6 +279,9 @@ select_subshapes(
         "sort_order": "desc",
         "limit": 1,
     },
+    detail_level="summary",
+    offset=0,
+    page_size=20,
 )
 
 select_subshapes(
@@ -287,6 +298,12 @@ select_subshapes(
     },
 )
 ```
+
+The default `detail_level="references"` returns only `FaceN`/`EdgeN` references
+plus pagination metadata. Use `summary` for compact selection evidence and
+`full` only to resolve a specific ambiguity. Location filters use
+`centroid_bounds`; the old input key `center` and `center_x/y/z` sort names are
+accepted for compatibility.
 
 Line direction is treated as undirected, so `[1, 0, 0]` also matches an edge
 stored from right to left. Type names are case-insensitive and accept common
@@ -674,10 +691,17 @@ example, GUI constraint 16 is deleted with `constraint_index=15`.
 #### get_sketch_info
 
 ```python
-get_sketch_info(sketch_name="BaseSketch", doc_name="Model")
+get_sketch_info(
+    sketch_name="BaseSketch",
+    doc_name="Model",
+    detail_level="summary",  # summary | geometry | constraints | full
+)
 ```
 
-The result includes:
+The compact default contains solver/profile status and record counts. Geometry,
+constraints, and expressions are independently paged when requested. Use
+`detail_level="full"` only when exact indices or expression bindings are needed.
+The detailed result includes:
 
 - `geometry`: indexed geometry with `geometry_type`, `start_point`, `end_point`,
   construction state, and type-specific data such as center/radius;
@@ -976,7 +1000,7 @@ polar_pattern(
 ) -> dict
 ```
 
-Both single-pattern tools use the first `TransformMode` enumeration entry advertised by the running FreeCAD build. This is the feature-transform mode, but its displayed label differs between FreeCAD versions (for example, `Features` or `Transform tool shapes`). The API contract still treats `feature_name` as an additive/subtractive seed rather than the whole Body. Responses keep `transform_mode` as the selected string and add `transform_mode_options` for diagnostics. They return `base_volume`, `result_volume`, and `volume_diagnostics`. They also compare the actual volume delta with the effective transformed `AddSubShape` and return `material_change_diagnostics`. When that causal check is available and inconsistent, the feature is rolled back even if OpenCASCADE reports a formally valid solid. The neutral retained/change ratios remain evidence for the agent rather than a general proof of design intent. Applying a pattern directly to another pattern is rejected with guidance to use `multi_transform_pattern`.
+Both single-pattern tools use the first `TransformMode` enumeration entry advertised by the running FreeCAD build. This is the feature-transform mode, but its displayed label differs between FreeCAD versions (for example, `Features` or `Transform tool shapes`). The API contract still treats `feature_name` as an additive/subtractive seed rather than the whole Body. Responses keep `transform_mode` as the selected string and add `transform_mode_options` for diagnostics. They return `base_volume`, `result_volume`, and `volume_diagnostics`. `material_change_diagnostics.method` is `add_subshape` when FreeCAD exposes the transformed tool shape. Valid patterns in builds that omit `AddSubShape` are checked with a B-rep before/after set difference (`result_shape_difference`) instead of being reported unavailable. An inconsistent causal check rolls the feature back even if OpenCASCADE reports a formally valid solid. The neutral retained/change ratios remain evidence for the agent rather than a general proof of design intent. Applying a pattern directly to another pattern is rejected with guidance to use `multi_transform_pattern`.
 
 #### multi_transform_pattern
 
@@ -1265,15 +1289,26 @@ fit_all(doc_name: str | None = None) -> dict
 
 #### set_camera_position
 
-Set an explicit camera position and look-at point.
+Set a reproducible engineering camera for drawing comparison.
 
 ```python
 set_camera_position(
     position: list[float],
     look_at: list[float] | None = None,
     doc_name: str | None = None,
+    up_direction: list[float] | None = None,
+    projection: str = "orthographic",
+    orthographic_height: float | None = None,
+    roll_degrees: float = 0,
+    fit_all: bool = False,
 ) -> dict
 ```
+
+Orthographic projection, explicit screen-up, and `orthographic_height` make
+candidate screenshots repeatable at the same orientation and scale. Use
+`get_camera_state()` to record the current projection, position, quaternion,
+height, and focal distance. `fit_all` and `orthographic_height` are mutually
+exclusive.
 
 ### Object Appearance
 
@@ -1372,6 +1407,9 @@ validate_parametric_model(
     recompute: bool = True,
     include_sketch_constraints: bool = False,
     required_dimension_names: list[str] | None = None,
+    detail_level: str = "summary",  # summary | structure | full
+    finding_offset: int = 0,
+    finding_limit: int = 20,
 ) -> dict
 ```
 
@@ -1394,7 +1432,8 @@ The report includes:
   degrees of freedom, solver-reported conflicting/redundant constraint indices,
   profile state, supports, expressions, and constraint counts;
 - standalone sketches, Spreadsheets, and solid objects outside Bodies;
-- required-dimension usage, including `missing` and `defined_but_unlinked`
+- required-dimension usage, including `missing`,
+  `defined_but_not_solid_driving`, and `solid_driving`
   identifiers;
 - each Spreadsheet alias, its direct and transitive dependencies, whether it is
   connected to a feature-tree expression, and an error finding for aliases that
@@ -1404,8 +1443,16 @@ The report includes:
   tolerances, design intent, or that a valid feature changed the expected amount
   of material. Use feature-level before/after volume diagnostics and visual checks.
 
-Set `include_sketch_constraints=True` only when individual constraint details are
-needed; it can make the response large.
+The default response is a completion-oriented summary with paged findings.
+`structure` adds Bodies, sketches, and Spreadsheet structure. `full` can be very
+large because it contains complete feature history, expression bindings,
+Spreadsheet cells, and optional individual constraints. Set
+`include_sketch_constraints=True` only together with `detail_level="full"`, and
+only when a compact response has identified a specific constraint-level problem.
+
+A source dimension counts only when the server can trace it to the active final
+solid. A named constraint on construction-only geometry, an inactive sketch,
+datum/helper object, or metadata-only property is reported as not solid-driving.
 
 Before final completion, investigate every unused Spreadsheet alias: connect it
 to the tree if it was intended to drive geometry, or remove it if it is

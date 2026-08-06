@@ -48,7 +48,7 @@ hidden when appropriate, and explained.
 
 ## Valid Shape is not sufficient evidence
 
-A feature can expose one valid OpenCASCADE solid and still remove or add the wrong amount of material. For Pocket and helix operations, compare the reported `base_volume`, `result_volume`, absolute change, and retained/change ratios with the expected feature. Pattern tools additionally return `material_change_diagnostics`, which compares the effective transformed `AddSubShape` with the actual Body volume delta and rolls the feature back when those two disagree. The remaining ratios are diagnostic evidence, not a universal numeric threshold.
+A feature can expose one valid OpenCASCADE solid and still remove or add the wrong amount of material. For Pocket and helix operations, compare the reported `base_volume`, `result_volume`, absolute change, and retained/change ratios with the expected feature. Pattern tools additionally return `material_change_diagnostics`. It compares the transformed `AddSubShape` with the actual Body delta when available, and otherwise uses the B-rep set difference between base and result (`method=result_shape_difference`). This fallback is required for valid FreeCAD patterns that do not publish `AddSubShape`. An inconsistent result is rolled back. The remaining ratios are diagnostic evidence, not a universal numeric threshold.
 
 Datum planes, lines, points, and coordinate systems are reference geometry. Their synthetic or infinite Shape bounds/volume are not meaningful solid metrics and must not be interpreted as model dimensions.
 
@@ -64,7 +64,19 @@ creating the pattern.
 For drawing/sketch input, call the final validator with the complete saved list
 of non-starred source-dimension identifiers. Each identifier must be used by a
 named driving sketch constraint or by a Spreadsheet alias that connects directly
-or transitively to a feature-tree expression.
+or transitively to an expression that influences the active final solid. A link
+to construction-only geometry, an inactive sketch, a datum/helper object, or
+metadata is not sufficient.
+
+Do not add construction points or other non-profile geometry solely to bind
+otherwise unused aliases. Such a model may look structurally connected while
+the final B-rep is invariant under those parameters. The validator reports this
+case as `defined_but_not_solid_driving`; treat it as an error in requirement
+correspondence.
+
+Use the validator's compact default first. Request `structure` only for a
+reported structural problem and `full` only for a focused history/expression or
+constraint diagnosis. Full reports can be extremely large.
 
 Review every unused Spreadsheet alias before completion. Determine why it was
 created; connect it to the tree when it represents required design intent, or

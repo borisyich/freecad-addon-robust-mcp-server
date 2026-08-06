@@ -347,7 +347,7 @@ FREECAD_MODE=embedded freecad-mcp
 
 ### Available Tools
 
-The server currently registers **116 MCP tools**. The tables below list common tools rather than duplicating the exact inventory. See the generated [Tools Overview](docs/guide/tools.md) or the MCP client's discovered tool list for the authoritative inventory; [MCP Tools Reference](docs/MCP_TOOLS_REFERENCE.md) provides detailed examples for core tools, while `freecad://capabilities` is a curated runtime overview. Tools marked with **GUI** require FreeCAD to be running in GUI mode; they return a structured error in headless mode.
+The server currently registers **117 MCP tools**. The tables below list common tools rather than duplicating the exact inventory. See the generated [Tools Overview](docs/guide/tools.md) or the MCP client's discovered tool list for the authoritative inventory; [MCP Tools Reference](docs/MCP_TOOLS_REFERENCE.md) provides detailed examples for core tools, while `freecad://capabilities` is a curated runtime overview. Tools marked with **GUI** require FreeCAD to be running in GUI mode; they return a structured error in headless mode.
 
 #### Execution & Debugging (5 tools)
 
@@ -383,8 +383,8 @@ The server currently registers **116 MCP tools**. The tables below list common t
 | Tool                | Description                                        | Mode |
 | ------------------- | -------------------------------------------------- | ---- |
 | `list_objects`      | List all objects in a document                     | All  |
-| `inspect_object`    | Inspect properties plus semantic face/edge topology | All  |
-| `select_subshapes`  | Select `FaceN`/`EdgeN` by geometric criteria       | All  |
+| `inspect_object`    | Compact object metrics; paged topology/properties on request | All  |
+| `select_subshapes`  | Select paged `FaceN`/`EdgeN` references by geometric criteria | All  |
 | `edit_object`       | Modify properties; resolve names for link properties | All  |
 | `delete_object`     | Delete an object from a document                   | All  |
 | `set_placement`     | Set object position and rotation                   | All  |
@@ -436,7 +436,8 @@ The server currently registers **116 MCP tools**. The tables below list common t
 | `evaluate_model_checkpoint` | Optional deterministic continue/rework assessment             | Both |
 | `set_view_angle`            | Set camera to a standard view                                 | GUI  |
 | `fit_all`                   | Fit all visible objects in the view                           | GUI  |
-| `set_camera_position`       | Set camera position and look-at point                         | GUI  |
+| `set_camera_position`       | Set position, target, screen-up, projection, scale, and roll  | GUI  |
+| `get_camera_state`          | Read reproducible camera projection and orientation state     | GUI  |
 | `set_visual_properties`     | Set visibility, RGB color, and/or display mode                | GUI  |
 | `workbench`                 | List or activate a FreeCAD workbench                          | All  |
 
@@ -476,7 +477,7 @@ does not by itself prove drawing correspondence.
 | --- | --- | --- |
 | `validate_object` | Check one object's shape and FreeCAD state | All |
 | `validate_document` | Check geometric health across a document | All |
-| `validate_parametric_model` | Report editable history, required dimensions, Spreadsheet connectivity, and direct solids | All |
+| `validate_parametric_model` | Compact final report; paged/expanded parametric diagnostics on request | All |
 | `undo_if_invalid` | Undo after invalid document state | All |
 | `safe_execute` | Run Python with optional validation and rollback | All |
 

@@ -242,10 +242,28 @@ else:
         self,
         obj_name: str,
         doc_name: str | None = None,
+        *,
+        include_properties: bool = False,
+        include_shape: bool = True,
+        include_topology: bool = False,
+        face_offset: int = 0,
+        face_limit: int | None = 20,
+        edge_offset: int = 0,
+        edge_limit: int | None = 20,
     ) -> ObjectInfo:
         """Get detailed object information with structured FreeCAD values."""
         result = await self.execute_python(
-            build_object_inspection_code(obj_name, doc_name)
+            build_object_inspection_code(
+                obj_name,
+                doc_name,
+                include_properties=include_properties,
+                include_shape=include_shape,
+                include_topology=include_topology,
+                face_offset=face_offset,
+                face_limit=face_limit,
+                edge_offset=edge_offset,
+                edge_limit=edge_limit,
+            )
         )
 
         if result.success and result.result:

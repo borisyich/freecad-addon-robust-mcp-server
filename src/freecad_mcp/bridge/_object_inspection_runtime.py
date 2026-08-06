@@ -206,7 +206,32 @@ OBJECT_INSPECTION_RUNTIME = dedent(
         return start, end
 
 
-    def _shape_topology_value(shape):
+    def _page_value(values, offset, limit):
+        total = len(values)
+        start = max(0, int(offset or 0))
+        if limit is None:
+            page = values[start:]
+        else:
+            page = values[start:start + max(0, int(limit))]
+        returned = len(page)
+        next_offset = start + returned if start + returned < total else None
+        return page, {
+            "offset": start,
+            "limit": limit,
+            "returned": returned,
+            "total": total,
+            "has_more": next_offset is not None,
+            "next_offset": next_offset,
+        }
+
+
+    def _shape_topology_value(
+        shape,
+        face_offset=0,
+        face_limit=20,
+        edge_offset=0,
+        edge_limit=20,
+    ):
         faces = list(_safe_attr(shape, "Faces", []) or [])
         edges = list(_safe_attr(shape, "Edges", []) or [])
 
@@ -253,11 +278,12 @@ OBJECT_INSPECTION_RUNTIME = dedent(
                     ),
                     "normal": normal,
                     "area": _finite_number(_safe_attr(face, "Area")),
-                    "center": (
+                    "centroid": (
                         _vector_value(_safe_attr(face, "CenterOfMass"))
                         if _safe_attr(face, "CenterOfMass") is not None
                         else None
                     ),
+                    "centroid_kind": "surface_area_centroid",
                     "adjacent_faces": sorted(adjacent_faces),
                     "edges": face_edge_names,
                     "convexity": curvature["classification"],
@@ -281,20 +307,34 @@ OBJECT_INSPECTION_RUNTIME = dedent(
                     "direction": _normalized_vector_between(start, end),
                     "length": _finite_number(_safe_attr(edge, "Length")),
                     "radius": radius,
-                    "center": (
+                    "centroid": (
                         _vector_value(_safe_attr(edge, "CenterOfMass"))
                         if _safe_attr(edge, "CenterOfMass") is not None
                         else None
                     ),
+                    "centroid_kind": "curve_length_centroid",
                     "adjacent_faces": edge_faces.get(edge_index, []),
                     "bounding_box": _bounding_box_value(_safe_attr(edge, "BoundBox")),
                 }
             )
 
-        return {"faces": face_values, "edges": edge_values}
+        face_page, face_paging = _page_value(face_values, face_offset, face_limit)
+        edge_page, edge_paging = _page_value(edge_values, edge_offset, edge_limit)
+        return {
+            "faces": face_page,
+            "edges": edge_page,
+            "topology_pages": {"faces": face_paging, "edges": edge_paging},
+        }
 
 
-    def _shape_value(shape, include_topology=True):
+    def _shape_value(
+        shape,
+        include_topology=False,
+        face_offset=0,
+        face_limit=20,
+        edge_offset=0,
+        edge_limit=20,
+    ):
         try:
             is_null = bool(shape.isNull())
         except Exception:
@@ -335,7 +375,15 @@ OBJECT_INSPECTION_RUNTIME = dedent(
         summary["center_of_mass"] = _vector_value(center) if center is not None else None
         summary["bounding_box"] = _bounding_box_value(_safe_attr(shape, "BoundBox"))
         if include_topology:
-            summary.update(_shape_topology_value(shape))
+            summary.update(
+                _shape_topology_value(
+                    shape,
+                    face_offset=face_offset,
+                    face_limit=face_limit,
+                    edge_offset=edge_offset,
+                    edge_limit=edge_limit,
+                )
+            )
         return summary
 
 
@@ -539,15 +587,33 @@ OBJECT_INSPECTION_RUNTIME = dedent(
         return entry
 
 
-    def _inspect_object_value(obj):
-        properties = {
-            property_name: _property_entry(obj, property_name)
-            for property_name in getattr(obj, "PropertiesList", [])
-        }
+    def _inspect_object_value(
+        obj,
+        include_properties=False,
+        include_shape=True,
+        include_topology=False,
+        face_offset=0,
+        face_limit=20,
+        edge_offset=0,
+        edge_limit=20,
+    ):
+        properties = {}
+        if include_properties:
+            properties = {
+                property_name: _property_entry(obj, property_name)
+                for property_name in getattr(obj, "PropertiesList", [])
+            }
         shape_info = None
-        if hasattr(obj, "Shape"):
+        if include_shape and hasattr(obj, "Shape"):
             try:
-                shape_info = _shape_value(obj.Shape)
+                shape_info = _shape_value(
+                    obj.Shape,
+                    include_topology=include_topology,
+                    face_offset=face_offset,
+                    face_limit=face_limit,
+                    edge_offset=edge_offset,
+                    edge_limit=edge_limit,
+                )
             except Exception as exc:
                 shape_info = {"error": str(exc)}
 
@@ -569,7 +635,18 @@ OBJECT_INSPECTION_RUNTIME = dedent(
 ).strip()
 
 
-def build_object_inspection_code(obj_name: str, doc_name: str | None) -> str:
+def build_object_inspection_code(
+    obj_name: str,
+    doc_name: str | None,
+    *,
+    include_properties: bool = False,
+    include_shape: bool = True,
+    include_topology: bool = False,
+    face_offset: int = 0,
+    face_limit: int | None = 20,
+    edge_offset: int = 0,
+    edge_limit: int | None = 20,
+) -> str:
     """Build the FreeCAD-side script used by all bridge implementations."""
     document_expression = (
         "FreeCAD.ActiveDocument"
@@ -587,5 +664,14 @@ if obj is None:
 
 {OBJECT_INSPECTION_RUNTIME}
 
-_result_ = _inspect_object_value(obj)
+_result_ = _inspect_object_value(
+    obj,
+    include_properties={include_properties!r},
+    include_shape={include_shape!r},
+    include_topology={include_topology!r},
+    face_offset={face_offset!r},
+    face_limit={face_limit!r},
+    edge_offset={edge_offset!r},
+    edge_limit={edge_limit!r},
+)
 """

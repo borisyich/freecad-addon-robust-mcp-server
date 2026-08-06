@@ -98,6 +98,7 @@ def test_generated_report_describes_body_tip_history_and_sketch(monkeypatch) -> 
         def __init__(self, constraint_type: str, name: str) -> None:
             self.Type = constraint_type
             self.Name = name
+            self.First = 0
 
     class FakeSketch:
         Name = "BaseSketch"
@@ -285,15 +286,13 @@ def test_generated_report_describes_body_tip_history_and_sketch(monkeypatch) -> 
     assert datum_report["shape"]["volume"] is None
     assert datum_report["shape"]["bounding_box"] is None
     assert any(
-        item["category"] == "sketch_under_constrained"
-        for item in report["findings"]
+        item["category"] == "sketch_under_constrained" for item in report["findings"]
     )
     assert report["dimension_inventory"]["required_names"] == ["Width", "Depth"]
     usage = {
-        item["name"]: item["status"]
-        for item in report["dimension_inventory"]["usage"]
+        item["name"]: item["status"] for item in report["dimension_inventory"]["usage"]
     }
-    assert usage == {"Width": "used", "Depth": "missing"}
+    assert usage == {"Width": "solid_driving", "Depth": "missing"}
     spreadsheet = report["spreadsheets"][0]
     parameters = {item["alias"]: item for item in spreadsheet["parameters"]}
     # Exact token matching: Params.Width2 must not count as Params.Width.
@@ -301,12 +300,26 @@ def test_generated_report_describes_body_tip_history_and_sketch(monkeypatch) -> 
     assert parameters["Width"]["connected_to_tree"] is True
     assert parameters["HalfWidth"]["reference_count"] == 1
     assert parameters["HalfWidth"]["connected_to_tree"] is True
-    assert [item["alias"] for item in spreadsheet["unused_parameters"]] == [
-        "Orphan"
-    ]
+    assert parameters["HalfWidth"]["connected_to_final_solid"] is True
+    assert [item["alias"] for item in spreadsheet["unused_parameters"]] == ["Orphan"]
     categories = {item["category"] for item in report["findings"]}
     assert "required_dimension_missing" in categories
     assert "unused_spreadsheet_parameter" in categories
+
+    # A named dimensional constraint attached only to construction geometry
+    # must not satisfy final-solid influence, even in an active sketch.
+    sketch.getConstruction = lambda _index: True
+    influence = namespace["_constraint_solid_influence"](sketch, 0, {"BaseSketch"})
+    assert influence["construction_only"] is True
+    assert influence["solid_driving"] is False
+    assert influence["reason"] == "constraint references construction geometry only"
+
+    pad.getPropertyStatus = lambda _name: [21]
+    drives_solid, reason = namespace["_expression_binding_solid_influence"](
+        pad, "AuditOnlyLength", {"Pad"}
+    )
+    assert drives_solid is False
+    assert reason == "expression is attached to a dynamic/custom metadata property"
 
 
 def test_reference_only_body_without_tip_is_incomplete_not_broken(monkeypatch) -> None:
@@ -333,9 +346,7 @@ def test_reference_only_body_without_tip_is_incomplete_not_broken(monkeypatch) -
 
     placement = SimpleNamespace(
         Base=SimpleNamespace(x=0.0, y=0.0, z=0.0),
-        Rotation=SimpleNamespace(
-            Axis=SimpleNamespace(x=0.0, y=0.0, z=1.0), Angle=0.0
-        ),
+        Rotation=SimpleNamespace(Axis=SimpleNamespace(x=0.0, y=0.0, z=1.0), Angle=0.0),
     )
     datum = SimpleNamespace(
         Name="DatumPlane",
@@ -391,8 +402,7 @@ def test_reference_only_body_without_tip_is_incomplete_not_broken(monkeypatch) -
     assert body_report["invalid_history_item_count"] == 0
     assert not [item for item in report["findings"] if item["severity"] == "error"]
     assert any(
-        "no shape-bearing feature" in warning
-        for warning in body_report["warnings"]
+        "no shape-bearing feature" in warning for warning in body_report["warnings"]
     )
 
 
@@ -428,9 +438,7 @@ def test_missing_tip_with_shape_history_remains_invalid(monkeypatch) -> None:
 
     placement = SimpleNamespace(
         Base=SimpleNamespace(x=0.0, y=0.0, z=0.0),
-        Rotation=SimpleNamespace(
-            Axis=SimpleNamespace(x=0.0, y=0.0, z=1.0), Angle=0.0
-        ),
+        Rotation=SimpleNamespace(Axis=SimpleNamespace(x=0.0, y=0.0, z=1.0), Angle=0.0),
     )
     pad = SimpleNamespace(
         Name="Pad",

@@ -160,8 +160,10 @@ Read the detailed strategy in
   `edit_sketch_constraints`, supply `expression` when creating the constraint,
   or use `set_expression`/`clear_expression` for an existing index. A readable
   `constraint_name` documents intent but does not replace the expression path.
-- After constraint edits, use `get_sketch_info` to confirm geometry endpoints,
-  referenced elements, datum/name/driving state, and exact expression bindings.
+- After constraint edits, use compact `get_sketch_info()` first. Request
+  `detail_level="constraints"` or paged `"full"` only when exact indices,
+  referenced elements, datum/name/driving state, or expression bindings are
+  needed for a specific diagnosis.
 - Avoid broad `Fix`/`Block` constraints as a substitute for design intent.
   They may constrain at most 50% of the sketch geometry. When the next Fix
   would exceed that limit, use geometric/dimensional constraints or delete
@@ -385,19 +387,21 @@ Read [references/drawing-reconstruction.md](references/drawing-reconstruction.md
 
 After a major feature or any suspicious result, use the smallest relevant check:
 
-- `get_sketch_info` for solver/profile state;
+- compact `get_sketch_info()` for solver/profile state and counts;
 - `validate_object` for one feature;
 - `validate_document` for overall geometric health;
-- `inspect_object(include_properties=False)` for routine placement, bounds,
-  volume, expressions, dependency inspection, and semantic face/edge topology.
-  Set `include_properties=True` only when exact property values are needed to
-  diagnose or edit a specific object; do not request the full property dump by
-  default;
+- compact `inspect_object()` for identity, relationships, bounds, volume, and
+  topology counts; use `detail_level="shape"` when only shape metrics are
+  needed, paged `"topology"` only for face/edge evidence, and `"full"` only for
+  an identified property-level diagnosis;
 - `select_subshapes` before face-supported sketches and topology-sensitive
   Fillet, Chamfer, Draft, or Thickness operations. Express intent through
   surface/curve type, normal/direction, size, adjacency, convexity, and location;
   do not manually enumerate every `FaceN`/`EdgeN` unless the selector cannot
-  represent a genuinely necessary criterion;
+  represent a genuinely necessary criterion. Its default returns references;
+  request paged `summary` evidence for ambiguous candidates and `full` only for
+  a focused diagnosis. `centroid_bounds` is a surface-area centroid for faces
+  and curve-length centroid for edges, in global coordinates;
 - feature responses for `base_volume`, `result_volume`, retained/change ratios, and resolved Body Tip/base;
 - screenshots/crops for visual correspondence;
 - `evaluate_model_checkpoint` only when a formal discrepancy ledger is useful.
@@ -417,6 +421,8 @@ use `multi_transform_pattern`; do not chain a Pattern feature directly into
 another Pattern. After every pattern, require successful
 `material_change_diagnostics`, then verify Shape, Body Tip, one-solid topology,
 before/after volume evidence, and instance layout in an equivalent view.
+The diagnostic may use `add_subshape` or the `result_shape_difference` fallback
+when a valid FreeCAD pattern does not expose `AddSubShape`.
 
 ### Sketch arc construction
 
@@ -459,6 +465,18 @@ Before reporting completion:
 - call `validate_parametric_model` and report its findings accurately. Do not
   finish while it reports missing/unlinked required dimensions or unused
   Spreadsheet parameters.
+
+Call the validator with its compact default first. Use `detail_level="structure"`
+only for a reported Body/sketch/Spreadsheet problem. Use `detail_level="full"`
+(and `include_sketch_constraints=True`, if needed) only after a compact result
+identifies a specific history, dependency, expression, or solver-index question.
+Full reports contain entire feature history, expressions, cells, and constraint
+records and can consume tens of thousands of tokens on complex documents.
+
+A required dimension is satisfied only when it has a verified path to the
+active final solid. Never add construction points, inactive helper sketches, or
+metadata-only links merely to make an identifier appear used; the validator
+reports them as `defined_but_not_solid_driving`.
 
 See [references/validation-and-editability.md](references/validation-and-editability.md)
 for interpretation details and [references/source-notes.md](references/source-notes.md)

@@ -1178,10 +1178,13 @@ async def import_file(
 async def inspect_object(
     object_name: str,
     doc_name: str | None = None,
-    include_properties: bool = False,
-    include_shape: bool = True,
+    detail_level: Literal["summary", "shape", "topology", "full"] = "summary",
+    face_offset: int = 0,
+    face_limit: int = 20,
+    edge_offset: int = 0,
+    edge_limit: int = 20,
 ) -> dict:
-    """Inspect identity, dependencies, properties, and semantic topology.
+    """Inspect compact metrics or explicitly paged topology/properties.
 
     Shape records include face surface type/normal/area/adjacency/local
     convexity and edge curve type/endpoints/length/adjacent faces.
@@ -1197,8 +1200,11 @@ async def select_subshapes(
     object_name: str,
     criteria: FaceSelectionCriteria | EdgeSelectionCriteria,
     doc_name: str | None = None,
+    detail_level: Literal["references", "summary", "full"] = "references",
+    offset: int = 0,
+    page_size: int = 20,
 ) -> dict:
-    """Return semantic matches and consumable FaceN/EdgeN references."""
+    """Return paged semantic matches and consumable FaceN/EdgeN references."""
     pass
 ```
 

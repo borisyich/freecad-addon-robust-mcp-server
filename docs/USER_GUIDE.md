@@ -475,9 +475,9 @@ For complex parts, build step by step:
 1. For drawing reconstruction, compare the equivalent reference and candidate
    views with `compare_images` after every major feature.
 1. Rework invalid or clearly incorrect geometry before adding dependent features.
-1. Use `inspect_object(include_properties=False)` for routine checks; enable full
-   properties only for a specific diagnosis. Its shape output exposes semantic
-   face/edge data. Use `select_subshapes` instead of manually iterating every
+1. Use compact `inspect_object()` or `detail_level="shape"` for routine checks.
+   Request paged `topology` only for face/edge evidence and `full` only for a
+   specific property diagnosis. Use `select_subshapes` instead of iterating every
    face or edge when choosing sketch support, Fillet, Chamfer, Draft, or Thickness.
 1. Immediately before the final response, call `validate_parametric_model`. For
    drawing/sketch input include all saved dimension identifiers, then resolve any
@@ -485,7 +485,7 @@ For complex parts, build step by step:
 
 ### Semantic face and edge selection
 
-`inspect_object(include_shape=True)` returns a topology catalogue. Faces include
+`inspect_object(detail_level="topology")` returns a paged topology catalogue. Faces include
 surface type, a representative oriented normal, area, adjacent faces, and local
 convexity. Edges
 include curve type, endpoints, length, direction/radius, and adjacent faces.
@@ -500,6 +500,7 @@ select_subshapes(
         "normal": [0, 0, 1], "sort_by": "center_z",
         "sort_order": "desc", "limit": 1,
     },
+    detail_level="summary",
 )
 
 # Four longest X-parallel straight edges for a fillet/chamfer candidate set.
@@ -549,7 +550,9 @@ edit_sketch_constraints(
 )
 ```
 
-Use `get_sketch_info` to inspect geometry endpoints and type-specific data,
+Use compact `get_sketch_info()` for status and counts. Request
+`detail_level="geometry"`, `"constraints"`, or paged `"full"` only to inspect
+geometry endpoints and type-specific data,
 constraint references/datums/names, and expression bindings. Constraint
 expression entries expose a stable `Constraints[index]` path; when FreeCAD
 reports a different canonical source path, it is preserved as `source_path`.

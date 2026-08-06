@@ -175,6 +175,11 @@ class _PatternFeature:
         self.AddSubShape = tool_shape
 
 
+class _PatternWithoutTool:
+    def __init__(self, result_shape: _MaterialShape) -> None:
+        self.Shape = result_shape
+
+
 def test_pattern_material_change_diagnostics_detects_near_empty_result() -> None:
     """A valid but causally impossible pattern result must be rejected."""
     helpers = _load_helpers(FEATURE_VALIDATION_RUNTIME_HELPERS)
@@ -193,6 +198,24 @@ def test_pattern_material_change_diagnostics_detects_near_empty_result() -> None
     assert broken["available"] is True
     assert broken["consistent"] is False
     assert broken["actual_material_change"] == 99.0
+
+
+def test_pattern_diagnostics_falls_back_to_result_shape_difference() -> None:
+    """Valid PolarPattern results need not expose AddSubShape in FreeCAD."""
+    helpers = _load_helpers(FEATURE_VALIDATION_RUNTIME_HELPERS)
+    diagnose = helpers["_pattern_material_change_diagnostics"]
+
+    base = _MaterialShape(100.0, cut_volume=20.0)
+    result_shape = _MaterialShape(80.0, cut_volume=0.0)
+    pattern = _PatternWithoutTool(result_shape)
+
+    result = diagnose(pattern, base, 80.0)
+
+    assert result["available"] is True
+    assert result["consistent"] is True
+    assert result["method"] == "result_shape_difference"
+    assert result["operation"] == "subtractive"
+    assert result["expected_material_change"] == 20.0
 
 
 class _TransformFeature:

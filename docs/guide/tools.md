@@ -1,6 +1,6 @@
 # Tools Reference
 
-The server currently registers **116 MCP tools**. This page is generated from the actual `@mcp.tool()` definitions in `src/freecad_mcp/tools` and is the exact inventory.
+The server currently registers **117 MCP tools**. This page is generated from the actual `@mcp.tool()` definitions in `src/freecad_mcp/tools` and is the exact inventory.
 
 Geometry-changing operations are transaction-backed where applicable. Use `history(action="undo")` for explicit recovery, `get_console_output` for console diagnostics, and `recompute_document` for document recomputation.
 
@@ -49,8 +49,8 @@ Geometry-changing operations are transaction-backed where applicable. Use `histo
 | Tool | Description |
 |---|---|
 | `list_objects` | List all objects in a FreeCAD document. |
-| `inspect_object` | Inspect an object, including semantic face and edge topology. |
-| `select_subshapes` | Select faces or edges by surface/curve type, direction, size, adjacency, convexity, and location. |
+| `inspect_object` | Compact metrics by default; paged topology and full properties on request. |
+| `select_subshapes` | Select paged face/edge references by semantic criteria and centroid location. |
 | `create_object` | Create a new FreeCAD object. |
 | `create_primitive` | Create a Box, Cylinder, Sphere, Cone, Torus, Wedge, or Helix. |
 | `edit_object` | Edit object properties; string names are resolved for FreeCAD link properties. |
@@ -115,7 +115,7 @@ Geometry-changing operations are transaction-backed where applicable. Use `histo
 | `thickness_feature` | Create a thickness (shell) feature in PartDesign. |
 | `subtractive_loft` | Create a subtractive loft (cut) through multiple sketches. |
 | `subtractive_pipe` | Create a subtractive pipe (sweep cut) along a spine path. |
-| `get_sketch_info` | Get sketch geometry with endpoints/type-specific data, constraints, expressions, and solver/profile diagnostics. |
+| `get_sketch_info` | Get compact sketch status; page geometry, constraints, and expressions on request. |
 
 ## Spreadsheet
 
@@ -169,6 +169,7 @@ Geometry-changing operations are transaction-backed where applicable. Use `histo
 | `history` | Undo, redo, or inspect document history. |
 | `fit_all` | Fit all objects in the current view. |
 | `set_camera_position` | Set the camera position and orientation. |
+| `get_camera_state` | Read camera projection, position, orientation, and scale. |
 | `list_parts_library` | List available parts from the FreeCAD parts library. |
 | `insert_part_from_library` | Insert a part from the parts library into the document. |
 
@@ -178,7 +179,7 @@ Geometry-changing operations are transaction-backed where applicable. Use `histo
 |---|---|
 | `validate_object` | Check the health and validity of a FreeCAD object. |
 | `validate_document` | Check the health of all objects in a FreeCAD document. |
-| `validate_parametric_model` | Inspect editable structure, required source-dimension usage, and Spreadsheet connectivity before completion. |
+| `validate_parametric_model` | Compact final diagnostic with expanded structure/full modes on request. |
 | `undo_if_invalid` | Check document health and undo the last operation if invalid objects exist. |
 | `safe_execute` | Execute Python code with automatic validation and rollback on failure. |
 

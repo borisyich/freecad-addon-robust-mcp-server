@@ -164,7 +164,9 @@ def test_structured_serializer_replaces_pointer_reprs() -> None:
     runtime = _load_runtime()
     inspect_value = runtime["_inspect_object_value"]
 
-    result = inspect_value(_InspectedObject())
+    result = inspect_value(
+        _InspectedObject(), include_properties=True, include_topology=True
+    )
 
     shape = result["properties"]["Shape"]
     assert shape["type"] == "Part::PropertyPartShape"
@@ -199,7 +201,8 @@ def test_structured_serializer_replaces_pointer_reprs() -> None:
 def test_all_bridges_can_share_one_inspection_script() -> None:
     code = build_object_inspection_code("Pad", "Model")
 
-    assert "_inspect_object_value(obj)" in code
+    assert "_inspect_object_value(" in code
+    assert "include_topology=False" in code
     assert "getTypeIdOfProperty" in code
     assert "FreeCAD.getDocument('Model')" in code
     assert "doc.getObject('Pad')" in code
@@ -209,15 +212,43 @@ def test_shape_topology_contains_semantic_faces_and_edges() -> None:
     runtime = _load_runtime()
     shape_value = runtime["_shape_value"]
 
-    result = shape_value(_TopologicalShape())
+    result = shape_value(_TopologicalShape(), include_topology=True)
 
     assert result["faces"][0]["surface_type"] == "Plane"
     assert result["faces"][0]["normal"] == {"x": 0.0, "y": 0.0, "z": 1.0}
     assert result["faces"][0]["area"] == 100.0
+    assert result["faces"][0]["centroid_kind"] == "surface_area_centroid"
     assert result["faces"][0]["adjacent_faces"] == ["Face2"]
     assert result["faces"][0]["convexity"] == "flat"
     assert result["edges"][0]["curve_type"] == "Line"
     assert result["edges"][0]["start_point"] == {"x": 0.0, "y": 0.0, "z": 0.0}
     assert result["edges"][0]["end_point"] == {"x": 10.0, "y": 0.0, "z": 0.0}
     assert result["edges"][0]["length"] == 10.0
+    assert result["edges"][0]["centroid_kind"] == "curve_length_centroid"
     assert result["edges"][0]["adjacent_faces"] == ["Face1", "Face2"]
+
+
+def test_shape_topology_is_paged_and_omitted_by_default() -> None:
+    runtime = _load_runtime()
+    shape_value = runtime["_shape_value"]
+
+    compact = shape_value(_TopologicalShape())
+    assert "faces" not in compact
+    assert compact["face_count"] == 2
+
+    paged = shape_value(
+        _TopologicalShape(),
+        include_topology=True,
+        face_offset=1,
+        face_limit=1,
+        edge_limit=1,
+    )
+    assert [item["name"] for item in paged["faces"]] == ["Face2"]
+    assert paged["topology_pages"]["faces"] == {
+        "offset": 1,
+        "limit": 1,
+        "returned": 1,
+        "total": 2,
+        "has_more": False,
+        "next_offset": None,
+    }

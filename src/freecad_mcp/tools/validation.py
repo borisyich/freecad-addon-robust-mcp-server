@@ -8,11 +8,106 @@ may fail or create invalid geometry.
 """
 
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Any, Literal
 
 from freecad_mcp.bridge._parametric_validation_runtime import (
     build_parametric_validation_code,
 )
+
+
+def _finding_page(
+    findings: list[dict[str, Any]], offset: int, page_size: int
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    total = len(findings)
+    page = findings[offset : offset + page_size]
+    next_offset = offset + len(page) if offset + len(page) < total else None
+    return page, {
+        "offset": offset,
+        "page_size": page_size,
+        "returned": len(page),
+        "total": total,
+        "has_more": next_offset is not None,
+        "next_offset": next_offset,
+    }
+
+
+def _compact_dimension_inventory(value: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "provided": value.get("provided", False),
+        "required_names": value.get("required_names", []),
+        "all_used": value.get("all_used", False),
+        "usage": [
+            {
+                "name": item.get("name"),
+                "status": item.get("status"),
+                "sketch_match_count": len(item.get("sketch_constraints") or []),
+                "spreadsheet_match_count": len(
+                    item.get("spreadsheet_parameters") or []
+                ),
+            }
+            for item in value.get("usage", [])
+        ],
+    }
+
+
+def _parametric_response(
+    report: dict[str, Any],
+    detail_level: str,
+    finding_offset: int,
+    finding_limit: int,
+) -> dict[str, Any]:
+    """Project the full validator report into an agent-sized response."""
+    findings = list(report.get("findings") or [])
+    finding_page, pagination = _finding_page(findings, finding_offset, finding_limit)
+    if detail_level == "full":
+        result = dict(report)
+        result["detail_level"] = "full"
+        result["response_guidance"] = (
+            "Full validation includes feature history, expressions, Spreadsheet "
+            "cells, and optionally every sketch constraint. Request it only for "
+            "a focused structural diagnosis after reviewing summary/structure."
+        )
+        return result
+
+    severity_counts: dict[str, int] = {}
+    category_counts: dict[str, int] = {}
+    for finding in findings:
+        severity = str(finding.get("severity", "unknown"))
+        category = str(finding.get("category", "unknown"))
+        severity_counts[severity] = severity_counts.get(severity, 0) + 1
+        category_counts[category] = category_counts.get(category, 0) + 1
+
+    result = {
+        "informational": report.get("informational", True),
+        "assessment": report.get("assessment"),
+        "summary": report.get("summary"),
+        "detail_level": detail_level,
+        "document": report.get("document"),
+        "counts": report.get("counts", {}),
+        "sketch_solver_status_counts": report.get("sketch_solver_status_counts", {}),
+        "dimension_inventory": _compact_dimension_inventory(
+            report.get("dimension_inventory") or {}
+        ),
+        "finding_counts": {
+            "by_severity": severity_counts,
+            "by_category": category_counts,
+        },
+        "findings": finding_page,
+        "finding_pagination": pagination,
+        "limitations": report.get("limitations", []),
+    }
+    if detail_level == "structure":
+        result.update(
+            {
+                "bodies": report.get("bodies", []),
+                "standalone_sketches": report.get("standalone_sketches", []),
+                "uncontained_shape_objects": report.get(
+                    "uncontained_shape_objects", []
+                ),
+                "spreadsheets": report.get("spreadsheets", []),
+            }
+        )
+    return result
 
 
 def register_validation_tools(
@@ -319,8 +414,11 @@ else:
         recompute: bool = True,
         include_sketch_constraints: bool = False,
         required_dimension_names: list[str] | None = None,
+        detail_level: Literal["summary", "structure", "full"] = "summary",
+        finding_offset: int = 0,
+        finding_limit: int = 20,
     ) -> dict[str, Any]:
-        """Inspect the document's editable parametric structure before completion.
+        """Validate parametric health with a compact default response.
 
         This is the mandatory final diagnostic for tasks that create or modify a
         FreeCAD model. It is intentionally informative rather than a rigid gate:
@@ -344,7 +442,14 @@ else:
                 explicit non-starred drawing dimension before modeling. Each name
                 must appear as a named driving sketch constraint or as a Spreadsheet
                 alias connected directly or transitively to an expression in the
-                feature tree.
+                active final-solid dependency graph. Construction-only geometry
+                and inactive/helper objects do not count as usage.
+            detail_level: ``summary`` (default) returns completion-critical counts,
+                dimension influence, and a page of findings. ``structure`` adds
+                Bodies, sketches, and Spreadsheet structure. ``full`` returns the
+                complete diagnostic and may be very large.
+            finding_offset: Zero-based findings-page offset.
+            finding_limit: Findings-page size, from 1 to 100.
 
         Returns:
             Informative report containing:
@@ -359,6 +464,16 @@ else:
                 - findings with error/warning severity
                 - explicit limitations of the diagnostic
         """
+        if finding_offset < 0:
+            raise ValueError("finding_offset must be non-negative")
+        if not 1 <= finding_limit <= 100:
+            raise ValueError("finding_limit must be between 1 and 100")
+        if include_sketch_constraints and detail_level != "full":
+            raise ValueError(
+                "include_sketch_constraints=True requires detail_level='full' "
+                "because individual constraints can make the response very large"
+            )
+
         normalized_required_dimensions = []
         seen_required_dimensions = set()
         for raw_name in required_dimension_names or []:
@@ -383,7 +498,12 @@ else:
         )
         result = await bridge.execute_python(code)
         if result.success and result.result:
-            return result.result
+            return _parametric_response(
+                result.result,
+                detail_level,
+                finding_offset,
+                finding_limit,
+            )
         error = result.error_traceback or "Parametric model validation failed"
         return {
             "informational": True,

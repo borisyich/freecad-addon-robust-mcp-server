@@ -56,6 +56,7 @@ async def _assert_parametric_model_valid(
         recompute=True,
         include_sketch_constraints=True,
         required_dimension_names=required_names,
+        detail_level="full",
     )
 
     errors = [
@@ -68,10 +69,9 @@ async def _assert_parametric_model_valid(
     assert not errors, errors
 
     usage = {
-        item["name"]: item["status"]
-        for item in report["dimension_inventory"]["usage"]
+        item["name"]: item["status"] for item in report["dimension_inventory"]["usage"]
     }
-    assert usage == {name: "used" for name in required_names}, usage
+    assert usage == {name: "solid_driving" for name in required_names}, usage
 
     dimensions_sheet = next(
         item for item in report["spreadsheets"] if item["name"] == "Dimensions"
@@ -167,6 +167,7 @@ async def test_semantic_selector_and_sketch_expressions_survive_parameter_update
             },
         ],
         doc_name=doc_name,
+        detail_level="full",
     )
     assert base_sketch["sketch_status"]["solver"]["status"] == "fully_constrained"
     assert base_sketch["geometry"][0]["geometry"]["radius"] == pytest.approx(20.0)
@@ -229,6 +230,7 @@ async def test_semantic_selector_and_sketch_expressions_survive_parameter_update
             "sort_order": "desc",
             "limit": 1,
         },
+        detail_level="summary",
     )
     assert top_face["match_count"] == 1, top_face
     assert top_face["matches"][0]["surface_type"] == "Plane"
@@ -292,6 +294,7 @@ async def test_semantic_selector_and_sketch_expressions_survive_parameter_update
             },
         ],
         doc_name=doc_name,
+        detail_level="full",
     )
     assert hole_sketch["sketch_status"]["solver"]["status"] == "fully_constrained"
     assert "start_point" in hole_sketch["geometry"][0]
@@ -307,6 +310,7 @@ async def test_semantic_selector_and_sketch_expressions_survive_parameter_update
         "get_sketch_info",
         sketch_name="HoleSketch",
         doc_name=doc_name,
+        detail_level="full",
     )
     assert detailed_hole_sketch["geometry"][0]["geometry_type"] == "Circle"
     assert detailed_hole_sketch["geometry"][0]["geometry"]["center"] == {
@@ -314,9 +318,11 @@ async def test_semantic_selector_and_sketch_expressions_survive_parameter_update
         "y": pytest.approx(4.0),
         "z": pytest.approx(0.0),
     }
-    assert {
-        item["path"] for item in detailed_hole_sketch["expressions"]
-    } == {"Constraints[0]", "Constraints[1]", "Constraints[2]"}
+    assert {item["path"] for item in detailed_hole_sketch["expressions"]} == {
+        "Constraints[0]",
+        "Constraints[1]",
+        "Constraints[2]",
+    }
 
     pocket = await _call(
         tools,
@@ -347,6 +353,7 @@ async def test_semantic_selector_and_sketch_expressions_survive_parameter_update
             "sort_order": "desc",
             "limit": 1,
         },
+        detail_level="summary",
     )
     assert top_outer_edge["match_count"] == 1, top_outer_edge
     assert len(top_outer_edge["matches"][0]["adjacent_faces"]) == 2
@@ -389,6 +396,7 @@ async def test_semantic_selector_and_sketch_expressions_survive_parameter_update
             "sort_order": "asc",
             "limit": 1,
         },
+        detail_level="summary",
     )
     assert bottom_outer_edge["match_count"] == 1, bottom_outer_edge
 
@@ -429,8 +437,7 @@ async def test_semantic_selector_and_sketch_expressions_survive_parameter_update
     assert all("adjacent_faces" in face for face in initial_shape["faces"])
     assert all("curve_type" in edge for edge in initial_shape["edges"])
     assert all(
-        "start_point" in edge and "end_point" in edge
-        for edge in initial_shape["edges"]
+        "start_point" in edge and "end_point" in edge for edge in initial_shape["edges"]
     )
     assert all("adjacent_faces" in edge for edge in initial_shape["edges"])
 
@@ -447,6 +454,7 @@ async def test_semantic_selector_and_sketch_expressions_survive_parameter_update
             "sort_order": "asc",
             "limit": 1,
         },
+        detail_level="summary",
     )
     assert concave_hole_face["match_count"] == 1, concave_hole_face
     assert concave_hole_face["matches"][0]["convexity"] == "concave"
@@ -475,23 +483,23 @@ async def test_semantic_selector_and_sketch_expressions_survive_parameter_update
         "get_sketch_info",
         sketch_name="BaseSketch",
         doc_name=doc_name,
+        detail_level="full",
     )
     resized_hole = await _call(
         tools,
         "get_sketch_info",
         sketch_name="HoleSketch",
         doc_name=doc_name,
+        detail_level="full",
     )
     assert resized_base["geometry"][0]["geometry"]["radius"] == pytest.approx(24.0)
     assert resized_hole["geometry"][0]["geometry"]["center"]["x"] == pytest.approx(10.0)
     assert resized_hole["geometry"][0]["geometry"]["radius"] == pytest.approx(6.0)
     assert (
-        _constraint_expressions(resized_base)["BaseRadius"]
-        == "Dimensions.BaseRadius"
+        _constraint_expressions(resized_base)["BaseRadius"] == "Dimensions.BaseRadius"
     )
     assert (
-        _constraint_expressions(resized_hole)["HoleRadius"]
-        == "Dimensions.HoleRadius"
+        _constraint_expressions(resized_hole)["HoleRadius"] == "Dimensions.HoleRadius"
     )
 
     resized_pad = await _call(
@@ -544,8 +552,9 @@ async def test_semantic_selector_and_sketch_expressions_survive_parameter_update
             "sort_order": "desc",
             "limit": 1,
         },
+        detail_level="summary",
     )
     assert resized_top_face["match_count"] == 1, resized_top_face
-    assert resized_top_face["matches"][0]["center"]["z"] == pytest.approx(36.0)
+    assert resized_top_face["matches"][0]["centroid"]["z"] == pytest.approx(36.0)
 
     await _assert_parametric_model_valid(tools, doc_name)

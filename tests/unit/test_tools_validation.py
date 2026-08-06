@@ -339,13 +339,10 @@ class TestValidationTools:
         assert result["valid"] is False
         assert "No active document" in result["summary"]
 
-
     # ========== validate_parametric_model tests ==========
 
     @pytest.mark.asyncio
-    async def test_validate_parametric_model_report(
-        self, register_tools, mock_bridge
-    ):
+    async def test_validate_parametric_model_report(self, register_tools, mock_bridge):
         report = {
             "informational": True,
             "assessment": "review_recommended",
@@ -377,13 +374,71 @@ class TestValidationTools:
             recompute=True,
             include_sketch_constraints=True,
             required_dimension_names=["Width", "HoleDiameter"],
+            detail_level="full",
         )
 
-        assert result == report
+        assert result["assessment"] == report["assessment"]
+        assert result["bodies"] == report["bodies"]
+        assert result["detail_level"] == "full"
         generated_code = mock_bridge.execute_python.call_args[0][0]
         assert "Bracket" in generated_code
         assert "if True:" in generated_code
         assert "['Width', 'HoleDiameter']" in generated_code
+
+    @pytest.mark.asyncio
+    async def test_validate_parametric_model_default_is_compact_and_pages_findings(
+        self, register_tools, mock_bridge
+    ):
+        report = {
+            "informational": True,
+            "assessment": "review_recommended",
+            "summary": "Paged report",
+            "document": {"name": "Model"},
+            "counts": {"bodies": 1},
+            "dimension_inventory": {
+                "provided": True,
+                "required_names": ["Width"],
+                "all_used": False,
+                "usage": [
+                    {
+                        "name": "Width",
+                        "status": "defined_but_not_solid_driving",
+                        "sketch_constraints": [{"index": 0}],
+                        "spreadsheet_parameters": [],
+                    }
+                ],
+            },
+            "bodies": [{"history": ["verbose"]}],
+            "findings": [
+                {"severity": "warning", "category": f"finding_{index}"}
+                for index in range(25)
+            ],
+            "limitations": [],
+        }
+        mock_bridge.execute_python = AsyncMock(
+            return_value=ExecutionResult(
+                success=True,
+                result=report,
+                stdout="",
+                stderr="",
+                execution_time_ms=1.0,
+            )
+        )
+
+        result = await register_tools["validate_parametric_model"](
+            required_dimension_names=["Width"], finding_limit=10
+        )
+
+        assert result["detail_level"] == "summary"
+        assert "bodies" not in result
+        assert len(result["findings"]) == 10
+        assert result["finding_pagination"]["next_offset"] == 10
+        assert result["dimension_inventory"]["usage"][0] == {
+            "name": "Width",
+            "status": "defined_but_not_solid_driving",
+            "sketch_match_count": 1,
+            "spreadsheet_match_count": 0,
+        }
 
     @pytest.mark.asyncio
     async def test_validate_parametric_model_rejects_duplicate_dimension_ids(

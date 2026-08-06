@@ -413,15 +413,31 @@ class FreecadBridge(ABC):
         self,
         obj_name: str,
         doc_name: str | None = None,
+        *,
+        include_properties: bool = False,
+        include_shape: bool = True,
+        include_topology: bool = False,
+        face_offset: int = 0,
+        face_limit: int | None = 20,
+        edge_offset: int = 0,
+        edge_limit: int | None = 20,
     ) -> ObjectInfo:
         """Get detailed object information.
 
         Args:
             obj_name: Name of the object.
             doc_name: Document name (uses active if None).
+            include_properties: Serialize the complete property map.
+            include_shape: Include compact shape metrics.
+            include_topology: Include paged face and edge records.
+            face_offset: Zero-based face-page offset.
+            face_limit: Face-page size, or all remaining faces when None.
+            edge_offset: Zero-based edge-page offset.
+            edge_limit: Edge-page size, or all remaining edges when None.
 
         Returns:
-            ObjectInfo with full object details.
+            ObjectInfo with the requested detail level. Topology pages are
+            omitted unless explicitly requested.
 
         Raises:
             ValueError: If object not found.

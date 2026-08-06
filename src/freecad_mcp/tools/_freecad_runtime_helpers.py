@@ -388,12 +388,14 @@ FEATURE_VALIDATION_RUNTIME_HELPERS = _runtime_code(
         intersecting that tool with the pre-pattern Body provides causal
         evidence for the amount of material that should be added or removed.
 
-        If FreeCAD does not expose a usable tool shape, the check is reported
-        as unavailable and callers may fall back to neutral volume diagnostics.
+        If FreeCAD does not expose a usable tool shape, compare the result B-rep
+        with the base B-rep. Report unavailable only when neither geometry can
+        support a causal set-difference check.
         """
         diagnostics = {
             "available": False,
             "consistent": None,
+            "method": None,
             "operation": None,
             "expected_material_change": None,
             "actual_material_change": None,
@@ -410,39 +412,70 @@ FEATURE_VALIDATION_RUNTIME_HELPERS = _runtime_code(
             return diagnostics
 
         tool_shape = getattr(pattern, "AddSubShape", None)
+        use_tool_shape = True
         try:
             if tool_shape is None or tool_shape.isNull():
-                diagnostics["reason"] = "pattern AddSubShape is unavailable"
-                return diagnostics
-            if not tool_shape.isValid():
-                diagnostics["reason"] = "pattern AddSubShape is invalid"
-                return diagnostics
+                use_tool_shape = False
+            elif not tool_shape.isValid():
+                use_tool_shape = False
         except Exception as exc:
+            use_tool_shape = False
             diagnostics["reason"] = f"could not inspect AddSubShape: {exc}"
-            return diagnostics
 
         actual_signed = result_volume - base_volume
         try:
-            if actual_signed < 0.0:
-                operation = "subtractive"
-                expected = float(base_shape.common(tool_shape).Volume)
-                actual = -actual_signed
-            elif actual_signed > 0.0:
-                operation = "additive"
-                expected = float(tool_shape.cut(base_shape).Volume)
-                actual = actual_signed
+            if use_tool_shape:
+                method = "add_subshape"
+                if actual_signed < 0.0:
+                    operation = "subtractive"
+                    expected = float(base_shape.common(tool_shape).Volume)
+                    actual = -actual_signed
+                elif actual_signed > 0.0:
+                    operation = "additive"
+                    expected = float(tool_shape.cut(base_shape).Volume)
+                    actual = actual_signed
+                else:
+                    removed = float(base_shape.common(tool_shape).Volume)
+                    added = float(tool_shape.cut(base_shape).Volume)
+                    if removed >= added:
+                        operation = "subtractive"
+                        expected = removed
+                    else:
+                        operation = "additive"
+                        expected = added
+                    actual = 0.0
             else:
-                # The sign cannot identify the feature intent.  Compute both
-                # effective tool volumes and use the larger one as evidence.
-                removed = float(base_shape.common(tool_shape).Volume)
-                added = float(tool_shape.cut(base_shape).Volume)
-                if removed >= added:
+                # Some valid PartDesign patterns (notably PolarPattern in
+                # several FreeCAD builds) do not publish AddSubShape. Compare
+                # the result B-rep with the pre-pattern B-rep instead.
+                result_shape = getattr(pattern, "Shape", None)
+                if result_shape is None or result_shape.isNull():
+                    diagnostics["reason"] = (
+                        "pattern AddSubShape and result Shape are unavailable"
+                    )
+                    return diagnostics
+                if not result_shape.isValid():
+                    diagnostics["reason"] = "pattern result Shape is invalid"
+                    return diagnostics
+                method = "result_shape_difference"
+                removed = float(base_shape.cut(result_shape).Volume)
+                added = float(result_shape.cut(base_shape).Volume)
+                if actual_signed < 0.0:
                     operation = "subtractive"
                     expected = removed
+                    actual = -actual_signed
+                elif actual_signed > 0.0:
+                    operation = "additive"
+                    expected = added
+                    actual = actual_signed
+                elif removed >= added:
+                    operation = "subtractive"
+                    expected = removed
+                    actual = 0.0
                 else:
                     operation = "additive"
                     expected = added
-                actual = 0.0
+                    actual = 0.0
         except Exception as exc:
             diagnostics["reason"] = (
                 f"could not evaluate pattern material change: {exc}"
@@ -461,6 +494,7 @@ FEATURE_VALIDATION_RUNTIME_HELPERS = _runtime_code(
         diagnostics.update({
             "available": True,
             "consistent": consistent,
+            "method": method,
             "operation": operation,
             "expected_material_change": expected,
             "actual_material_change": actual,
@@ -471,7 +505,7 @@ FEATURE_VALIDATION_RUNTIME_HELPERS = _runtime_code(
                 if consistent
                 else (
                     "Pattern result volume is inconsistent with the effective "
-                    "AddSubShape material change"
+                    f"material change measured by {method}"
                 )
             ),
         })

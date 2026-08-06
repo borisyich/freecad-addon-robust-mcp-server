@@ -153,6 +153,11 @@ Use same-view comparisons. A whole drawing sheet compared with an isometric
 screenshot is weak evidence. Crop the relevant drawing view and orient FreeCAD
 to the same projection.
 
+For non-standard candidate views, use `set_camera_position` with explicit
+`look_at`, `up_direction`, orthographic projection, and (when scale must remain
+fixed) `orthographic_height`. Record the result with `get_camera_state`. Do not
+combine `fit_all` with an explicit orthographic height.
+
 `compare_images` only presents images. It does not align them, read dimensions,
 or compute correctness. Explicitly inspect:
 

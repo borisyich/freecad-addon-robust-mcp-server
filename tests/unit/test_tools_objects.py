@@ -115,7 +115,17 @@ class TestObjectTools:
         assert result["properties"]["Length"] == 10.0
         assert result["shape_info"]["volume"] == 6000.0
         assert result["children"] == ["Fillet001"]
-        mock_bridge.get_object.assert_called_once_with("Box", None)
+        mock_bridge.get_object.assert_called_once_with(
+            "Box",
+            None,
+            include_properties=True,
+            include_shape=True,
+            include_topology=True,
+            face_offset=0,
+            face_limit=20,
+            edge_offset=0,
+            edge_limit=20,
+        )
 
     @pytest.mark.asyncio
     async def test_inspect_object_reuses_top_level_shape_summary(
@@ -137,9 +147,7 @@ class TestObjectTools:
         )
         mock_bridge.get_object = AsyncMock(return_value=mock_object)
 
-        result = await register_tools["inspect_object"](
-            "Pad", include_properties=True
-        )
+        result = await register_tools["inspect_object"]("Pad", include_properties=True)
 
         assert result["properties"]["Shape"]["value"] == {"summary_ref": "shape_info"}
         assert result["shape_info"]["volume"] == 100.0
@@ -167,6 +175,33 @@ class TestObjectTools:
         assert result["name"] == "Box"
         assert "properties" not in result
         assert "shape_info" not in result
+
+    @pytest.mark.asyncio
+    async def test_inspect_object_default_is_compact(self, register_tools, mock_bridge):
+        mock_bridge.get_object = AsyncMock(
+            return_value=ObjectInfo(
+                name="Body",
+                label="Body",
+                type_id="PartDesign::Body",
+                shape_info={"volume": 42.0, "face_count": 80},
+            )
+        )
+
+        result = await register_tools["inspect_object"]("Body")
+
+        assert result["detail_level"] == "summary"
+        assert result["shape_info"]["face_count"] == 80
+        mock_bridge.get_object.assert_awaited_once_with(
+            "Body",
+            None,
+            include_properties=False,
+            include_shape=True,
+            include_topology=False,
+            face_offset=0,
+            face_limit=20,
+            edge_offset=0,
+            edge_limit=20,
+        )
 
     @pytest.mark.asyncio
     async def test_select_subshapes_filters_and_sorts_faces(
@@ -218,10 +253,11 @@ class TestObjectTools:
                 "sort_order": "desc",
                 "limit": 1,
             },
+            detail_level="summary",
         )
 
         assert result["references"] == ["Face2"]
-        assert result["matches"][0]["center"]["z"] == 10.0
+        assert result["matches"][0]["centroid"]["z"] == 10.0
 
     @pytest.mark.asyncio
     async def test_select_subshapes_filters_edges_by_direction_and_adjacency(
@@ -277,6 +313,20 @@ class TestObjectTools:
         )
 
         assert result["references"] == ["Edge1"]
+        assert "matches" not in result
+
+    def test_subshape_centroid_field_is_explicit_and_legacy_center_is_accepted(self):
+        from freecad_mcp.tools.objects import FaceSelectionCriteria
+
+        criteria = FaceSelectionCriteria.model_validate(
+            {"kind": "face", "center": {"z_min": 5.0}}
+        )
+
+        assert criteria.centroid_bounds is not None
+        assert criteria.centroid_bounds.z_min == 5.0
+        dumped = criteria.model_dump(exclude_none=True)
+        assert "centroid_bounds" in dumped
+        assert "center" not in dumped
 
     @pytest.mark.asyncio
     async def test_select_subshapes_rejects_zero_direction(
@@ -295,15 +345,28 @@ class TestObjectTools:
     ):
         mock_bridge.get_object = AsyncMock(
             return_value=ObjectInfo(
-                name="Pad", label="Pad", type_id="PartDesign::Feature",
+                name="Pad",
+                label="Pad",
+                type_id="PartDesign::Feature",
                 shape_info={
-                    "shape_type": "Solid", "is_null": False,
+                    "shape_type": "Solid",
+                    "is_null": False,
                     "faces": [],
                     "edges": [
-                        {"name": "Edge1", "index": 1, "curve_type": "LineSegment",
-                         "length": None, "adjacent_faces": []},
-                        {"name": "Edge2", "index": 2, "curve_type": "Line",
-                         "length": 30.0, "adjacent_faces": []},
+                        {
+                            "name": "Edge1",
+                            "index": 1,
+                            "curve_type": "LineSegment",
+                            "length": None,
+                            "adjacent_faces": [],
+                        },
+                        {
+                            "name": "Edge2",
+                            "index": 2,
+                            "curve_type": "Line",
+                            "length": 30.0,
+                            "adjacent_faces": [],
+                        },
                     ],
                 },
             )
@@ -311,8 +374,12 @@ class TestObjectTools:
 
         result = await register_tools["select_subshapes"](
             object_name="Pad",
-            criteria={"kind": "edge", "curve_types": ["linear"],
-                      "sort_by": "length", "sort_order": "desc"},
+            criteria={
+                "kind": "edge",
+                "curve_types": ["linear"],
+                "sort_by": "length",
+                "sort_order": "desc",
+            },
         )
 
         assert result["references"] == ["Edge2", "Edge1"]
@@ -804,8 +871,9 @@ class TestObjectTools:
         result = await register_tools["selection"]("clear")
 
         assert result["selected_count"] == 0
-        assert "FreeCADGui.Selection.clearSelection()" in (
-            mock_bridge.execute_python.await_args.args[0]
+        assert (
+            "FreeCADGui.Selection.clearSelection()"
+            in (mock_bridge.execute_python.await_args.args[0])
         )
 
     @pytest.mark.asyncio

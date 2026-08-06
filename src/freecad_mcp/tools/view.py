@@ -406,8 +406,13 @@ else:
         position: list[float],
         look_at: list[float] | None = None,
         doc_name: str | None = None,
+        up_direction: list[float] | None = None,
+        projection: Literal["orthographic", "perspective"] = "orthographic",
+        orthographic_height: float | None = None,
+        roll_degrees: float = 0.0,
+        fit_all: bool = False,
     ) -> dict[str, Any]:
-        """Set the camera position and orientation.
+        """Set a deterministic engineering camera for drawing comparison.
 
         Requires GUI mode.
 
@@ -415,11 +420,34 @@ else:
             position: Camera position as [x, y, z].
             look_at: Point to look at as [x, y, z]. Uses origin if None.
             doc_name: Document to set camera for. Uses active document if None.
+            up_direction: Approximate screen-up vector. Defaults to global +Z,
+                with a safe fallback when parallel to the viewing direction.
+            projection: Orthographic by default for same-view drawing checks.
+            orthographic_height: Visible world-space height for reproducible scale.
+            roll_degrees: Additional roll around the viewing direction.
+            fit_all: Fit visible geometry after orientation. Do not combine with
+                orthographic_height because fit_all determines scale.
 
         Returns:
             Dictionary with result:
                 - success: Whether operation was successful
         """
+        for field_name, value in (
+            ("position", position),
+            ("look_at", look_at),
+            ("up_direction", up_direction),
+        ):
+            if value is not None and len(value) != 3:
+                raise ValueError(f"{field_name} must contain exactly three numbers")
+        if orthographic_height is not None and orthographic_height <= 0:
+            raise ValueError("orthographic_height must be positive")
+        if projection != "orthographic" and orthographic_height is not None:
+            raise ValueError(
+                "orthographic_height is available only for orthographic projection"
+            )
+        if fit_all and orthographic_height is not None:
+            raise ValueError("fit_all and orthographic_height are mutually exclusive")
+
         bridge = await get_bridge()
 
         look_str = (
@@ -427,6 +455,7 @@ else:
             if look_at
             else "FreeCAD.Vector(0, 0, 0)"
         )
+        up = up_direction or [0.0, 0.0, 1.0]
 
         code = f"""
 if not FreeCAD.GuiUp:
@@ -435,23 +464,94 @@ else:
     doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
     if doc is None:
         _result_ = {{"success": False, "error": "No document found"}}
-    elif FreeCADGui.ActiveDocument is None or FreeCADGui.ActiveDocument.ActiveView is None:
-        _result_ = {{"success": False, "error": "No active view"}}
+    elif FreeCADGui.getDocument(doc.Name) is None:
+        _result_ = {{"success": False, "error": "Document has no GUI view"}}
     else:
-        view = FreeCADGui.ActiveDocument.ActiveView
+        from pivy import coin
+
+        FreeCAD.setActiveDocument(doc.Name)
+        gui_doc = FreeCADGui.getDocument(doc.Name)
+        view = gui_doc.activeView()
         pos = FreeCAD.Vector({position[0]}, {position[1]}, {position[2]})
         look_at = {look_str}
 
         # Calculate direction
         direction = look_at - pos
+        if direction.Length <= 1e-12:
+            raise ValueError("position and look_at must be different points")
+        focal_distance = float(direction.Length)
         direction.normalize()
 
-        # Set camera
-        view.setCameraOrientation(FreeCAD.Rotation(FreeCAD.Vector(0, 0, -1), direction))
-        cam = view.getCameraNode()
-        cam.position.setValue(pos.x, pos.y, pos.z)
+        up = FreeCAD.Vector({up[0]}, {up[1]}, {up[2]})
+        if up.Length <= 1e-12:
+            raise ValueError("up_direction must be a non-zero vector")
+        up.normalize()
+        # Project the requested up vector into the camera plane. If it is
+        # parallel to the view, choose a deterministic fallback axis.
+        projection_component = up.dot(direction)
+        up = up - FreeCAD.Vector(
+            direction.x * projection_component,
+            direction.y * projection_component,
+            direction.z * projection_component,
+        )
+        if up.Length <= 1e-9:
+            fallback = FreeCAD.Vector(0, 1, 0)
+            if abs(direction.dot(fallback)) > 0.99:
+                fallback = FreeCAD.Vector(1, 0, 0)
+            projection_component = fallback.dot(direction)
+            up = fallback - FreeCAD.Vector(
+                direction.x * projection_component,
+                direction.y * projection_component,
+                direction.z * projection_component,
+            )
+        up.normalize()
+        if {roll_degrees!r}:
+            up = FreeCAD.Rotation(direction, {roll_degrees!r}).multVec(up)
+        right = direction.cross(up)
+        right.normalize()
+        up = right.cross(direction)
+        up.normalize()
+        backward = FreeCAD.Vector(-direction.x, -direction.y, -direction.z)
 
-        _result_ = {{"success": True}}
+        view.setCameraType({projection.title()!r})
+        camera_rotation = FreeCAD.Rotation(right, up, backward, "ZXY")
+        cam = view.getCameraNode()
+        quaternion = camera_rotation.Q
+        cam.orientation.setValue(coin.SbRotation(*quaternion))
+        cam.position.setValue(pos.x, pos.y, pos.z)
+        cam.focalDistance.setValue(focal_distance)
+        if {fit_all!r}:
+            view.fitAll()
+        if {orthographic_height!r} is not None:
+            cam.height.setValue(float({orthographic_height!r}))
+        view.redraw()
+        FreeCADGui.updateGui()
+        # Some Coin/FreeCAD camera combinations apply a deferred focal update
+        # during redraw. Reassert the requested position and scale afterwards.
+        if not {fit_all!r}:
+            cam.position.setValue(pos.x, pos.y, pos.z)
+            cam.focalDistance.setValue(focal_distance)
+        if {orthographic_height!r} is not None:
+            cam.height.setValue(float({orthographic_height!r}))
+        view.redraw()
+        FreeCADGui.updateGui()
+
+        _result_ = {{
+            "success": True,
+            "position": [float(cam.position.getValue()[i]) for i in range(3)],
+            "look_at": [look_at.x, look_at.y, look_at.z],
+            "view_direction": [direction.x, direction.y, direction.z],
+            "up_direction": [up.x, up.y, up.z],
+            "projection": {projection!r},
+            "orthographic_height": (
+                float(cam.height.getValue())
+                if {projection!r} == "orthographic" and hasattr(cam, "height")
+                else None
+            ),
+            "roll_degrees": {roll_degrees!r},
+            "fit_all": {fit_all!r},
+            "focal_distance": float(cam.focalDistance.getValue()),
+        }}
 """
         result = await bridge.execute_python(code)
         if result.success and result.result:
@@ -459,6 +559,48 @@ else:
         return {
             "success": False,
             "error": result.error_traceback or "Set camera position failed",
+        }
+
+    @mcp.tool()
+    async def get_camera_state(doc_name: str | None = None) -> dict[str, Any]:
+        """Return compact current camera state for reproducible view checks."""
+        bridge = await get_bridge()
+        code = f"""
+if not FreeCAD.GuiUp:
+    _result_ = {{"success": False, "error": "GUI not available"}}
+else:
+    doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
+    if doc is None or FreeCADGui.getDocument(doc.Name) is None:
+        _result_ = {{"success": False, "error": "No active document/view"}}
+    else:
+        FreeCAD.setActiveDocument(doc.Name)
+        gui_doc = FreeCADGui.getDocument(doc.Name)
+        view = gui_doc.activeView()
+        cam = view.getCameraNode()
+        pos = cam.position.getValue()
+        orientation = cam.orientation.getValue()
+        _result_ = {{
+            "success": True,
+            "projection": str(view.getCameraType()).lower(),
+            "position": [float(pos[i]) for i in range(3)],
+            "orientation_quaternion": [
+                float(orientation.getValue()[i]) for i in range(4)
+            ],
+            "orthographic_height": (
+                float(cam.height.getValue()) if hasattr(cam, "height") else None
+            ),
+            "focal_distance": (
+                float(cam.focalDistance.getValue())
+                if hasattr(cam, "focalDistance") else None
+            ),
+        }}
+"""
+        result = await bridge.execute_python(code)
+        if result.success and result.result:
+            return result.result
+        return {
+            "success": False,
+            "error": result.error_traceback or "Get camera state failed",
         }
 
     @mcp.tool()

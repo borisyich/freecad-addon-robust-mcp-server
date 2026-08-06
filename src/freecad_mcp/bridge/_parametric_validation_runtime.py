@@ -190,6 +190,132 @@ def _expression_summary(obj):
     return output
 
 
+def _constraint_geometry_indices(constraint):
+    indices = []
+    for attribute in ("First", "Second", "Third"):
+        try:
+            value = int(getattr(constraint, attribute))
+        except Exception:
+            continue
+        if value >= 0 and value not in indices:
+            indices.append(value)
+    return indices
+
+
+def _constraint_solid_influence(sketch, constraint_index, active_object_names):
+    result = {
+        "in_tip_dependency": getattr(sketch, "Name", None) in active_object_names,
+        "geometry_indices": [],
+        "construction_geometry_indices": [],
+        "construction_only": False,
+        "solid_driving": False,
+        "reason": None,
+    }
+    try:
+        constraint = list(sketch.Constraints or [])[constraint_index]
+    except Exception:
+        result["reason"] = "constraint is unavailable"
+        return result
+
+    indices = _constraint_geometry_indices(constraint)
+    result["geometry_indices"] = indices
+    construction = []
+    getter = getattr(sketch, "getConstruction", None)
+    for index in indices:
+        try:
+            if callable(getter) and bool(getter(index)):
+                construction.append(index)
+        except Exception:
+            pass
+    result["construction_geometry_indices"] = construction
+    result["construction_only"] = bool(indices) and len(construction) == len(indices)
+
+    driving_getter = getattr(sketch, "isDriving", None)
+    try:
+        driving = bool(driving_getter(constraint_index)) if callable(driving_getter) else True
+    except Exception:
+        driving = True
+    if not driving:
+        result["reason"] = "constraint is reference/non-driving"
+    elif not result["in_tip_dependency"]:
+        result["reason"] = "sketch is not in the active Body Tip dependency graph"
+    elif not indices:
+        result["reason"] = "constraint has no verifiable profile geometry reference"
+    elif result["construction_only"]:
+        result["reason"] = "constraint references construction geometry only"
+    else:
+        result["solid_driving"] = True
+    return result
+
+
+def _active_solid_dependency_names(doc):
+    """Return objects reachable backwards from each active Body Tip."""
+    names = set()
+    for body in getattr(doc, "Objects", []) or []:
+        if getattr(body, "TypeId", None) != "PartDesign::Body":
+            continue
+        tip = getattr(body, "Tip", None)
+        stack = [tip] if tip is not None else []
+        visited = set()
+        while stack:
+            current = stack.pop()
+            marker = id(current)
+            if marker in visited:
+                continue
+            visited.add(marker)
+            name = getattr(current, "Name", None)
+            if name:
+                names.add(name)
+            stack.extend(
+                item for item in (getattr(current, "OutList", []) or [])
+                if item is not None
+            )
+    return names
+
+
+def _expression_binding_solid_influence(obj, property_name, active_object_names):
+    type_id = getattr(obj, "TypeId", "")
+    name = getattr(obj, "Name", None)
+    if name not in active_object_names:
+        return False, "object is not in the active Body Tip dependency graph"
+    if type_id == "Sketcher::SketchObject":
+        match = re.search(r"Constraints\[(\d+)\]", str(property_name))
+        if match is None:
+            constraint_name = str(property_name).split("Constraints.", 1)
+            index = None
+            if len(constraint_name) == 2:
+                getter = getattr(obj, "getConstraintName", None)
+                if callable(getter):
+                    for candidate in range(int(getattr(obj, "ConstraintCount", 0))):
+                        try:
+                            if getter(candidate) == constraint_name[1]:
+                                index = candidate
+                                break
+                        except Exception:
+                            pass
+            if index is None:
+                return False, "sketch expression is not bound to a verifiable constraint"
+        else:
+            index = int(match.group(1))
+        influence = _constraint_solid_influence(obj, index, active_object_names)
+        return influence["solid_driving"], influence["reason"]
+    if type_id.startswith("PartDesign::") and not any(
+        token in type_id for token in ("Plane", "Line", "Point", "CoordinateSystem", "Body")
+    ):
+        status_getter = getattr(obj, "getPropertyStatus", None)
+        if callable(status_getter):
+            try:
+                raw_status = list(status_getter(property_name) or [])
+            except Exception:
+                raw_status = []
+            # FreeCAD Python may expose the Dynamic enum as its numeric index
+            # (21) instead of the label, depending on the bridge serializer.
+            if any(item == 21 or str(item) == "Dynamic" for item in raw_status):
+                return False, "expression is attached to a dynamic/custom metadata property"
+        return True, None
+    return False, "expression endpoint is not a shape-producing active feature"
+
+
 def _spreadsheet_cells(sheet):
     cells = set()
     try:
@@ -252,7 +378,9 @@ def _spreadsheet_summary(sheet, expression_bindings):
             "reference_count": len(references),
             "dependencies": [],
             "dependent_cells": [],
-            "connected_to_tree": bool(references),
+            "connected_to_tree": any(
+                reference.get("solid_driving") for reference in references
+            ),
         }
         cells.append(cell_summary)
         if alias:
@@ -333,6 +461,7 @@ def _resolve_spreadsheet_connectivity(spreadsheets):
     for spreadsheet in spreadsheets:
         for cell in spreadsheet["cells"]:
             cell["connected_to_tree"] = cell["node_id"] in connected
+            cell["connected_to_final_solid"] = cell["connected_to_tree"]
             cell["dependent_cells"] = sorted(set(cell["dependent_cells"]))
         spreadsheet["unused_parameters"] = [
             parameter
@@ -792,9 +921,15 @@ else:
             }
         )
 
+    active_solid_dependency_names = _active_solid_dependency_names(doc)
     expression_bindings = []
     for obj in doc.Objects:
         for expression in _expression_summary(obj):
+            solid_driving, influence_reason = _expression_binding_solid_influence(
+                obj,
+                expression["property"],
+                active_solid_dependency_names,
+            )
             expression_bindings.append(
                 {
                     "object": getattr(obj, "Name", None),
@@ -802,6 +937,8 @@ else:
                     "object_type": getattr(obj, "TypeId", None),
                     "property": expression["property"],
                     "expression": expression["expression"],
+                    "solid_driving": solid_driving,
+                    "influence_reason": influence_reason,
                 }
             )
 
@@ -819,12 +956,26 @@ else:
 
     named_dimension_constraints = []
     for sketch in all_sketches:
+        getter = getattr(doc, "getObject", None)
+        live_sketch = getter(sketch["name"]) if callable(getter) else next(
+            (
+                item
+                for item in doc.Objects
+                if getattr(item, "Name", None) == sketch["name"]
+            ),
+            None,
+        )
         for constraint in sketch.get("named_constraints", []):
             # A geometric constraint may have a name, but it is not a drawing
             # dimension. Only constraints with a readable datum satisfy the
             # required-dimension inventory.
             if constraint.get("datum") is None:
                 continue
+            influence = _constraint_solid_influence(
+                live_sketch,
+                constraint["index"],
+                active_solid_dependency_names,
+            )
             named_dimension_constraints.append(
                 {
                     "name": constraint["name"],
@@ -833,6 +984,7 @@ else:
                     "type": constraint["type"],
                     "driving": constraint["driving"],
                     "datum": constraint["datum"],
+                    **influence,
                 }
             )
 
@@ -851,6 +1003,9 @@ else:
                     "dependencies": parameter["dependencies"],
                     "dependent_cells": parameter["dependent_cells"],
                     "connected_to_tree": parameter["connected_to_tree"],
+                    "connected_to_final_solid": parameter[
+                        "connected_to_final_solid"
+                    ],
                 }
             )
 
@@ -865,15 +1020,17 @@ else:
             item for item in spreadsheet_parameters if item["name"] == required_name
         ]
         driving_sketch_matches = [
-            item for item in sketch_matches if item.get("driving") is not False
+            item for item in sketch_matches if item.get("solid_driving") is True
         ]
         linked_spreadsheet_matches = [
-            item for item in spreadsheet_matches if item["connected_to_tree"]
+            item
+            for item in spreadsheet_matches
+            if item["connected_to_final_solid"]
         ]
         if driving_sketch_matches or linked_spreadsheet_matches:
-            status = "used"
+            status = "solid_driving"
         elif sketch_matches or spreadsheet_matches:
-            status = "defined_but_unlinked"
+            status = "defined_but_not_solid_driving"
         else:
             status = "missing"
         dimension_usage.append(
@@ -928,7 +1085,7 @@ else:
                     ),
                 }
             )
-        elif item["status"] == "defined_but_unlinked":
+        elif item["status"] == "defined_but_not_solid_driving":
             findings.append(
                 {
                     "severity": "error",
@@ -936,8 +1093,9 @@ else:
                     "object": None,
                     "message": (
                         f"Required drawing dimension {item['name']!r} exists but does "
-                        "not drive model geometry. Bind it into the feature tree or "
-                        "replace it with a named driving constraint."
+                        "not have a verified influence on the active final solid. "
+                        "Construction-only constraints, inactive sketches, datum "
+                        "objects, and metadata links do not satisfy this check."
                     ),
                 }
             )
@@ -1124,7 +1282,7 @@ else:
             "required_names": required_dimension_names,
             "usage": dimension_usage,
             "all_used": bool(required_dimension_names) and all(
-                item["status"] == "used" for item in dimension_usage
+                item["status"] == "solid_driving" for item in dimension_usage
             ),
             "named_dimension_constraints": named_dimension_constraints,
             "spreadsheet_parameters": spreadsheet_parameters,

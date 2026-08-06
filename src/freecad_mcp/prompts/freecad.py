@@ -535,15 +535,21 @@ safe_execute(
 - Shape existence - Object has geometry
 - Recompute state - Object up to date
 
-### validate_parametric_model(doc_name, recompute, include_sketch_constraints, required_dimension_names)
+### validate_parametric_model(..., detail_level, finding_offset, finding_limit)
 Mandatory final informative scan after creating or changing geometry:
 - reports Bodies, Tips, ordered history, and shape validity;
 - reports sketches, solver/profile status, remaining DoF, supports, and expressions;
-- verifies that every supplied required dimension identifier drives the model;
+- verifies that every supplied required dimension identifier influences the
+  active final solid; construction-only/helper bindings do not count;
 - reports Spreadsheet aliases that are not directly or transitively connected
   to the feature tree so they can be linked or removed;
 - reports standalone/direct solids and significant warnings;
 - does not by itself prove drawing correspondence or manufacturability.
+
+Use the compact default first. Request `structure` only for a reported
+Body/sketch/Spreadsheet issue. Request `full` and individual sketch constraints
+only for a specific history, expression, or solver-index diagnosis; these modes
+can produce very large responses.
 
 Call it immediately before the final user-facing response and summarize the findings.""",
             "drawing_reconstruction": DRAWING_RECONSTRUCTION_WORKFLOW,
@@ -612,8 +618,9 @@ Add additional features as needed:
 
 ### 6. Verify and Export
 When complete:
-- Use `inspect_object(include_properties=False)` for routine verification. Set
-  `include_properties=True` only when exact object properties are needed.
+- Use compact `inspect_object()` or `detail_level="shape"` for routine
+  verification. Request paged `topology` or `full` only for a specific
+  topology/property diagnosis.
 - Use `get_screenshot` to visualize the result
 - Export with `export(file_format=...)` using the required target format
 
@@ -873,7 +880,8 @@ Use the `{info["tool"]}` tool:
         return """# FreeCAD Shape Analysis Guide
 
 ## Quick Analysis
-Use `inspect_object` with `include_shape=True` to get:
+Use compact `inspect_object()` for metrics and paged
+`inspect_object(detail_level="topology")` to get:
 - Volume, surface area, bounding box, and validity
 - Faces: surface type, oriented normal, area, adjacency, and local convexity
 - Edges: curve type, endpoints, length, direction/radius, and adjacent faces
@@ -883,7 +891,8 @@ references; do not write manual topology loops for ordinary selection tasks.
 
 ## Detailed Analysis with Typed Tools
 
-1. Call `inspect_object(object_name="ObjectName", include_shape=True)`.
+1. Call `inspect_object(object_name="ObjectName")`, then request paged topology
+   only if the compact metrics do not answer the question.
 2. Read the returned bounding box, volume, area, semantic topology, placement,
    dependencies, and readable properties.
 3. Use `select_subshapes` when an operation needs a face or edge reference.
@@ -921,7 +930,7 @@ recompute_document()  # Force full recompute
 **Diagnosis:**
 ```text
 validate_object(object_name="ObjectName")
-inspect_object(object_name="ObjectName", include_shape=True)
+inspect_object(object_name="ObjectName", detail_level="shape")
 ```
 If invalid, undo the failed feature and confirm the previous Body Tip is valid.
 

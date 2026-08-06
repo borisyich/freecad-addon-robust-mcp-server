@@ -30,6 +30,13 @@ reconstruction, model modification, validation, and completion criteria.
 6. **Tools** — perform deterministic operations and diagnostics. In particular,
    `validate_parametric_model` reports the actual FreeCAD document structure.
 
+Protocol-level `MCP_INSTRUCTIONS` is delivered once as server instructions; it
+must not be copied into every tool description. Tool descriptions contain only
+the first concise purpose paragraph. Exact typed arguments remain in JSON
+Schema, while cosmetic schema `title` fields are removed to keep `tools/list`
+within a practical context budget. Full workflows and large-response warnings
+belong in documentation, resources, prompts, and the Skill.
+
 ## What is mandatory
 
 For any task that creates or changes FreeCAD geometry:

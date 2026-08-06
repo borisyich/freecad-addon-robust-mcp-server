@@ -1783,7 +1783,7 @@ class TestPartDesignTools:
         )
 
         get_info = register_tools["get_sketch_info"]
-        result = await get_info(sketch_name="Sketch")
+        result = await get_info(sketch_name="Sketch", detail_level="full")
 
         status = result["sketch_status"]
         assert status["geometry_count"] == 4
@@ -1793,11 +1793,22 @@ class TestPartDesignTools:
         assert result["geometry"][0]["end_point"]["x"] == 20.0
         assert result["constraints"][0]["expression"] == "Dimensions.Width"
         assert result["expressions"][0]["path"] == "Constraints[0]"
+
+        summary = await get_info(sketch_name="Sketch")
+        assert summary["detail_level"] == "summary"
+        assert summary["detail_counts"] == {
+            "geometry": 1,
+            "constraints": 1,
+            "expressions": 1,
+        }
+        assert "geometry" not in summary
+        assert "constraints" not in summary
+        assert "expressions" not in summary
         generated_code = mock_bridge.execute_python.await_args.args[0]
         assert "sketch.solve()" in generated_code
         assert "sketch.DoF" in generated_code
         assert "_sketch_detailed_info(sketch)" in generated_code
-        mock_bridge.execute_python.assert_called_once()
+        assert mock_bridge.execute_python.await_count == 2
 
 
 class TestOriginFeatureResolver:

@@ -473,18 +473,27 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                         },
                         {
                             "name": "inspect_object",
-                            "description": "Inspect an object plus semantic face/edge topology; keep include_properties false unless exact values are needed",
+                            "description": "Compact object metrics by default; paged topology/full properties only on request",
                             "key_params": [
                                 "object_name",
                                 "doc_name",
-                                "include_properties",
-                                "include_shape",
+                                "detail_level",
+                                "face_offset",
+                                "face_limit",
+                                "edge_offset",
+                                "edge_limit",
                             ],
                         },
                         {
                             "name": "select_subshapes",
-                            "description": "Select FaceN/EdgeN references by semantic geometric criteria",
-                            "key_params": ["object_name", "criteria", "doc_name"],
+                            "description": "Select paged FaceN/EdgeN references; centroid means face-area or edge-length centroid",
+                            "key_params": [
+                                "object_name",
+                                "criteria",
+                                "detail_level",
+                                "offset",
+                                "page_size",
+                            ],
                         },
                         {
                             "name": "create_object",
@@ -968,13 +977,24 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                     "tools": [
                         {
                             "name": "edit_sketch_constraints",
-                            "description": "Edit ordered sketch constraints, names, and Spreadsheet expressions",
-                            "key_params": ["sketch_name", "operations", "doc_name"],
+                            "description": "Edit ordered constraints; return compact status or paged diagnostics",
+                            "key_params": [
+                                "sketch_name",
+                                "operations",
+                                "detail_level",
+                                "constraint_offset",
+                                "constraint_limit",
+                            ],
                         },
                         {
                             "name": "get_sketch_info",
-                            "description": "Get indexed geometry/endpoints, constraints, expressions, solver, and profile diagnostics",
-                            "key_params": ["sketch_name", "doc_name"],
+                            "description": "Compact solver/profile status by default; geometry and constraints are paged on request",
+                            "key_params": [
+                                "sketch_name",
+                                "detail_level",
+                                "geometry_offset",
+                                "constraint_offset",
+                            ],
                         },
                     ],
                 },
@@ -989,17 +1009,30 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                         {
                             "name": "open_image_tiles",
                             "description": "Return indexed overview plus enlarged overlapping drawing fragments",
-                            "key_params": ["path", "rows", "columns", "overlap_percent"],
+                            "key_params": [
+                                "path",
+                                "rows",
+                                "columns",
+                                "overlap_percent",
+                            ],
                         },
                         {
                             "name": "compare_images",
                             "description": "Mandatory major-feature and pre-pattern seed comparison for drawing reconstruction",
-                            "key_params": ["reference_path", "candidate_path", "view_context"],
+                            "key_params": [
+                                "reference_path",
+                                "candidate_path",
+                                "view_context",
+                            ],
                         },
                         {
                             "name": "evaluate_model_checkpoint",
                             "description": "Optionally return continue/rework from checkpoint evidence",
-                            "key_params": ["checkpoint_name", "geometry_valid", "discrepancies"],
+                            "key_params": [
+                                "checkpoint_name",
+                                "geometry_valid",
+                                "discrepancies",
+                            ],
                         },
                     ],
                 },
@@ -1009,7 +1042,12 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                         {
                             "name": "get_screenshot",
                             "description": "Capture a settled standard-view screenshot (GUI only)",
-                            "key_params": ["view_angle", "width", "height", "settle_time_seconds"],
+                            "key_params": [
+                                "view_angle",
+                                "width",
+                                "height",
+                                "settle_time_seconds",
+                            ],
                         },
                         {
                             "name": "set_view_angle",
@@ -1023,13 +1061,30 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                         },
                         {
                             "name": "set_camera_position",
-                            "description": "Set exact camera position and look-at target",
-                            "key_params": ["position", "look_at", "doc_name"],
+                            "description": "Set deterministic position, target, up, projection, scale, and roll",
+                            "key_params": [
+                                "position",
+                                "look_at",
+                                "up_direction",
+                                "projection",
+                                "orthographic_height",
+                                "roll_degrees",
+                            ],
+                        },
+                        {
+                            "name": "get_camera_state",
+                            "description": "Read projection, position, orientation, and orthographic scale",
+                            "key_params": ["doc_name"],
                         },
                         {
                             "name": "set_visual_properties",
                             "description": "Set visibility, shape color, and display mode",
-                            "key_params": ["object_name", "visible", "color", "display_mode"],
+                            "key_params": [
+                                "object_name",
+                                "visible",
+                                "color",
+                                "display_mode",
+                            ],
                         },
                         {
                             "name": "workbench",
@@ -1128,12 +1183,15 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                         },
                         {
                             "name": "validate_parametric_model",
-                            "description": "Scan editable history, required dimension usage, Spreadsheet connectivity, and solids outside Bodies",
+                            "description": "Compact final diagnostic; expanded structure/full reports only on request",
                             "key_params": [
                                 "doc_name",
                                 "recompute",
                                 "include_sketch_constraints",
                                 "required_dimension_names",
+                                "detail_level",
+                                "finding_offset",
+                                "finding_limit",
                             ],
                         },
                         {

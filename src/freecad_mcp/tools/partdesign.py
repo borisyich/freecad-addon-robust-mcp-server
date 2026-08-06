@@ -418,6 +418,74 @@ SketchConstraintOperation = Annotated[
 _SKETCH_CONSTRAINT_OPERATION_ADAPTER = TypeAdapter(SketchConstraintOperation)
 
 
+def _page_records(
+    values: list[dict[str, Any]], offset: int, limit: int
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    total = len(values)
+    page = values[offset : offset + limit]
+    next_offset = offset + len(page) if offset + len(page) < total else None
+    return page, {
+        "offset": offset,
+        "limit": limit,
+        "returned": len(page),
+        "total": total,
+        "has_more": next_offset is not None,
+        "next_offset": next_offset,
+    }
+
+
+def _sketch_tool_response(
+    value: dict[str, Any],
+    detail_level: str,
+    geometry_offset: int,
+    geometry_limit: int,
+    constraint_offset: int,
+    constraint_limit: int,
+) -> dict[str, Any]:
+    """Return a compact sketch report and page verbose records explicitly."""
+    geometry = list(value.get("geometry") or [])
+    constraints = list(value.get("constraints") or [])
+    expressions = list(value.get("expressions") or [])
+    geometry_page, geometry_paging = _page_records(
+        geometry, geometry_offset, geometry_limit
+    )
+    constraint_page, constraint_paging = _page_records(
+        constraints, constraint_offset, constraint_limit
+    )
+    expression_page, expression_paging = _page_records(
+        expressions, constraint_offset, constraint_limit
+    )
+    result = {
+        key: item
+        for key, item in value.items()
+        if key not in {"geometry", "constraints", "expressions"}
+    }
+    result.update(
+        {
+            "detail_level": detail_level,
+            "detail_counts": {
+                "geometry": len(geometry),
+                "constraints": len(constraints),
+                "expressions": len(expressions),
+            },
+        }
+    )
+    if detail_level in {"geometry", "full"}:
+        result["geometry"] = geometry_page
+        result["geometry_pagination"] = geometry_paging
+    if detail_level in {"constraints", "full"}:
+        result["constraints"] = constraint_page
+        result["constraint_pagination"] = constraint_paging
+        result["expressions"] = expression_page
+        result["expression_pagination"] = expression_paging
+    if detail_level == "full":
+        result["response_guidance"] = (
+            "Geometry and constraints are paged. Follow next_offset only while "
+            "diagnosing a specific index or expression binding."
+        )
+    return result
+
+
 def register_partdesign_tools(
     mcp: Any, get_bridge: Callable[[], Awaitable[Any]]
 ) -> None:
@@ -1304,6 +1372,11 @@ _result_ = {{
         sketch_name: str,
         operations: list[SketchConstraintOperation],
         doc_name: str | None = None,
+        detail_level: Literal["summary", "geometry", "constraints", "full"] = "summary",
+        geometry_offset: int = 0,
+        geometry_limit: int = 20,
+        constraint_offset: int = 0,
+        constraint_limit: int = 20,
     ) -> dict[str, Any]:
         """Apply constraint edits to one sketch in a single transaction.
 
@@ -1322,12 +1395,26 @@ _result_ = {{
             sketch_name: Name of the sketch to edit.
             operations: Ordered constraint operations.
             doc_name: Document containing the sketch. Uses active document if None.
+            detail_level: Compact ``summary`` by default. Request paged geometry,
+                constraints/expressions, or both (``full``) only for diagnosis.
+            geometry_offset: Zero-based geometry-page offset.
+            geometry_limit: Geometry-page size, maximum 100 records.
+            constraint_offset: Zero-based constraint/expression-page offset.
+            constraint_limit: Constraint/expression-page size, maximum 100.
 
         Returns:
-            Batch result with one entry per operation and final sketch diagnostics.
+            Batch result with operation results and compact final sketch status.
         """
         if not operations:
             raise ValueError("operations must contain at least one constraint edit")
+        if min(geometry_offset, constraint_offset) < 0:
+            raise ValueError(
+                "geometry_offset and constraint_offset must be non-negative"
+            )
+        if not 1 <= geometry_limit <= 100 or not 1 <= constraint_limit <= 100:
+            raise ValueError(
+                "geometry_limit and constraint_limit must be between 1 and 100"
+            )
         normalized_operations = [
             _SKETCH_CONSTRAINT_OPERATION_ADAPTER.validate_python(operation).model_dump()
             for operation in operations
@@ -1538,7 +1625,14 @@ _result_ = {{
 """
         result = await bridge.execute_python(code)
         if result.success:
-            return result.result
+            return _sketch_tool_response(
+                result.result,
+                detail_level,
+                geometry_offset,
+                geometry_limit,
+                constraint_offset,
+                constraint_limit,
+            )
         raise ValueError(result.error_traceback or "Edit sketch constraints failed")
 
     @mcp.tool()
@@ -4606,29 +4700,36 @@ _result_ = {{
     async def get_sketch_info(
         sketch_name: str,
         doc_name: str | None = None,
+        detail_level: Literal["summary", "geometry", "constraints", "full"] = "summary",
+        geometry_offset: int = 0,
+        geometry_limit: int = 20,
+        constraint_offset: int = 0,
+        constraint_limit: int = 20,
     ) -> dict[str, Any]:
-        """Get detailed information about a sketch.
+        """Inspect a sketch with compact defaults and paged detail records.
 
         Args:
             sketch_name: Name of the sketch.
             doc_name: Document containing the sketch. Uses active document if None.
+            detail_level: ``summary`` returns solver/profile status and counts;
+                ``geometry`` or ``constraints`` returns that paged section;
+                ``full`` returns both paged sections and can still be large.
+            geometry_offset: Zero-based geometry-page offset.
+            geometry_limit: Geometry-page size, maximum 100 records.
+            constraint_offset: Zero-based constraint/expression-page offset.
+            constraint_limit: Constraint/expression-page size, maximum 100.
 
         Returns:
-            Dictionary with sketch information:
-                - name: Sketch name
-                - geometry: Ordered geometry records with index, geometry type,
-                  construction state, start/end points, and type-specific data
-                - constraints: Ordered constraints with geometry references,
-                  datum, name, driving state, and attached expression
-                - expressions: Stable expression bindings. Constraint paths
-                  use ``Constraints[index]``; FreeCAD's original path is kept
-                  as ``source_path`` when it differs
-                - sketch_status: Structured dict containing:
-                    - geometry and constraint counts
-                    - solver status, solve code, and remaining DoF
-                    - closed/open profile state and open endpoints
-                    - unconstrained geometry plus actionable hints
+            Sketch status plus the explicitly requested, paged detail sections.
         """
+        if min(geometry_offset, constraint_offset) < 0:
+            raise ValueError(
+                "geometry_offset and constraint_offset must be non-negative"
+            )
+        if not 1 <= geometry_limit <= 100 or not 1 <= constraint_limit <= 100:
+            raise ValueError(
+                "geometry_limit and constraint_limit must be between 1 and 100"
+            )
         bridge = await get_bridge()
 
         code = f"""
@@ -4651,5 +4752,12 @@ _result_ = {{
 """
         result = await bridge.execute_python(code)
         if result.success:
-            return result.result
+            return _sketch_tool_response(
+                result.result,
+                detail_level,
+                geometry_offset,
+                geometry_limit,
+                constraint_offset,
+                constraint_limit,
+            )
         raise ValueError(result.error_traceback or "Get sketch info failed")

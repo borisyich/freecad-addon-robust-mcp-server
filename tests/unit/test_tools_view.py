@@ -179,8 +179,9 @@ class TestViewTools:
         result = await register_tools["get_screenshot"](corner_cross_size=0)
 
         assert result.isError is True
-        assert "corner_cross_size must be between 1 and 100" in (
-            result.structuredContent["error"]
+        assert (
+            "corner_cross_size must be between 1 and 100"
+            in (result.structuredContent["error"])
         )
         mock_bridge.get_screenshot.assert_not_called()
 
@@ -192,8 +193,9 @@ class TestViewTools:
         result = await register_tools["get_screenshot"](settle_time_seconds=11)
 
         assert result.isError is True
-        assert "settle_time_seconds must be between 0 and 10" in (
-            result.structuredContent["error"]
+        assert (
+            "settle_time_seconds must be between 0 and 10"
+            in (result.structuredContent["error"])
         )
         mock_bridge.get_screenshot.assert_not_called()
 
@@ -309,8 +311,12 @@ class TestViewTools:
         """workbench(action='list') should expose all available workbenches."""
         mock_bridge.get_workbenches = AsyncMock(
             return_value=[
-                WorkbenchInfo(name="PartDesignWorkbench", label="Part Design", is_active=True),
-                WorkbenchInfo(name="SketcherWorkbench", label="Sketcher", is_active=False),
+                WorkbenchInfo(
+                    name="PartDesignWorkbench", label="Part Design", is_active=True
+                ),
+                WorkbenchInfo(
+                    name="SketcherWorkbench", label="Sketcher", is_active=False
+                ),
             ]
         )
 
@@ -449,7 +455,6 @@ class TestViewTools:
         assert {"set_visual_properties", "workbench", "history"} <= set(register_tools)
         assert removed.isdisjoint(register_tools)
 
-
     @pytest.mark.asyncio
     async def test_set_camera_position(self, register_tools, mock_bridge):
         """set_camera_position should set camera location via execute_python."""
@@ -470,7 +475,48 @@ class TestViewTools:
 
         assert result["success"] is True
         mock_bridge.execute_python.assert_called_once()
+        code = mock_bridge.execute_python.call_args.args[0]
+        assert "view.setCameraType('Orthographic')" in code
+        assert 'FreeCAD.Rotation(right, up, backward, "ZXY")' in code
+        assert "cam.orientation.setValue(coin.SbRotation(*quaternion))" in code
 
+    @pytest.mark.asyncio
+    async def test_set_camera_supports_reproducible_orthographic_scale(
+        self, register_tools, mock_bridge
+    ):
+        mock_bridge.execute_python = AsyncMock(
+            return_value=ExecutionResult(
+                success=True,
+                result={"success": True, "orthographic_height": 120.0},
+                stdout="",
+                stderr="",
+                execution_time_ms=1.0,
+            )
+        )
+
+        result = await register_tools["set_camera_position"](
+            position=[0, -200, 0],
+            look_at=[0, 0, 0],
+            up_direction=[0, 0, 1],
+            projection="orthographic",
+            orthographic_height=120,
+        )
+
+        assert result["orthographic_height"] == 120.0
+        code = mock_bridge.execute_python.call_args.args[0]
+        assert "cam.height.setValue(float(120))" in code
+
+    @pytest.mark.asyncio
+    async def test_set_camera_rejects_conflicting_scale_controls(
+        self, register_tools, mock_bridge
+    ):
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            await register_tools["set_camera_position"](
+                position=[0, -100, 0],
+                fit_all=True,
+                orthographic_height=100,
+            )
+        mock_bridge.execute_python.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_list_parts_library(self, register_tools, mock_bridge):
@@ -674,5 +720,3 @@ class TestViewTools:
         ]
         assert namespace["_result_"]["source_document"] == "TargetDoc"
         assert namespace["_result_"]["source_object"] == "Box"
-
-

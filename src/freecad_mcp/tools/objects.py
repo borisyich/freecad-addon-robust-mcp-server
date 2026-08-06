@@ -8,13 +8,20 @@ import math
 from collections.abc import Awaitable, Callable
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    model_validator,
+)
 
 
 class _PrimitiveBase(BaseModel):
     """Strict base model for one concrete primitive contract."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
 
 class BoxPrimitive(_PrimitiveBase):
@@ -106,7 +113,7 @@ _PRIMITIVE_ADAPTER = TypeAdapter(PrimitiveSpec)
 
 
 class CoordinateRange(_PrimitiveBase):
-    """Optional center-point bounds used by semantic subshape selection."""
+    """Bounds for a face-area or edge-length centroid in global coordinates."""
 
     x_min: float | None = None
     x_max: float | None = None
@@ -134,17 +141,29 @@ class FaceSelectionCriteria(_PrimitiveBase):
     normal_tolerance_deg: float = Field(default=10.0, ge=0, le=180)
     area_min: float | None = Field(default=None, ge=0)
     area_max: float | None = Field(default=None, ge=0)
-    convexity: Literal["flat", "convex", "concave", "saddle", "unknown"] | None = (
-        None
-    )
+    convexity: Literal["flat", "convex", "concave", "saddle", "unknown"] | None = None
     adjacent_face_count_min: int | None = Field(default=None, ge=0)
     adjacent_face_count_max: int | None = Field(default=None, ge=0)
-    center: CoordinateRange | None = None
+    centroid_bounds: CoordinateRange | None = Field(
+        default=None,
+        validation_alias=AliasChoices("centroid_bounds", "center"),
+        description=(
+            "Global-coordinate bounds for the face surface-area centroid. "
+            "The legacy input name 'center' is accepted for compatibility."
+        ),
+    )
     sort_by: Literal[
-        "index", "area", "center_x", "center_y", "center_z"
+        "index",
+        "area",
+        "centroid_x",
+        "centroid_y",
+        "centroid_z",
+        "center_x",
+        "center_y",
+        "center_z",
     ] = "index"
     sort_order: Literal["asc", "desc"] = "asc"
-    limit: int = Field(default=20, ge=1, le=200)
+    limit: int | None = Field(default=None, ge=1, le=200)
 
     @model_validator(mode="after")
     def validate_ranges(self) -> "FaceSelectionCriteria":
@@ -180,12 +199,27 @@ class EdgeSelectionCriteria(_PrimitiveBase):
     adjacent_face_count_min: int | None = Field(default=None, ge=0)
     adjacent_face_count_max: int | None = Field(default=None, ge=0)
     adjacent_surface_types: list[str] | None = None
-    center: CoordinateRange | None = None
+    centroid_bounds: CoordinateRange | None = Field(
+        default=None,
+        validation_alias=AliasChoices("centroid_bounds", "center"),
+        description=(
+            "Global-coordinate bounds for the edge curve-length centroid. "
+            "The legacy input name 'center' is accepted for compatibility."
+        ),
+    )
     sort_by: Literal[
-        "index", "length", "radius", "center_x", "center_y", "center_z"
+        "index",
+        "length",
+        "radius",
+        "centroid_x",
+        "centroid_y",
+        "centroid_z",
+        "center_x",
+        "center_y",
+        "center_z",
     ] = "index"
     sort_order: Literal["asc", "desc"] = "asc"
-    limit: int = Field(default=20, ge=1, le=200)
+    limit: int | None = Field(default=None, ge=1, le=200)
 
     @model_validator(mode="after")
     def validate_ranges(self) -> "EdgeSelectionCriteria":
@@ -278,16 +312,16 @@ def _inside_range(value: Any, minimum: Any, maximum: Any) -> bool:
     )
 
 
-def _center_matches(
-    center: dict[str, Any] | None, bounds: CoordinateRange | None
+def _centroid_matches(
+    centroid: dict[str, Any] | None, bounds: CoordinateRange | None
 ) -> bool:
     if bounds is None:
         return True
-    if center is None:
+    if centroid is None:
         return False
     for axis in ("x", "y", "z"):
         if not _inside_range(
-            center.get(axis),
+            centroid.get(axis),
             getattr(bounds, f"{axis}_min"),
             getattr(bounds, f"{axis}_max"),
         ):
@@ -301,8 +335,10 @@ def _semantic_matches(
     """Filter enriched ``shape_info`` using typed semantic criteria."""
     faces = list(shape_info.get("faces") or [])
     face_by_name = {face.get("name"): face for face in faces}
-    source = faces if isinstance(criteria, FaceSelectionCriteria) else list(
-        shape_info.get("edges") or []
+    source = (
+        faces
+        if isinstance(criteria, FaceSelectionCriteria)
+        else list(shape_info.get("edges") or [])
     )
     matches: list[dict[str, Any]] = []
 
@@ -367,16 +403,17 @@ def _semantic_matches(
             criteria.adjacent_face_count_max,
         ):
             continue
-        if not _center_matches(item.get("center"), criteria.center):
+        centroid = item.get("centroid") or item.get("center")
+        if not _centroid_matches(centroid, criteria.centroid_bounds):
             continue
         matches.append(item)
 
     def sort_value(item: dict[str, Any]) -> tuple[bool, float]:
         if criteria.sort_by == "index":
             value = item.get("index")
-        elif criteria.sort_by.startswith("center_"):
+        elif criteria.sort_by.startswith(("center_", "centroid_")):
             axis = criteria.sort_by[-1]
-            value = (item.get("center") or {}).get(axis)
+            value = (item.get("centroid") or item.get("center") or {}).get(axis)
         else:
             value = item.get(criteria.sort_by)
         try:
@@ -391,7 +428,47 @@ def _semantic_matches(
         (missing if is_missing else present).append((value, item))
     present.sort(key=lambda pair: pair[0], reverse=criteria.sort_order == "desc")
     ordered = [item for _, item in present] + [item for _, item in missing]
-    return ordered[: criteria.limit]
+    return ordered
+
+
+def _page(
+    items: list[dict[str, Any]], offset: int, page_size: int
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Return one deterministic page plus navigation metadata."""
+    total = len(items)
+    page = items[offset : offset + page_size]
+    next_offset = offset + len(page) if offset + len(page) < total else None
+    return page, {
+        "offset": offset,
+        "page_size": page_size,
+        "returned": len(page),
+        "total": total,
+        "has_more": next_offset is not None,
+        "next_offset": next_offset,
+    }
+
+
+def _compact_subshape(item: dict[str, Any]) -> dict[str, Any]:
+    """Keep selection evidence useful without returning diagnostic topology."""
+    keys = (
+        "name",
+        "index",
+        "surface_type",
+        "curve_type",
+        "normal",
+        "direction",
+        "area",
+        "length",
+        "radius",
+        "centroid",
+        "centroid_kind",
+        "convexity",
+        "adjacent_faces",
+    )
+    result = {key: item[key] for key in keys if key in item}
+    if "centroid" not in result and item.get("center") is not None:
+        result["centroid"] = item["center"]
+    return result
 
 
 def _primitive_definition(spec: PrimitiveSpec) -> tuple[str, dict[str, Any]]:
@@ -487,43 +564,62 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
     async def inspect_object(
         object_name: str,
         doc_name: str | None = None,
-        include_properties: bool = False,
-        include_shape: bool = True,
+        detail_level: Literal["summary", "shape", "topology", "full"] = "summary",
+        face_offset: int = 0,
+        face_limit: int = 20,
+        edge_offset: int = 0,
+        edge_limit: int = 20,
+        include_properties: bool | None = None,
+        include_shape: bool | None = None,
     ) -> dict[str, Any]:
-        """Get detailed information about a FreeCAD object.
+        """Inspect an object with compact defaults and paged topology on demand.
 
         Args:
             object_name: Name of the object to inspect.
             doc_name: Document containing the object. Uses active document if None.
-            include_properties: Whether to include the full property-value map.
-                Prefer ``False`` for routine structural inspection and set it to
-                ``True`` only when exact properties are needed for diagnosis or
-                editing; full property output can be large.
-            include_shape: Whether to include shape geometry details.
+            detail_level: ``summary`` returns identity, links, and compact shape
+                metrics; ``shape`` returns only bounds, volume, area, validity,
+                and topology counts; ``topology`` adds paged face/edge records;
+                ``full`` also serializes every property. Request ``full`` only
+                after compact modes show that exact properties are necessary.
+            face_offset: Zero-based face-page offset for topology/full.
+            face_limit: Face-page size, from 1 to 100.
+            edge_offset: Zero-based edge-page offset for topology/full.
+            edge_limit: Edge-page size, from 1 to 100.
+            include_properties: Deprecated switch that selects full detail.
+            include_shape: Deprecated switch that can omit shape metrics.
 
         Returns:
-            Dictionary containing comprehensive object information:
-                - name, label, type_id: Object identity
-                - properties: Each property contains its FreeCAD type, group,
-                  status flags, and a structured JSON-safe value
-                - shape_info: Topology, validity, dimensions, mass center, and bounds;
-                  faces include surface type, normal, area, adjacency, and local
-                  convexity; edges include curve type, endpoints, length, and
-                  adjacent faces
-                - children, parents: Linked object names
-                - visibility: Current view visibility
-
-            Complex FreeCAD values are converted to semantic structures:
-            placements become position/rotation data, linked objects become
-            name/label/type_id references, quantities include value and unit,
-            and TopoShapes become geometry summaries instead of pointer strings.
+            A compact report by default. Topology/full include page metadata with
+            ``has_more`` and ``next_offset``. Large objects can still produce a
+            large response in ``full`` mode; keep page limits small.
         """
+        if min(face_offset, edge_offset) < 0:
+            raise ValueError("face_offset and edge_offset must be non-negative")
+        if not 1 <= face_limit <= 100 or not 1 <= edge_limit <= 100:
+            raise ValueError("face_limit and edge_limit must be between 1 and 100")
+
+        effective_detail = detail_level
+        if include_properties is True:
+            effective_detail = "full"
+        include_shape_value = include_shape is not False
+        include_topology = effective_detail in {"topology", "full"}
         try:
             bridge = await get_bridge()
-            obj = await bridge.get_object(object_name, doc_name)
+            obj = await bridge.get_object(
+                object_name,
+                doc_name,
+                include_properties=effective_detail == "full",
+                include_shape=include_shape_value,
+                include_topology=include_topology,
+                face_offset=face_offset,
+                face_limit=face_limit,
+                edge_offset=edge_offset,
+                edge_limit=edge_limit,
+            )
         except Exception as e:
             return {
-                "error": f"Failed to retrieve object '{object_name}' from FreeCAD: {str(e)}",
+                "error": f"Failed to retrieve object '{object_name}' from FreeCAD: {e!s}",
                 "success": False,
             }
 
@@ -531,6 +627,13 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
             return {"error": f"Object '{object_name}' not found", "success": False}
 
         # obj is an ObjectInfo dataclass returned by the bridge
+        if effective_detail == "shape":
+            return {
+                "object_name": obj.name,
+                "detail_level": "shape",
+                "shape_metrics": obj.shape_info,
+            }
+
         result: dict[str, Any] = {
             "name": obj.name,
             "label": obj.label,
@@ -538,18 +641,29 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
             "children": obj.children,
             "parents": obj.parents,
             "visibility": obj.visibility,
+            "detail_level": effective_detail,
         }
 
-        if include_properties:
+        if effective_detail == "full":
             properties = dict(obj.properties)
-            if include_shape and obj.shape_info is not None and "Shape" in properties:
+            if (
+                include_shape_value
+                and obj.shape_info is not None
+                and "Shape" in properties
+            ):
                 shape_property = dict(properties["Shape"])
                 shape_property["value"] = {"summary_ref": "shape_info"}
                 properties["Shape"] = shape_property
             result["properties"] = properties
 
-        if include_shape:
+        if include_shape_value:
             result["shape_info"] = obj.shape_info
+
+        if effective_detail in {"topology", "full"}:
+            result["response_guidance"] = (
+                "Use topology_pages.next_offset to request another page; use full "
+                "only for a specific property-level diagnosis."
+            )
 
         return result
 
@@ -558,6 +672,9 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
         object_name: str,
         criteria: SubshapeSelectionCriteria,
         doc_name: str | None = None,
+        detail_level: Literal["references", "summary", "full"] = "references",
+        offset: int = 0,
+        page_size: int = 20,
     ) -> dict[str, Any]:
         """Select faces or edges by semantic geometric criteria.
 
@@ -567,44 +684,74 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
         consumed by PartDesign tools.
 
         Face criteria can filter by surface type, representative oriented
-        normal, area, local convexity, adjacency count, and center position.
+        normal, area, local convexity, adjacency count, and centroid position.
         Edge criteria can filter by curve type, undirected line direction,
         length, radius, required adjacent surface types, adjacency count, and
-        center position. Every listed adjacent surface type must occur. Results
-        can be sorted by size or location and limited to the best candidates.
+        centroid position. Face centroids are surface-area centroids; edge
+        centroids are curve-length centroids. Every listed adjacent surface type
+        must occur. Results can be sorted by size or location.
 
         Args:
             object_name: Object whose Shape contains the target subshapes.
             criteria: Typed face or edge selection criteria.
             doc_name: Document containing the object. Uses active document if None.
+            detail_level: ``references`` (default) returns only FaceN/EdgeN names;
+                ``summary`` adds compact evidence; ``full`` adds complete topology
+                records and should be used only for a focused diagnosis.
+            offset: Zero-based output-page offset.
+            page_size: Output-page size, from 1 to 100.
 
         Returns:
-            Object identity, normalized criteria, match count, matching semantic
-            records, and a compact list of ``FaceN`` or ``EdgeN`` references.
+            Object identity, total match count, page metadata, and references.
         """
+        if offset < 0:
+            raise ValueError("offset must be non-negative")
+        if not 1 <= page_size <= 100:
+            raise ValueError("page_size must be between 1 and 100")
         normalized = (
             criteria
             if isinstance(criteria, (FaceSelectionCriteria, EdgeSelectionCriteria))
             else _SUBSHAPE_CRITERIA_ADAPTER.validate_python(criteria)
         )
         bridge = await get_bridge()
-        obj = await bridge.get_object(object_name, doc_name)
+        obj = await bridge.get_object(
+            object_name,
+            doc_name,
+            include_properties=False,
+            include_shape=True,
+            include_topology=True,
+            face_limit=None,
+            edge_limit=None,
+        )
         if not obj:
             raise ValueError(f"Object not found: {object_name!r}")
         shape_info = obj.shape_info
         if not isinstance(shape_info, dict) or shape_info.get("is_null") is True:
             raise ValueError(f"Object {object_name!r} has no usable Shape")
 
-        matches = _semantic_matches(shape_info, normalized)
-        return {
+        all_matches = _semantic_matches(shape_info, normalized)
+        if normalized.limit is not None:
+            all_matches = all_matches[: normalized.limit]
+        matches, pagination = _page(all_matches, offset, page_size)
+        response = {
             "object_name": obj.name,
             "object_label": obj.label,
             "kind": normalized.kind,
             "criteria": normalized.model_dump(exclude_none=True),
-            "match_count": len(matches),
+            "detail_level": detail_level,
+            "match_count": len(all_matches),
+            "pagination": pagination,
             "references": [item["name"] for item in matches],
-            "matches": matches,
         }
+        if detail_level == "summary":
+            response["matches"] = [_compact_subshape(item) for item in matches]
+        elif detail_level == "full":
+            response["matches"] = matches
+            response["response_guidance"] = (
+                "Full topology records are verbose; keep page_size small and page "
+                "only while resolving a specific ambiguous selection."
+            )
+        return response
 
     @mcp.tool()
     async def create_object(
