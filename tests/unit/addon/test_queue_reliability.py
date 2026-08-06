@@ -50,6 +50,29 @@ def test_report_view_error_turns_successful_exec_into_failure(monkeypatch):
     assert "Property 'A1' not found" in result["error_traceback"]
 
 
+def test_report_view_is_read_after_gui_events_are_flushed(monkeypatch):
+    """Queued Spreadsheet diagnostics must be visible before success is decided."""
+    plugin = MODULE.FreecadMCPPlugin(enable_xmlrpc=False)
+    state = {"flushed": False}
+
+    def report_text():
+        if state["flushed"]:
+            return "Spreadsheet: Invalid expression in cell A1\n"
+        return ""
+
+    def flush():
+        state["flushed"] = True
+
+    monkeypatch.setattr(plugin, "_get_report_view_text", report_text)
+    monkeypatch.setattr(plugin, "_flush_gui_events", flush)
+
+    result = plugin._execute_code_sync("_result_ = {'success': True}")
+
+    assert result["success"] is False
+    assert result["error_type"] == "FreeCADReportError"
+    assert "Invalid expression in cell A1" in result["error_traceback"]
+
+
 def test_report_view_non_error_message_does_not_fail(monkeypatch):
     """Informational Report View output must not make a request fail."""
     plugin = MODULE.FreecadMCPPlugin(enable_xmlrpc=False)
@@ -60,6 +83,7 @@ def test_report_view_non_error_message_does_not_fail(monkeypatch):
 
     assert result["success"] is True
     assert result["result"] == 42
+
 
 def test_report_view_delta_uses_only_new_text():
     """Old Report View errors must not poison later bridge requests."""
@@ -83,14 +107,22 @@ def test_report_view_delta_handles_trimmed_prefix():
 
 def test_report_view_errors_are_deduplicated():
     """Repeated recompute messages should produce one concise failure line."""
-    text = (
-        "10:00 <Exception> No profile linked\n"
-        "10:00 <Exception> No profile linked\n"
-    )
+    text = "10:00 <Exception> No profile linked\n10:00 <Exception> No profile linked\n"
 
     assert MODULE._extract_report_error_lines(text) == [
         "10:00 <Exception> No profile linked"
     ]
+
+
+def test_report_view_recognizes_spreadsheet_formula_errors_case_insensitively():
+    """Spreadsheet diagnostics should translate to FreeCADReportError evidence."""
+    assert MODULE._extract_report_error_lines(
+        "10:00 spreadsheet: invalid expression in B7\n"
+    ) == ["10:00 spreadsheet: invalid expression in B7"]
+    assert MODULE._extract_report_error_lines("10:00 ERR: division by zero\n") == [
+        "10:00 ERR: division by zero"
+    ]
+    assert MODULE._extract_report_error_lines("10:00 stderr: diagnostic\n") == []
 
 
 def test_report_view_delta_ignores_tiny_accidental_overlap():

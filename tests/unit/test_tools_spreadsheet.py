@@ -1103,6 +1103,86 @@ async def test_spreadsheet_apply_batch_uses_one_transaction_and_recompute() -> N
     assert result["cells_applied"] == 2
 
 
+def test_spreadsheet_runtime_detects_encoded_formula_errors() -> None:
+    """FreeCAD formula error strings must not be accepted as computed values."""
+    from freecad_mcp.tools.spreadsheet import SPREADSHEET_RUNTIME_HELPERS
+
+    namespace = {}
+    exec(SPREADSHEET_RUNTIME_HELPERS, namespace)  # noqa: S102
+    detect = namespace["_spreadsheet_formula_error"]
+
+    assert detect("A1", "=MissingAlias", "#ERR: Property not found") == (
+        "Spreadsheet formula failed in A1: #ERR: Property not found"
+    )
+    assert detect("B2", "=MissingAlias", "ERR: Property not found") == (
+        "Spreadsheet formula failed in B2: ERR: Property not found"
+    )
+    assert detect("A1", "42", "#ERR: literal text") is None
+    assert detect("A1", "=B1 * 2", 84) is None
+
+
+@pytest.mark.asyncio
+async def test_spreadsheet_apply_batch_rejects_false_success_payload() -> None:
+    """A truthy bridge payload with success=false must not escape as success."""
+    from freecad_mcp.bridge.base import ExecutionResult
+    from freecad_mcp.tools.spreadsheet import register_spreadsheet_tools
+
+    mcp = MagicMock()
+    registered = {}
+    mcp.tool = lambda: lambda fn: registered.setdefault(fn.__name__, fn) or fn
+    bridge = AsyncMock()
+    bridge.execute_python = AsyncMock(
+        return_value=ExecutionResult(
+            success=True,
+            result={"success": False, "error": "formula failed"},
+            stdout="",
+            stderr="",
+            execution_time_ms=1.0,
+        )
+    )
+
+    async def get_bridge():
+        return bridge
+
+    register_spreadsheet_tools(mcp, get_bridge)
+    with pytest.raises(ValueError, match="Failed to apply spreadsheet batch"):
+        await registered["spreadsheet_apply_batch"](
+            "Params", cells=[{"cell": "A1", "value": "=MissingAlias"}]
+        )
+
+
+@pytest.mark.asyncio
+async def test_spreadsheet_apply_batch_surfaces_report_view_failure() -> None:
+    """The tool must expose the bridge's Report View diagnostic to the client."""
+    from freecad_mcp.bridge.base import ExecutionResult
+    from freecad_mcp.tools.spreadsheet import register_spreadsheet_tools
+
+    mcp = MagicMock()
+    registered = {}
+    mcp.tool = lambda: lambda fn: registered.setdefault(fn.__name__, fn) or fn
+    bridge = AsyncMock()
+    bridge.execute_python = AsyncMock(
+        return_value=ExecutionResult(
+            success=False,
+            result=None,
+            stdout="",
+            stderr="Spreadsheet: Invalid expression in A1",
+            execution_time_ms=1.0,
+            error_type="FreeCADReportError",
+            error_traceback="FreeCAD Report View: Invalid expression in A1",
+        )
+    )
+
+    async def get_bridge():
+        return bridge
+
+    register_spreadsheet_tools(mcp, get_bridge)
+    with pytest.raises(ValueError, match="FreeCAD Report View"):
+        await registered["spreadsheet_apply_batch"](
+            "Params", cells=[{"cell": "A1", "value": "=MissingAlias"}]
+        )
+
+
 def test_spreadsheet_batch_models_reject_bad_cells_and_aliases() -> None:
     """Batch input validation should fail before a FreeCAD call."""
     from pydantic import ValidationError

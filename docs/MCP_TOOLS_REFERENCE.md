@@ -588,6 +588,12 @@ These do not duplicate the standalone Part tools: `create_regular_polygon` creat
 
 The result contains one entry per operation and the final sketch solver/profile
 status. Invalid operation payloads are rejected before FreeCAD is modified.
+`operations` is a discriminated union keyed by `op`, so MCP clients receive the
+required fields for each variant. Every operation that creates local sketch
+geometry accepts `construction=true`; compound operations apply it to every
+created segment. `add_arc` returns `point_indices` mapping the requested
+`start`, `end`, and `center` roles to Sketcher's point positions, avoiding
+assumptions when a FreeCAD build canonicalizes arc orientation.
 
 #### edit_sketch_constraints
 
@@ -657,6 +663,13 @@ edit_sketch_constraints(
 
 Use explicit units in constants inside expressions (`2 mm`, `15 deg`). The
 Spreadsheet alias itself may already carry units.
+
+All MCP fields named `constraint_index` are **zero-based**, matching
+`SketchObject.Constraints` and `Constraints[index]`. FreeCAD's GUI and solver
+messages often display one-based constraint numbers. Results therefore include
+both `constraint_index` and `constraint_number`; solver diagnostics expose
+`indices` (zero-based MCP values) and `numbers` (one-based GUI values). For
+example, GUI constraint 16 is deleted with `constraint_index=15`.
 
 #### get_sketch_info
 
@@ -762,7 +775,16 @@ pocket_sketch(
 ) -> dict
 ```
 
-`direction` is relative to the sketch normal and does not depend on GUI selection. `base_feature_name` is authoritative when supplied. Without it, the tool uses a valid preceding Body Tip when possible, then the nearest valid preceding single-solid feature. `type="UpToFace"` requires an explicit and prevalidated `up_to_face="Feature.FaceN"`; supplying that parameter for another type is rejected. The response reports `base_feature`, `base_selection`, global `effective_direction`, Shape/Tip evidence, and before/after volume diagnostics.
+`direction` is relative to the sketch normal and does not depend on GUI
+selection: `normal` cuts along the positive global sketch normal and `reversed`
+along the negative normal. The tool translates this to Pocket's inverted
+internal `Reversed` convention and reports the actual global
+`effective_direction`. `base_feature_name` is authoritative when supplied.
+Without it, the tool uses a valid preceding Body Tip when possible, then the
+nearest valid preceding single-solid feature. `type="UpToFace"` requires an
+explicit and prevalidated `up_to_face="Feature.FaceN"`; supplying that parameter
+for another type is rejected. The response reports `base_feature`,
+`base_selection`, Shape/Tip evidence, and before/after volume diagnostics.
 
 #### groove_sketch
 
@@ -1015,6 +1037,12 @@ Retries are idempotent, including aliases that already point to the requested
 cell. When a unitless Spreadsheet value is bound to an `App::PropertyAngle`
 such as `PartDesign::PolarPattern.Angle`, the generated expression multiplies
 the value by `1 deg`; a cell that already has an angle unit is bound directly.
+After recompute the batch verifies every updated formula. Encoded values such as
+`ERR:`, `#ERR`, `#REF!`, or an invalid-expression diagnostic cause rollback
+rather than a successful response. In GUI mode the bridge flushes posted Qt
+events before reading the per-request Report View delta; high-confidence Spreadsheet errors
+are returned as `FreeCADReportError` even when FreeCAD's Python API did not
+raise an exception.
 
 `spreadsheet_get_aliases` enumerates actual Spreadsheet cells (not ordinary
 FreeCAD object properties). `spreadsheet_clear_cell` is idempotent and reports

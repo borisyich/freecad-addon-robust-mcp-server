@@ -329,7 +329,9 @@ such as `horizontal`, `vertical`, `coincident`, `parallel`, `perpendicular`,
 `fix`, plus generic `add_constraint` and `delete_constraint`. Dimensional
 operations may include `constraint_name` and a Spreadsheet expression. Use
 `set_expression`/`clear_expression` with `constraint_index` to change existing
-bindings. The resulting number of Fix/Block constraints must never exceed 50% of
+bindings. `constraint_index` is zero-based; GUI/solver constraint numbers are
+one-based, and sketch results expose both forms. The resulting number of
+Fix/Block constraints must never exceed 50% of
 `GeometryCount`; use other constraints or delete existing fixes.
 
 For `create_hole`, use non-construction circles in a dedicated sketch attached
@@ -340,7 +342,9 @@ off-face cuts. `thread_type="ISO_FINE"` is supported; provide the exact fine
 
 For Spreadsheet-driven pattern angles, a unitless value such as `360` is bound
 as degrees. Prefer `spreadsheet_apply_batch` for atomic value/alias/binding
-updates; failed batches restore the affected cells, aliases, and expressions.""",
+updates; failed formulas and Report View expression errors are not successful
+results, and failed batches restore the affected cells, aliases, and
+expressions.""",
             "boolean": """# Boolean Operations Guidance
 
 ## Available Operations

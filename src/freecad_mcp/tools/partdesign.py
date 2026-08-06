@@ -8,7 +8,7 @@ comprehensive PartDesign coverage.
 """
 
 from collections.abc import Awaitable, Callable, Mapping
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
@@ -20,37 +20,55 @@ from freecad_mcp.tools._freecad_runtime_helpers import (
 )
 
 
-class SketchGeometryOperation(BaseModel):
-    """One atomic geometry edit for :func:`edit_sketch_geometry`."""
+class _SketchOperation(BaseModel):
+    """Strict base for discriminated Sketcher batch operations."""
 
     model_config = ConfigDict(extra="forbid")
 
-    op: Literal[
-        "add_rectangle",
-        "add_circle",
-        "add_line",
-        "add_arc",
-        "add_point",
-        "add_ellipse",
-        "add_regular_polygon",
-        "add_polyline",
-        "add_slot",
-        "add_bspline",
-        "add_external_geometry",
-        "delete_geometry",
-        "toggle_construction",
-    ]
-    x: float | None = None
-    y: float | None = None
-    width: float | None = None
-    height: float | None = None
-    center_x: float | None = None
-    center_y: float | None = None
-    radius: float | None = None
+
+class AddRectangleOperation(_SketchOperation):
+    """Add an axis-aligned rectangle."""
+
+    op: Literal["add_rectangle"]
+    x: float
+    y: float
+    width: float = Field(gt=0)
+    height: float = Field(gt=0)
+    construction: bool = False
+
+
+class AddCircleOperation(_SketchOperation):
+    """Add a circle."""
+
+    op: Literal["add_circle"]
+    center_x: float
+    center_y: float
+    radius: float = Field(gt=0)
+    construction: bool = False
+
+
+class AddLineOperation(_SketchOperation):
+    """Add a line segment."""
+
+    op: Literal["add_line"]
+    x1: float
+    y1: float
+    x2: float
+    y2: float
+    construction: bool = False
+
+
+class AddArcOperation(_SketchOperation):
+    """Add a circular arc or a tangent fillet."""
+
+    op: Literal["add_arc"]
     arc_mode: Literal["center_angles", "endpoints_radius", "tangent_fillet"] = (
         "center_angles"
     )
     arc_side: Literal["left", "right"] = "left"
+    center_x: float | None = None
+    center_y: float | None = None
+    radius: float = Field(gt=0)
     x1: float | None = None
     y1: float | None = None
     x2: float | None = None
@@ -59,124 +77,163 @@ class SketchGeometryOperation(BaseModel):
     line2_index: int | None = None
     start_angle: float | None = None
     end_angle: float | None = None
-    major_radius: float | None = None
-    minor_radius: float | None = None
-    sides: int = 6
-    center1_x: float | None = None
-    center1_y: float | None = None
-    center2_x: float | None = None
-    center2_y: float | None = None
-    points: list[list[float]] | None = None
-    closed: bool = False
     construction: bool = False
-    object_name: str | None = None
-    element: str | None = None
-    geometry_index: int | None = None
 
     @model_validator(mode="after")
-    def validate_operation(self) -> "SketchGeometryOperation":
-        """Reject incomplete or nonsensical operation payloads."""
-        required_by_op = {
-            "add_rectangle": ("x", "y", "width", "height"),
-            "add_circle": ("center_x", "center_y", "radius"),
-            "add_line": ("x1", "y1", "x2", "y2"),
-            "add_point": ("x", "y"),
-            "add_ellipse": (
-                "center_x",
-                "center_y",
-                "major_radius",
-                "minor_radius",
-            ),
-            "add_regular_polygon": ("center_x", "center_y", "radius"),
-            "add_polyline": ("points",),
-            "add_slot": (
-                "center1_x",
-                "center1_y",
-                "center2_x",
-                "center2_y",
-                "radius",
-            ),
-            "add_bspline": ("points",),
-            "add_external_geometry": ("object_name", "element"),
-            "delete_geometry": ("geometry_index",),
-            "toggle_construction": ("geometry_index",),
-        }
-        required_fields = required_by_op.get(self.op, ())
-        if self.op == "add_arc":
-            required_fields = {
-                "center_angles": (
-                    "center_x",
-                    "center_y",
-                    "radius",
-                    "start_angle",
-                    "end_angle",
-                ),
-                "endpoints_radius": ("x1", "y1", "x2", "y2", "radius"),
-                "tangent_fillet": ("line1_index", "line2_index", "radius"),
-            }[self.arc_mode]
-
-        missing = [
-            field for field in required_fields if getattr(self, field) is None
-        ]
+    def validate_arc(self) -> "AddArcOperation":
+        """Reject incomplete or geometrically impossible arc definitions."""
+        required_fields = {
+            "center_angles": ("center_x", "center_y", "start_angle", "end_angle"),
+            "endpoints_radius": ("x1", "y1", "x2", "y2"),
+            "tangent_fillet": ("line1_index", "line2_index"),
+        }[self.arc_mode]
+        missing = [field for field in required_fields if getattr(self, field) is None]
         if missing:
-            raise ValueError(f"{self.op} requires: {', '.join(missing)}")
-
-        positive_fields = {
-            "add_rectangle": ("width", "height"),
-            "add_circle": ("radius",),
-            "add_arc": ("radius",),
-            "add_ellipse": ("major_radius", "minor_radius"),
-            "add_regular_polygon": ("radius",),
-            "add_slot": ("radius",),
-        }
-        for field in positive_fields.get(self.op, ()):
-            value = getattr(self, field)
-            if value is not None and value <= 0:
-                raise ValueError(f"{field} must be positive")
-
-        if self.op == "add_regular_polygon" and self.sides < 3:
-            raise ValueError("add_regular_polygon requires sides >= 3")
-        if self.op == "add_polyline":
-            points = self.points or []
-            minimum = 3 if self.closed else 2
-            if len(points) < minimum or any(len(point) != 2 for point in points):
-                raise ValueError(
-                    f"add_polyline requires at least {minimum} [x, y] points"
-                )
-            if any(
-                points[index] == points[index + 1]
-                for index in range(len(points) - 1)
-            ):
-                raise ValueError("add_polyline contains consecutive duplicate points")
-            if self.closed and points[0] == points[-1]:
-                raise ValueError(
-                    "For a closed polyline, omit the repeated final point; "
-                    "closed=true creates the closing segment"
-                )
-        if self.op == "add_bspline":
-            points = self.points or []
-            if len(points) < 2 or any(len(point) != 2 for point in points):
-                raise ValueError("add_bspline requires at least two [x, y] points")
-        if self.op == "add_arc" and self.arc_mode == "endpoints_radius":
-            assert self.x1 is not None and self.y1 is not None
-            assert self.x2 is not None and self.y2 is not None
-            assert self.radius is not None
-            chord = ((self.x2 - self.x1) ** 2 + (self.y2 - self.y1) ** 2) ** 0.5
+            raise ValueError(f"add_arc requires: {', '.join(missing)}")
+        if self.arc_mode == "center_angles":
+            start_angle = cast(float, self.start_angle)
+            end_angle = cast(float, self.end_angle)
+            if abs(end_angle - start_angle) <= 1e-12:
+                raise ValueError("add_arc angles must describe a non-zero sweep")
+        if self.arc_mode == "endpoints_radius":
+            x1 = cast(float, self.x1)
+            y1 = cast(float, self.y1)
+            x2 = cast(float, self.x2)
+            y2 = cast(float, self.y2)
+            chord = ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5
             if chord <= 1e-12:
                 raise ValueError("add_arc endpoints must be different")
             if chord > 2 * self.radius + 1e-9:
                 raise ValueError(
                     "add_arc endpoints are farther apart than the diameter"
                 )
-        if self.op == "add_arc" and self.arc_mode == "tangent_fillet":
-            assert self.line1_index is not None and self.line2_index is not None
-            if self.line1_index < 0 or self.line2_index < 0:
+        if self.arc_mode == "tangent_fillet":
+            line1_index = cast(int, self.line1_index)
+            line2_index = cast(int, self.line2_index)
+            if line1_index < 0 or line2_index < 0:
                 raise ValueError("line1_index and line2_index must be non-negative")
-            if self.line1_index == self.line2_index:
+            if line1_index == line2_index:
                 raise ValueError("tangent_fillet requires two different line indices")
-        if self.geometry_index is not None and self.geometry_index < 0:
-            raise ValueError("geometry_index must be non-negative")
         return self
+
+
+class AddPointOperation(_SketchOperation):
+    """Add a point."""
+
+    op: Literal["add_point"]
+    x: float
+    y: float
+    construction: bool = False
+
+
+class AddEllipseOperation(_SketchOperation):
+    """Add an ellipse."""
+
+    op: Literal["add_ellipse"]
+    center_x: float
+    center_y: float
+    major_radius: float = Field(gt=0)
+    minor_radius: float = Field(gt=0)
+    construction: bool = False
+
+
+class AddRegularPolygonOperation(_SketchOperation):
+    """Add a regular polygon."""
+
+    op: Literal["add_regular_polygon"]
+    center_x: float
+    center_y: float
+    radius: float = Field(gt=0)
+    sides: int = Field(default=6, ge=3)
+    construction: bool = False
+
+
+class AddPolylineOperation(_SketchOperation):
+    """Add an open or closed polyline."""
+
+    op: Literal["add_polyline"]
+    points: list[list[float]]
+    closed: bool = False
+    construction: bool = False
+
+    @model_validator(mode="after")
+    def validate_points(self) -> "AddPolylineOperation":
+        """Validate point count, shape and duplication."""
+        minimum = 3 if self.closed else 2
+        if len(self.points) < minimum or any(len(point) != 2 for point in self.points):
+            raise ValueError(f"add_polyline requires at least {minimum} [x, y] points")
+        if any(
+            self.points[index] == self.points[index + 1]
+            for index in range(len(self.points) - 1)
+        ):
+            raise ValueError("add_polyline contains consecutive duplicate points")
+        if self.closed and self.points[0] == self.points[-1]:
+            raise ValueError(
+                "For a closed polyline, omit the repeated final point; "
+                "closed=true creates the closing segment"
+            )
+        return self
+
+
+class AddSlotOperation(_SketchOperation):
+    """Add a straight slot."""
+
+    op: Literal["add_slot"]
+    center1_x: float
+    center1_y: float
+    center2_x: float
+    center2_y: float
+    radius: float = Field(gt=0)
+    construction: bool = False
+
+
+class AddBSplineOperation(_SketchOperation):
+    """Add an interpolating B-spline."""
+
+    op: Literal["add_bspline"]
+    points: list[list[float]]
+    closed: bool = False
+    construction: bool = False
+
+    @model_validator(mode="after")
+    def validate_points(self) -> "AddBSplineOperation":
+        """Validate B-spline interpolation points."""
+        if len(self.points) < 2 or any(len(point) != 2 for point in self.points):
+            raise ValueError("add_bspline requires at least two [x, y] points")
+        return self
+
+
+class AddExternalGeometryOperation(_SketchOperation):
+    """Add a reference to external geometry."""
+
+    op: Literal["add_external_geometry"]
+    object_name: str = Field(min_length=1)
+    element: str = Field(min_length=1)
+
+
+class GeometryIndexOperation(_SketchOperation):
+    """Delete geometry or toggle its construction state."""
+
+    op: Literal["delete_geometry", "toggle_construction"]
+    geometry_index: int = Field(ge=0)
+
+
+SketchGeometryOperation = Annotated[
+    AddRectangleOperation
+    | AddCircleOperation
+    | AddLineOperation
+    | AddArcOperation
+    | AddPointOperation
+    | AddEllipseOperation
+    | AddRegularPolygonOperation
+    | AddPolylineOperation
+    | AddSlotOperation
+    | AddBSplineOperation
+    | AddExternalGeometryOperation
+    | GeometryIndexOperation,
+    Field(discriminator="op"),
+]
+_SKETCH_GEOMETRY_OPERATION_ADAPTER = TypeAdapter(SketchGeometryOperation)
 
 
 class LinearMultiTransform(BaseModel):
@@ -249,71 +306,22 @@ SketchSupport = Annotated[
 _SKETCH_SUPPORT_ADAPTER = TypeAdapter(SketchSupport)
 
 
-class SketchConstraintOperation(BaseModel):
-    """One atomic constraint edit for :func:`edit_sketch_constraints`."""
+class AddConstraintOperation(_SketchOperation):
+    """Add a generic Sketcher constraint."""
 
-    model_config = ConfigDict(extra="forbid")
-
-    op: Literal[
-        "add_constraint",
-        "horizontal",
-        "vertical",
-        "coincident",
-        "parallel",
-        "perpendicular",
-        "tangent",
-        "equal",
-        "distance",
-        "distance_x",
-        "distance_y",
-        "radius",
-        "angle",
-        "fix",
-        "set_expression",
-        "clear_expression",
-        "delete_constraint",
-    ]
-    constraint_type: str | None = None
-    geometry1: int | None = None
+    op: Literal["add_constraint"]
+    constraint_type: str = Field(min_length=1)
+    geometry1: int
     point1: int = -1
     geometry2: int = -2
     point2: int = -1
     value: float | None = None
-    constraint_index: int | None = None
     expression: str | None = None
     constraint_name: str | None = None
 
     @model_validator(mode="after")
-    def validate_operation(self) -> "SketchConstraintOperation":
-        """Reject incomplete constraint operations before touching FreeCAD."""
-        if self.op in {"delete_constraint", "set_expression", "clear_expression"}:
-            if self.constraint_index is None or self.constraint_index < 0:
-                raise ValueError(
-                    f"{self.op} requires a non-negative constraint_index"
-                )
-            if self.op == "set_expression" and not (self.expression or "").strip():
-                raise ValueError("set_expression requires expression")
-            return self
-
-        if self.geometry1 is None:
-            raise ValueError(f"{self.op} requires geometry1")
-        if self.op == "add_constraint" and not self.constraint_type:
-            raise ValueError("add_constraint requires constraint_type")
-        if (
-            self.op
-            in {
-                "coincident",
-                "parallel",
-                "perpendicular",
-                "tangent",
-                "equal",
-            }
-            and self.geometry2 < 0
-        ):
-            raise ValueError(f"{self.op} requires geometry2")
-        if self.op in {"distance", "distance_x", "distance_y", "radius", "angle"}:
-            if self.value is None:
-                raise ValueError(f"{self.op} requires value")
+    def validate_generic_constraint(self) -> "AddConstraintOperation":
+        """Validate generic constraint metadata."""
         if self.constraint_name is not None and not self.constraint_name.strip():
             raise ValueError("constraint_name must not be empty")
         if self.expression is not None:
@@ -327,22 +335,87 @@ class SketchConstraintOperation(BaseModel):
                 "Diameter",
                 "Angle",
             }
-            if self.op == "add_constraint":
-                if self.constraint_type not in dimensional_types:
-                    raise ValueError(
-                        "expression is supported only for dimensional constraints"
-                    )
-            elif self.op not in {
-                "distance",
-                "distance_x",
-                "distance_y",
-                "radius",
-                "angle",
-            }:
+            if self.constraint_type not in dimensional_types:
                 raise ValueError(
                     "expression is supported only for dimensional constraints"
                 )
         return self
+
+
+class UnaryConstraintOperation(_SketchOperation):
+    """Add a constraint that targets one geometry item."""
+
+    op: Literal["horizontal", "vertical", "fix"]
+    geometry1: int
+    point1: int = -1
+    constraint_name: str | None = None
+
+
+class BinaryConstraintOperation(_SketchOperation):
+    """Add a relation between two geometry items or points."""
+
+    op: Literal["coincident", "parallel", "perpendicular", "tangent", "equal"]
+    geometry1: int
+    point1: int = -1
+    geometry2: int
+    point2: int = -1
+    constraint_name: str | None = None
+
+
+class DimensionalConstraintOperation(_SketchOperation):
+    """Add a dimensional constraint, optionally bound to an expression."""
+
+    op: Literal["distance", "distance_x", "distance_y", "radius", "angle"]
+    geometry1: int
+    point1: int = -1
+    geometry2: int = -2
+    point2: int = -1
+    value: float
+    expression: str | None = None
+    constraint_name: str | None = None
+
+    @model_validator(mode="after")
+    def validate_metadata(self) -> "DimensionalConstraintOperation":
+        """Reject empty names and expressions."""
+        if self.constraint_name is not None and not self.constraint_name.strip():
+            raise ValueError("constraint_name must not be empty")
+        if self.expression is not None and not self.expression.strip():
+            raise ValueError("expression must not be empty; use clear_expression")
+        return self
+
+
+class SetConstraintExpressionOperation(_SketchOperation):
+    """Set an expression on an existing zero-based constraint index."""
+
+    op: Literal["set_expression"]
+    constraint_index: int = Field(ge=0)
+    expression: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_expression(self) -> "SetConstraintExpressionOperation":
+        """Reject whitespace-only expressions."""
+        if not self.expression.strip():
+            raise ValueError("set_expression requires expression")
+        return self
+
+
+class ConstraintIndexOperation(_SketchOperation):
+    """Clear an expression or delete a zero-based constraint index."""
+
+    op: Literal["clear_expression", "delete_constraint"]
+    constraint_index: int = Field(ge=0)
+
+
+SketchConstraintOperation = Annotated[
+    AddConstraintOperation
+    | UnaryConstraintOperation
+    | BinaryConstraintOperation
+    | DimensionalConstraintOperation
+    | SetConstraintExpressionOperation
+    | ConstraintIndexOperation,
+    Field(discriminator="op"),
+]
+_SKETCH_CONSTRAINT_OPERATION_ADAPTER = TypeAdapter(SketchConstraintOperation)
 
 
 def register_partdesign_tools(
@@ -464,9 +537,7 @@ def register_partdesign_tools(
                 )
         return normalized
 
-    def require_valid_feature_result(
-        payload: Any, operation: str
-    ) -> dict[str, Any]:
+    def require_valid_feature_result(payload: Any, operation: str) -> dict[str, Any]:
         """Enforce the host-side contract for neutral PartDesign features."""
         normalized = _validation_payload(payload, operation)
         _validate_optional_common_evidence(normalized, operation)
@@ -616,6 +687,8 @@ _result_ = {{
                 - support_kind: Typed selector kind
         """
         bridge = await get_bridge()
+        support_reference: str
+        support_kind: str
         if support is not None:
             normalized_support = (
                 support
@@ -824,11 +897,7 @@ _result_ = {{
         if not operations:
             raise ValueError("operations must contain at least one geometry edit")
         normalized_operations = [
-            (
-                operation
-                if isinstance(operation, SketchGeometryOperation)
-                else SketchGeometryOperation.model_validate(operation)
-            ).model_dump()
+            _SKETCH_GEOMETRY_OPERATION_ADAPTER.validate_python(operation).model_dump()
             for operation in operations
         ]
         bridge = await get_bridge()
@@ -860,15 +929,16 @@ try:
             y = operation["y"]
             width = operation["width"]
             height = operation["height"]
+            construction = bool(operation["construction"])
             first_idx = sketch.GeometryCount
-            sketch.addGeometry(Part.LineSegment(FreeCAD.Vector(x, y, 0), FreeCAD.Vector(x + width, y, 0)), False)
-            sketch.addGeometry(Part.LineSegment(FreeCAD.Vector(x + width, y, 0), FreeCAD.Vector(x + width, y + height, 0)), False)
-            sketch.addGeometry(Part.LineSegment(FreeCAD.Vector(x + width, y + height, 0), FreeCAD.Vector(x, y + height, 0)), False)
-            sketch.addGeometry(Part.LineSegment(FreeCAD.Vector(x, y + height, 0), FreeCAD.Vector(x, y, 0)), False)
+            sketch.addGeometry(Part.LineSegment(FreeCAD.Vector(x, y, 0), FreeCAD.Vector(x + width, y, 0)), construction)
+            sketch.addGeometry(Part.LineSegment(FreeCAD.Vector(x + width, y, 0), FreeCAD.Vector(x + width, y + height, 0)), construction)
+            sketch.addGeometry(Part.LineSegment(FreeCAD.Vector(x + width, y + height, 0), FreeCAD.Vector(x, y + height, 0)), construction)
+            sketch.addGeometry(Part.LineSegment(FreeCAD.Vector(x, y + height, 0), FreeCAD.Vector(x, y, 0)), construction)
             for offset in range(4):
                 next_offset = (offset + 1) % 4
                 sketch.addConstraint(Sketcher.Constraint("Coincident", first_idx + offset, 2, first_idx + next_offset, 1))
-            operation_results.append({{"op": op, "geometry_indices": list(range(first_idx, first_idx + 4))}})
+            operation_results.append({{"op": op, "geometry_indices": list(range(first_idx, first_idx + 4)), "construction": construction}})
 
         elif op == "add_circle":
             idx = sketch.addGeometry(
@@ -877,9 +947,9 @@ try:
                     FreeCAD.Vector(0, 0, 1),
                     operation["radius"],
                 ),
-                False,
+                bool(operation["construction"]),
             )
-            operation_results.append({{"op": op, "geometry_index": idx}})
+            operation_results.append({{"op": op, "geometry_index": idx, "construction": bool(operation["construction"])}})
 
         elif op == "add_line":
             idx = sketch.addGeometry(
@@ -889,7 +959,11 @@ try:
                 ),
                 bool(operation["construction"]),
             )
-            operation_results.append({{"op": op, "geometry_index": idx}})
+            operation_results.append({{
+                "op": op,
+                "geometry_index": idx,
+                "construction": bool(operation["construction"]),
+            }})
 
         elif op == "add_arc":
             arc_mode = operation["arc_mode"]
@@ -904,11 +978,34 @@ try:
                     math.radians(operation["start_angle"]),
                     math.radians(operation["end_angle"]),
                 )
-                idx = sketch.addGeometry(arc, False)
+                idx = sketch.addGeometry(arc, bool(operation["construction"]))
+                requested_start = FreeCAD.Vector(
+                    operation["center_x"] + operation["radius"] * math.cos(math.radians(operation["start_angle"])),
+                    operation["center_y"] + operation["radius"] * math.sin(math.radians(operation["start_angle"])),
+                    0,
+                )
+                requested_end = FreeCAD.Vector(
+                    operation["center_x"] + operation["radius"] * math.cos(math.radians(operation["end_angle"])),
+                    operation["center_y"] + operation["radius"] * math.sin(math.radians(operation["end_angle"])),
+                    0,
+                )
+                actual_start = sketch.getPoint(idx, 1)
+                actual_end = sketch.getPoint(idx, 2)
+                direct_error = (actual_start - requested_start).Length + (actual_end - requested_end).Length
+                reverse_error = (actual_start - requested_end).Length + (actual_end - requested_start).Length
+                if min(direct_error, reverse_error) > 1e-7:
+                    raise ValueError("FreeCAD created an arc with unexpected endpoints")
+                point_indices = (
+                    {{"start": 1, "end": 2, "center": 3}}
+                    if direct_error <= reverse_error
+                    else {{"start": 2, "end": 1, "center": 3}}
+                )
                 operation_results.append({{
                     "op": op,
                     "arc_mode": arc_mode,
                     "geometry_index": idx,
+                    "construction": bool(operation["construction"]),
+                    "point_indices": point_indices,
                 }})
             elif arc_mode == "endpoints_radius":
                 start = FreeCAD.Vector(operation["x1"], operation["y1"], 0)
@@ -931,13 +1028,29 @@ try:
                 )
                 center = midpoint - left_normal * (side_sign * center_offset)
                 arc_midpoint = center + left_normal * (side_sign * radius)
-                idx = sketch.addGeometry(Part.Arc(start, arc_midpoint, end), False)
+                idx = sketch.addGeometry(
+                    Part.Arc(start, arc_midpoint, end),
+                    bool(operation["construction"]),
+                )
+                actual_start = sketch.getPoint(idx, 1)
+                actual_end = sketch.getPoint(idx, 2)
+                direct_error = (actual_start - start).Length + (actual_end - end).Length
+                reverse_error = (actual_start - end).Length + (actual_end - start).Length
+                if min(direct_error, reverse_error) > 1e-7:
+                    raise ValueError("FreeCAD created an arc with unexpected endpoints")
+                point_indices = (
+                    {{"start": 1, "end": 2, "center": 3}}
+                    if direct_error <= reverse_error
+                    else {{"start": 2, "end": 1, "center": 3}}
+                )
                 operation_results.append({{
                     "op": op,
                     "arc_mode": arc_mode,
                     "arc_side": operation["arc_side"],
                     "geometry_index": idx,
                     "center": [float(center.x), float(center.y)],
+                    "construction": bool(operation["construction"]),
+                    "point_indices": point_indices,
                 }})
             elif arc_mode == "tangent_fillet":
                 line1_index = operation["line1_index"]
@@ -984,6 +1097,9 @@ try:
                         "check line intersection and radius"
                     )
                 created_indices = list(range(before_count, after_count))
+                if operation["construction"]:
+                    for created_index in created_indices:
+                        sketch.toggleConstruction(created_index)
                 operation_results.append({{
                     "op": op,
                     "arc_mode": arc_mode,
@@ -991,6 +1107,7 @@ try:
                     "geometry_indices": created_indices,
                     "trimmed_line_indices": [line1_index, line2_index],
                     "radius": float(operation["radius"]),
+                    "construction": bool(operation["construction"]),
                 }})
             else:
                 raise ValueError(f"Unsupported add_arc arc_mode: {{arc_mode!r}}")
@@ -998,9 +1115,9 @@ try:
         elif op == "add_point":
             idx = sketch.addGeometry(
                 Part.Point(FreeCAD.Vector(operation["x"], operation["y"], 0)),
-                False,
+                bool(operation["construction"]),
             )
-            operation_results.append({{"op": op, "geometry_index": idx}})
+            operation_results.append({{"op": op, "geometry_index": idx, "construction": bool(operation["construction"])}})
 
         elif op == "add_ellipse":
             ellipse = Part.Ellipse(
@@ -1008,8 +1125,8 @@ try:
                 operation["major_radius"],
                 operation["minor_radius"],
             )
-            idx = sketch.addGeometry(ellipse, False)
-            operation_results.append({{"op": op, "geometry_index": idx}})
+            idx = sketch.addGeometry(ellipse, bool(operation["construction"]))
+            operation_results.append({{"op": op, "geometry_index": idx, "construction": bool(operation["construction"])}})
 
         elif op == "add_regular_polygon":
             first_idx = sketch.GeometryCount
@@ -1040,7 +1157,7 @@ try:
                         1,
                     )
                 )
-            operation_results.append({{"op": op, "geometry_indices": list(range(first_idx, first_idx + sides))}})
+            operation_results.append({{"op": op, "geometry_indices": list(range(first_idx, first_idx + sides)), "construction": bool(operation["construction"])}})
 
         elif op == "add_polyline":
             points = [FreeCAD.Vector(point[0], point[1], 0) for point in operation["points"]]
@@ -1075,6 +1192,7 @@ try:
                 "op": op,
                 "geometry_indices": list(range(first_idx, first_idx + segment_count)),
                 "closed": bool(operation["closed"]),
+                "construction": bool(operation["construction"]),
             }})
 
         elif op == "add_slot":
@@ -1098,18 +1216,18 @@ try:
                     angle,
                     angle + math.pi,
                 ),
-                False,
+                bool(operation["construction"]),
             )
-            sketch.addGeometry(Part.LineSegment(point2, point3), False)
+            sketch.addGeometry(Part.LineSegment(point2, point3), bool(operation["construction"]))
             sketch.addGeometry(
                 Part.ArcOfCircle(
                     Part.Circle(center2, FreeCAD.Vector(0, 0, 1), radius),
                     angle + math.pi,
                     angle + 2 * math.pi,
                 ),
-                False,
+                bool(operation["construction"]),
             )
-            sketch.addGeometry(Part.LineSegment(point4, point1), False)
+            sketch.addGeometry(Part.LineSegment(point4, point1), bool(operation["construction"]))
             for offset in range(4):
                 sketch.addConstraint(
                     Sketcher.Constraint(
@@ -1120,7 +1238,7 @@ try:
                         1,
                     )
                 )
-            operation_results.append({{"op": op, "geometry_indices": list(range(first_idx, first_idx + 4))}})
+            operation_results.append({{"op": op, "geometry_indices": list(range(first_idx, first_idx + 4)), "construction": bool(operation["construction"])}})
 
         elif op == "add_bspline":
             vectors = [FreeCAD.Vector(point[0], point[1], 0) for point in operation["points"]]
@@ -1129,8 +1247,8 @@ try:
                 bspline.interpolate(vectors, PeriodicFlag=True)
             else:
                 bspline.interpolate(vectors)
-            idx = sketch.addGeometry(bspline, False)
-            operation_results.append({{"op": op, "geometry_index": idx}})
+            idx = sketch.addGeometry(bspline, bool(operation["construction"]))
+            operation_results.append({{"op": op, "geometry_index": idx, "construction": bool(operation["construction"])}})
 
         elif op == "add_external_geometry":
             referenced_object = doc.getObject(operation["object_name"])
@@ -1211,11 +1329,7 @@ _result_ = {{
         if not operations:
             raise ValueError("operations must contain at least one constraint edit")
         normalized_operations = [
-            (
-                operation
-                if isinstance(operation, SketchConstraintOperation)
-                else SketchConstraintOperation.model_validate(operation)
-            ).model_dump()
+            _SKETCH_CONSTRAINT_OPERATION_ADAPTER.validate_python(operation).model_dump()
             for operation in operations
         ]
         bridge = await get_bridge()
@@ -1240,10 +1354,17 @@ try:
     for operation in operations:
         op = operation["op"]
         if op == "delete_constraint":
-            sketch.delConstraint(operation["constraint_index"])
+            constraint_index = operation["constraint_index"]
+            if constraint_index >= int(sketch.ConstraintCount):
+                raise ValueError(
+                    f"Constraint index out of range: {{constraint_index}}; "
+                    "constraint_index is zero-based"
+                )
+            sketch.delConstraint(constraint_index)
             operation_results.append({{
                 "op": op,
-                "deleted_constraint_index": operation["constraint_index"],
+                "deleted_constraint_index": constraint_index,
+                "deleted_constraint_number": constraint_index + 1,
             }})
             continue
         if op in ["set_expression", "clear_expression"]:
@@ -1276,6 +1397,7 @@ try:
             operation_results.append({{
                 "op": op,
                 "constraint_index": constraint_index,
+                "constraint_number": constraint_index + 1,
                 "expression_path": expression_path,
                 "expression": expression,
             }})
@@ -1297,17 +1419,17 @@ try:
             "fix": "Block",
         }}
         constraint_type = (
-            operation["constraint_type"]
+            operation.get("constraint_type")
             if op == "add_constraint"
             else constraint_types[op]
         )
         geometry1 = operation["geometry1"]
-        point1 = operation["point1"]
-        geometry2 = operation["geometry2"]
-        point2 = operation["point2"]
-        value = operation["value"]
-        expression = operation["expression"]
-        constraint_name = operation["constraint_name"]
+        point1 = operation.get("point1", -1)
+        geometry2 = operation.get("geometry2", -2)
+        point2 = operation.get("point2", -1)
+        value = operation.get("value")
+        expression = operation.get("expression")
+        constraint_name = operation.get("constraint_name")
 
         if constraint_type == "Block":
             geometry_count = int(sketch.GeometryCount)
@@ -1393,6 +1515,7 @@ try:
             "op": op,
             "constraint_type": constraint_type,
             "constraint_index": constraint_index,
+            "constraint_number": constraint_index + 1,
             "constraint_name": constraint_name,
             "expression_path": expression_path,
             "expression": expression,
@@ -1576,7 +1699,10 @@ _result_ = {{
             sketch_name: Name of the sketch to pocket.
             length: Pocket depth.
             type: Pocket type: "Length", "ThroughAll", "UpToFirst", "UpToFace".
-            direction: Cut along the sketch normal or the reversed normal.
+            direction: Requested world-space cut direction relative to the sketch:
+                ``normal`` follows its positive normal and ``reversed`` follows
+                the negative normal. The tool translates this semantic direction
+                to FreeCAD Pocket's inverted ``Reversed`` convention.
             base_feature_name: Optional explicit single-solid feature before the
                 sketch. Avoids relying on Body history when the intended base is
                 not the current Tip.
@@ -1602,9 +1728,7 @@ _result_ = {{
             raise ValueError("Pocket length must be greater than zero")
         if type == "UpToFace":
             if not up_to_face or "." not in up_to_face:
-                raise ValueError(
-                    'type="UpToFace" requires up_to_face="Feature.FaceN"'
-                )
+                raise ValueError('type="UpToFace" requires up_to_face="Feature.FaceN"')
             object_name, face_name = up_to_face.rsplit(".", 1)
             if (
                 not object_name
@@ -1612,9 +1736,7 @@ _result_ = {{
                 or not face_name[4:].isdigit()
                 or int(face_name[4:]) < 1
             ):
-                raise ValueError(
-                    'up_to_face must use the form "Feature.FaceN"'
-                )
+                raise ValueError('up_to_face must use the form "Feature.FaceN"')
         elif up_to_face is not None:
             raise ValueError('up_to_face is valid only for type="UpToFace"')
         bridge = await get_bridge()
@@ -1683,7 +1805,10 @@ try:
     pocket.Profile = sketch
     pocket.Length = {length}
     pocket.Type = {type!r}
-    pocket.Reversed = {direction!r} == "reversed"
+    # PartDesign::Pocket's default direction is opposite the positive sketch
+    # normal. Translate the public geometric direction instead of exposing that
+    # inverted implementation detail to callers.
+    pocket.Reversed = {direction!r} == "normal"
     if up_to_face_reference is not None:
         pocket.UpToFace = up_to_face_reference
 
@@ -1693,7 +1818,7 @@ try:
         sketch_rotation = sketch.Placement.Rotation
     sketch_normal = sketch_rotation.multVec(FreeCAD.Vector(0, 0, 1))
     effective_direction_vec = (
-        sketch_normal * -1.0 if pocket.Reversed else sketch_normal
+        sketch_normal if pocket.Reversed else sketch_normal * -1.0
     )
     body.Tip = pocket
 
@@ -4386,7 +4511,9 @@ _result_ = {{
                 - type_id: Object type
         """
         if profile_sketch == spine_sketch:
-            raise ValueError("Subtractive pipe profile and spine must be different sketches")
+            raise ValueError(
+                "Subtractive pipe profile and spine must be different sketches"
+            )
         transition_map = {"Transformed": 0, "Right": 1, "Round": 2}
         if transition not in transition_map:
             raise ValueError(f"Invalid transition: {transition}")

@@ -280,9 +280,7 @@ _result_ = {{
         assert created["removed_volume"] > 0.0
 
         with pytest.raises(ValueError, match="requires ThreadSize"):
-            await live_bridge.edit_object(
-                "Hole", {"ThreadType": "ISO_FINE"}, doc_name
-            )
+            await live_bridge.edit_object("Hole", {"ThreadType": "ISO_FINE"}, doc_name)
 
         await live_bridge.edit_object(
             "Hole",
@@ -373,6 +371,48 @@ _result_ = {{
             "alias": "Original",
             "expressions": [],
         }
+    finally:
+        await live_bridge.execute_python(
+            f"FreeCAD.closeDocument({doc_name!r}) if {doc_name!r} in FreeCAD.listDocuments() else None"
+        )
+
+
+@pytest.mark.asyncio
+async def test_formula_error_is_not_success_and_restores_previous_cell(
+    live_bridge: XmlRpcBridge,
+    spreadsheet_tools: dict[str, Any],
+) -> None:
+    """FreeCAD's textual ERR result must fail inside the batch transaction."""
+    doc_name = "MCPSpreadsheetFormulaErrorRegression"
+    setup = await live_bridge.execute_python(
+        f"""
+if {doc_name!r} in FreeCAD.listDocuments():
+    FreeCAD.closeDocument({doc_name!r})
+doc = FreeCAD.newDocument({doc_name!r})
+sheet = doc.addObject("Spreadsheet::Sheet", "Parameters")
+sheet.set("A1", "10")
+doc.recompute()
+_result_ = True
+"""
+    )
+    assert setup.success, setup.error_traceback
+
+    try:
+        with pytest.raises(ValueError, match="Spreadsheet formula failed in A1"):
+            await spreadsheet_tools["spreadsheet_apply_batch"](
+                spreadsheet_name="Parameters",
+                cells=[{"cell": "A1", "value": "=MissingObject.MissingProperty"}],
+                doc_name=doc_name,
+            )
+
+        state = await live_bridge.execute_python(
+            f"""
+sheet = FreeCAD.getDocument({doc_name!r}).getObject("Parameters")
+_result_ = {{"content": sheet.getContents("A1"), "computed": sheet.get("A1")}}
+"""
+        )
+        assert state.success, state.error_traceback
+        assert state.result == {"content": "10", "computed": 10}
     finally:
         await live_bridge.execute_python(
             f"FreeCAD.closeDocument({doc_name!r}) if {doc_name!r} in FreeCAD.listDocuments() else None"

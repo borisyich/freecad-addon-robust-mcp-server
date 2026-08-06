@@ -409,7 +409,7 @@ def _support_summary(sketch):
 
 
 def _solver_constraint_indices(sketch):
-    """Return constraint indices reported by the last Sketcher solve."""
+    """Return zero-based constraint indices reported by the last solve."""
     result = {
         "conflicting": [],
         "redundant": [],
@@ -435,6 +435,7 @@ def _solver_constraint_indices(sketch):
 def _constraint_detail(sketch, index, constraint):
     item = {
         "index": index,
+        "number": index + 1,
         "type": str(getattr(constraint, "Type", type(constraint).__name__)),
         "name": None,
         "driving": None,
@@ -1049,7 +1050,11 @@ else:
                     "severity": severity,
                     "category": f"sketch_{key}_constraints",
                     "object": sketch["name"],
-                    "message": f"Sketch solver reported {key} constraint indices: {indices}.",
+                    "message": (
+                        f"Sketch solver reported {key} zero-based MCP constraint "
+                        f"indices: {indices}; GUI numbers: "
+                        f"{[index + 1 for index in indices]}."
+                    ),
                 }
             )
 

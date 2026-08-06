@@ -87,3 +87,27 @@ async def test_execute_falls_back_to_legacy_method():
         "execute",
         "_result_ = 42",
     )
+
+
+@pytest.mark.asyncio
+async def test_execute_preserves_freecad_report_error_type():
+    """XML-RPC transport must not erase Report View failure classification."""
+    bridge = XmlRpcBridge()
+    bridge._proxy = MagicMock()
+    bridge._call_rpc = AsyncMock(
+        return_value={
+            "success": False,
+            "result": None,
+            "stdout": "",
+            "stderr": "FreeCAD Report View reported errors",
+            "execution_time_ms": 1.0,
+            "error_type": "FreeCADReportError",
+            "error_traceback": "Spreadsheet: Invalid expression in A1",
+        }
+    )
+
+    result = await bridge.execute_python("_result_ = True")
+
+    assert result.success is False
+    assert result.error_type == "FreeCADReportError"
+    assert "Invalid expression" in (result.error_traceback or "")

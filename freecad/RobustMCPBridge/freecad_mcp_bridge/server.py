@@ -25,6 +25,7 @@ import io
 import json
 import os
 import queue
+import re
 import sys
 import threading
 import time
@@ -174,6 +175,15 @@ _REPORT_ERROR_MARKERS = (
     "No edges specified",
     "Tool shape is not valid for boolean operation",
     "Adding face failed",
+    "Invalid expression",
+    "Expression error",
+    "Parse error",
+    "Cyclic dependency",
+    "#ERR",
+    "#REF!",
+    "#VALUE!",
+    "#NAME?",
+    "#DIV/0!",
 )
 
 
@@ -185,9 +195,11 @@ def _extract_report_error_lines(text: str) -> list[str]:
         line = raw_line.strip()
         if not line:
             continue
-        is_error = any(marker in line for marker in _REPORT_ERROR_MARKERS)
-        is_missing_property = "Property '" in line and " not found" in line
-        if (is_error or is_missing_property) and line not in seen:
+        lowered = line.lower()
+        is_error = any(marker.lower() in lowered for marker in _REPORT_ERROR_MARKERS)
+        is_encoded_error = re.search(r"(?<![A-Za-z])ERR:", line, re.IGNORECASE)
+        is_missing_property = "property '" in lowered and " not found" in lowered
+        if (is_error or is_encoded_error or is_missing_property) and line not in seen:
             seen.add(line)
             errors.append(line)
     return errors
@@ -831,11 +843,7 @@ class FreecadMCPPlugin:
                     dock
                     for dock in docks
                     if "report"
-                    in (
-                        f"{dock.objectName()} {dock.windowTitle()}"
-                        .strip()
-                        .lower()
-                    )
+                    in (f"{dock.objectName()} {dock.windowTitle()}".strip().lower())
                 ),
                 None,
             )
@@ -863,6 +871,26 @@ class FreecadMCPPlugin:
             # Report capture is diagnostic only. It must never prevent code from
             # executing when the GUI implementation differs between Qt builds.
             return None
+
+    def _flush_gui_events(self) -> None:
+        """Flush posted GUI work so Report View reflects the executed request."""
+        if not (FREECAD_AVAILABLE and getattr(FreeCAD, "GuiUp", False)):
+            return
+        with contextlib.suppress(Exception):
+            FreeCADGui.updateGui()
+        qt_widgets = _get_qt_widgets()
+        if qt_widgets is None:
+            return
+        with contextlib.suppress(Exception):
+            application = qt_widgets.QApplication.instance()
+            if application is not None:
+                application.processEvents()
+        qt_core = _get_qt_core()
+        if qt_core is not None:
+            with contextlib.suppress(Exception):
+                qt_core.QCoreApplication.sendPostedEvents(None, 0)
+            with contextlib.suppress(Exception):
+                qt_core.QCoreApplication.processEvents()
 
     @staticmethod
     def _report_view_delta(before: str | None, after: str | None) -> str:
@@ -920,9 +948,7 @@ class FreecadMCPPlugin:
                 compiled = compile(code, "<mcp>", "exec")
                 exec(compiled, exec_globals)  # noqa: S102
 
-            if FREECAD_AVAILABLE and getattr(FreeCAD, "GuiUp", False):
-                with contextlib.suppress(Exception):
-                    FreeCADGui.updateGui()
+            self._flush_gui_events()
             report_after = self._get_report_view_text()
             report_delta = self._report_view_delta(report_before, report_after)
             report_errors = _extract_report_error_lines(report_delta)
@@ -931,8 +957,7 @@ class FreecadMCPPlugin:
             if report_errors:
                 report_message = (
                     "FreeCAD Report View reported errors despite successful "
-                    "Python execution:\n"
-                    + "\n".join(report_errors)
+                    "Python execution:\n" + "\n".join(report_errors)
                 )
                 captured_stderr = stderr_capture.getvalue()
                 return {
@@ -959,18 +984,14 @@ class FreecadMCPPlugin:
             }
 
         except Exception as e:
-            if FREECAD_AVAILABLE and getattr(FreeCAD, "GuiUp", False):
-                with contextlib.suppress(Exception):
-                    FreeCADGui.updateGui()
+            self._flush_gui_events()
             report_after = self._get_report_view_text()
             report_delta = self._report_view_delta(report_before, report_after)
             report_errors = _extract_report_error_lines(report_delta)
             elapsed = (time.perf_counter() - start) * 1000
             error_traceback = traceback.format_exc()
             if report_errors:
-                error_traceback += (
-                    "\nFreeCAD Report View:\n" + "\n".join(report_errors)
-                )
+                error_traceback += "\nFreeCAD Report View:\n" + "\n".join(report_errors)
             return {
                 "success": False,
                 "result": None,

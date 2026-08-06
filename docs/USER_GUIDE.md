@@ -424,12 +424,12 @@ metric; use formal checkpoints only when the task benefits from them.
 
 ## Reliable PartDesign Feature Selection
 
-- `pocket_sketch` accepts `direction="normal"|"reversed"` and an optional explicit `base_feature_name`. Without an explicit base it prefers a valid preceding Body Tip, then the nearest valid preceding solid.
+- `pocket_sketch` accepts `direction="normal"|"reversed"` and an optional explicit `base_feature_name`. `normal` means the positive global sketch normal even though FreeCAD Pocket internally uses an inverted `Reversed` flag. Without an explicit base it prefers a valid preceding Body Tip, then the nearest valid preceding solid.
 - `set_body_tip` changes the active Body result without using `edit_object` or GUI selection and validates the resulting Shape/Tip contract.
 - `linear_pattern` and `polar_pattern` are for one transformation of a non-pattern seed. Use `multi_transform_pattern` for combined linear and polar stages. For drawing reconstruction, accept the single seed through `compare_images` before repeating it.
 - Pattern, Pocket, and thread responses include before/after volume diagnostics. A valid Shape is not proof that the intended amount of material changed.
 - `thread_helix` creates native additive or subtractive helical geometry from an editable profile sketch.
-- `spreadsheet_apply_batch` is the efficient way to create values, aliases, and property bindings in one transaction. It validates alias collisions and restores affected cells, aliases, and expressions if a later operation fails.
+- `spreadsheet_apply_batch` is the efficient way to create values, aliases, and property bindings in one transaction. It validates alias collisions and computed formulas and restores affected cells, aliases, and expressions if a later operation fails. Report View formula errors are surfaced as `FreeCADReportError` rather than success.
 - A unitless spreadsheet number bound to an angle property is interpreted in degrees, so `360` can safely drive `PolarPattern.Angle`. Supplying `360 deg` remains supported.
 - Change a Hole thread profile and size together, for example `edit_object("Hole", {"ThreadType": "ISO_FINE", "ThreadSize": "M12x1.25"})`; this prevents FreeCAD from silently resetting the size.
 
@@ -553,7 +553,10 @@ Use `get_sketch_info` to inspect geometry endpoints and type-specific data,
 constraint references/datums/names, and expression bindings. Constraint
 expression entries expose a stable `Constraints[index]` path; when FreeCAD
 reports a different canonical source path, it is preserved as `source_path`.
-Use explicit units for literal constants inside expressions.
+Use explicit units for literal constants inside expressions. Constraint indices
+in MCP requests are zero-based. The GUI/solver commonly shows one-based
+numbers, so subtract one when copying a displayed number (GUI 16 becomes
+`constraint_index=15`). Sketch responses include both forms.
 
 ### 5. Save Frequently
 

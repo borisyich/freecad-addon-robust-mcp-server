@@ -72,6 +72,29 @@ SPREADSHEET_RUNTIME_HELPERS = dedent(
         return str(value)
 
 
+    def _spreadsheet_formula_error(cell, content, computed):
+        """Return a diagnostic when FreeCAD encoded a formula failure as text."""
+        if not str(content or "").lstrip().startswith("="):
+            return None
+        text = str(computed or "").strip()
+        lowered = text.lower()
+        error_tokens = (
+            "#err",
+            "err:",
+            "#ref",
+            "#value",
+            "#name",
+            "#div/0",
+            "invalid expression",
+            "expression error",
+            "parse error",
+            "cyclic dependency",
+        )
+        if any(token in lowered for token in error_tokens):
+            return f"Spreadsheet formula failed in {cell}: {text}"
+        return None
+
+
     def _spreadsheet_expression_dependencies(doc, sheet, cell, alias):
         import re
 
@@ -1010,8 +1033,17 @@ try:
     for item in cells:
         try:
             computed = sheet.get(item["cell"])
-        except Exception:
-            computed = item["value"]
+        except Exception as exc:
+            raise ValueError(
+                f"Failed to evaluate spreadsheet cell {{item['cell']}}: {{exc}}"
+            ) from exc
+        formula_error = _spreadsheet_formula_error(
+            item["cell"],
+            _spreadsheet_cell_content(sheet, item["cell"]),
+            computed,
+        )
+        if formula_error:
+            raise ValueError(formula_error)
         computed_cells.append({{
             "cell": item["cell"],
             "value": item["value"],
@@ -1069,7 +1101,11 @@ _result_ = {{
 }}
 """
         result = await bridge.execute_python(code)
-        if result.success and result.result:
+        if (
+            result.success
+            and isinstance(result.result, dict)
+            and result.result.get("success") is True
+        ):
             return result.result
         raise ValueError(result.error_traceback or "Failed to apply spreadsheet batch")
 

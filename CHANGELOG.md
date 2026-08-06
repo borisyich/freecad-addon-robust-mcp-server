@@ -118,6 +118,15 @@
   expressions on non-dimensional constraints.
 - Made FreeCAD GUI bridge execution fail with `FreeCADReportError` when Report View records high-confidence errors such as `<Exception>`, dangling property bindings, invalid topology links, missing Hole profiles, or invalid boolean tools despite Python `exec()` returning normally. Per-request delta extraction excludes old messages, and executed code cannot bypass the check.
 - Hardened `spreadsheet_clear_cell`: referenced parameter cells are preserved by default, `clear_bindings=True` detaches dependent expressions atomically, and rollback restores cell content, alias, and expressions.
+- Replaced ambiguous sketch batch item schemas with discriminated `op` unions,
+  implemented consistent construction geometry handling and explicit arc point
+  mappings, and documented zero-based MCP versus one-based GUI constraint
+  references.
+- Corrected `pocket_sketch` direction translation for FreeCAD's inverted Pocket
+  `Reversed` convention.
+- Prevented false `spreadsheet_apply_batch` success by validating computed
+  formulas and flushing GUI events before translating new Report View formula
+  diagnostics into `FreeCADReportError`.
 
 This project uses **component-specific versioning**. Each component has its own
 release notes and version history.

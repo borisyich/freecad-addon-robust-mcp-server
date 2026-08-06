@@ -312,11 +312,22 @@ def test_sketch_analysis_distinguishes_redundant_constraints() -> None:
         def getStatusString(self) -> str:
             return "Redundant constraint: 4"
 
+        def getLastRedundant(self) -> list[int]:
+            return [3]
+
     helpers = _load_helpers(SKETCH_ANALYSIS_RUNTIME_HELPERS)
     result = helpers["_analyze_sketch"](_RedundantSketch())
 
     assert result["solver"]["status"] == "redundant"
     assert result["solver"]["message"] == "Redundant constraint: 4"
+    assert result["solver"]["constraint_references"]["redundant"] == {
+        "indices": [3],
+        "numbers": [4],
+    }
+    assert result["solver"]["indexing"] == {
+        "constraint_index": "zero_based",
+        "constraint_number": "one_based_gui",
+    }
     assert result["profile_ready"] is False
     assert result["issues"] == ["Sketch contains a redundant constraint."]
 
@@ -350,6 +361,7 @@ def test_sketch_analysis_reports_open_endpoints() -> None:
     ]
     assert result["profile_ready"] is False
     assert any("Coincident" in hint for hint in result["hints"])
+
 
 class _SketchVector:
     def __init__(self, x: float, y: float, z: float = 0.0) -> None:
@@ -422,6 +434,8 @@ def test_sketch_details_include_geometry_constraints_and_expressions() -> None:
         {"path": "Constraints[0]", "expression": "Dimensions.PlateWidth"}
     ]
     assert result["constraints"][0]["constraint_type"] == "Distance"
+    assert result["constraints"][0]["index"] == 0
+    assert result["constraints"][0]["number"] == 1
     assert result["constraints"][0]["first_geometry"] == 0
     assert result["constraints"][0]["name"] == "PlateWidth"
     assert result["constraints"][0]["driving"] is True

@@ -101,11 +101,52 @@ _result_ = True
         sketch_name="PocketSketch",
         length=10,
         type="ThroughAll",
+        direction="reversed",
         name="Pocket",
         doc_name=doc,
     )
     assert pocket["validated"] is True
     return pocket["name"]
+
+
+@pytest.mark.asyncio
+async def test_pocket_direction_follows_global_sketch_normal(
+    live_tools: dict[str, Any],
+) -> None:
+    """A bottom-plane normal pocket must cut upward into a positive-Z pad."""
+    tools = live_tools
+    doc = "McpAuditPocketNormalDirection"
+    await _base_plate(tools, doc)
+    await _call(
+        tools,
+        "create_sketch",
+        body_name="Body",
+        support={"kind": "origin_plane", "plane": "XY_Plane"},
+        name="BottomPocketSketch",
+        doc_name=doc,
+    )
+    await _call(
+        tools,
+        "edit_sketch_geometry",
+        sketch_name="BottomPocketSketch",
+        operations=[
+            {"op": "add_circle", "center_x": 0, "center_y": 0, "radius": 3}
+        ],
+        doc_name=doc,
+    )
+    pocket = await _call(
+        tools,
+        "pocket_sketch",
+        sketch_name="BottomPocketSketch",
+        length=10,
+        type="ThroughAll",
+        direction="normal",
+        name="BottomPocket",
+        doc_name=doc,
+    )
+    assert pocket["validated"] is True
+    assert pocket["removed_volume"] > 0
+    assert pocket["effective_direction"] == [0.0, 0.0, 1.0]
 
 
 async def _setup_pipe_sketches(
@@ -233,7 +274,7 @@ async def test_sketch_geometry_and_constraint_operation_catalog(live_tools: dict
         {"op": "add_line", "x1": 0, "y1": 20, "x2": 10, "y2": 20},
         {"op": "add_arc", "center_x": 20, "center_y": 20, "radius": 4,
          "start_angle": 0, "end_angle": 180},
-        {"op": "add_point", "x": 30, "y": 30},
+        {"op": "add_point", "x": 30, "y": 30, "construction": True},
         {"op": "add_ellipse", "center_x": 40, "center_y": 0,
          "major_radius": 6, "minor_radius": 3},
         {"op": "add_regular_polygon", "center_x": 40, "center_y": 20,
@@ -249,6 +290,13 @@ async def test_sketch_geometry_and_constraint_operation_catalog(live_tools: dict
     result = await _call(tools, "edit_sketch_geometry", sketch_name="Geometry",
                          operations=operations, doc_name=doc)
     assert result["operations_applied"] == len(operations)
+    assert result["operation_results"][3]["point_indices"] == {
+        "start": 1,
+        "end": 2,
+        "center": 3,
+    }
+    assert result["operation_results"][4]["construction"] is True
+    assert result["sketch_status"]["construction_geometry_count"] >= 1
     external_doc = "McpAuditExternalGeometry"
     await _fresh(tools, external_doc)
     await _call(

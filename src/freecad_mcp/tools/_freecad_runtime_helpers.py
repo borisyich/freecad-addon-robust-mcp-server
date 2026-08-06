@@ -810,6 +810,31 @@ SKETCH_ANALYSIS_RUNTIME_HELPERS = _runtime_code(
             "fully_constrained": fully_constrained,
             "remaining_dof": remaining_dof,
         }
+        constraint_indices = {}
+        for key, getter_name in (
+            ("conflicting", "getLastConflicting"),
+            ("redundant", "getLastRedundant"),
+            ("partially_redundant", "getLastPartiallyRedundant"),
+            ("malformed", "getLastMalformedConstraints"),
+        ):
+            getter = getattr(sketch, getter_name, None)
+            if not callable(getter):
+                continue
+            try:
+                indices = sorted({int(value) for value in (getter() or [])})
+            except Exception:
+                continue
+            if indices:
+                constraint_indices[key] = {
+                    "indices": indices,
+                    "numbers": [index + 1 for index in indices],
+                }
+        if constraint_indices:
+            result["constraint_references"] = constraint_indices
+            result["indexing"] = {
+                "constraint_index": "zero_based",
+                "constraint_number": "one_based_gui",
+            }
         if solver_message:
             result["message"] = solver_message
         return result
@@ -1079,6 +1104,7 @@ SKETCH_ANALYSIS_RUNTIME_HELPERS = _runtime_code(
             path = f"Constraints[{index}]"
             detail = {
                 "index": index,
+                "number": index + 1,
                 "constraint_type": getattr(
                     constraint, "Type", type(constraint).__name__
                 ),

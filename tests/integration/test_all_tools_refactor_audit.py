@@ -302,6 +302,31 @@ def test_create_sketch_runtime_schema_has_only_typed_support() -> None:
     }
 
 
+def test_sketch_batch_runtime_schemas_expose_discriminated_operations() -> None:
+    """FastMCP tools/list must not degrade sketch operation items to unknown."""
+    async def schemas() -> dict[str, dict[str, Any]]:
+        return {
+            tool.name: tool.inputSchema
+            for tool in await production_mcp.list_tools()
+            if tool.name in {"edit_sketch_geometry", "edit_sketch_constraints"}
+        }
+
+    input_schemas = asyncio.run(schemas())
+    expected = {
+        "edit_sketch_geometry": set(
+            DOCUMENTED_CHOICES[("edit_sketch_geometry", "operations[].op")]
+        ),
+        "edit_sketch_constraints": set(
+            DOCUMENTED_CHOICES[("edit_sketch_constraints", "operations[].op")]
+        ),
+    }
+    for tool_name, operation_names in expected.items():
+        items = input_schemas[tool_name]["properties"]["operations"]["items"]
+        assert items["discriminator"]["propertyName"] == "op"
+        assert set(items["discriminator"]["mapping"]) == operation_names
+        assert len(items["oneOf"]) > 1
+
+
 def test_documented_choice_catalog_is_nonempty_and_unique() -> None:
     assert len(DOCUMENTED_CHOICES) >= 25
     for key, values in DOCUMENTED_CHOICES.items():

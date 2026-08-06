@@ -184,6 +184,23 @@ class TestPartDesignTools:
         assert "plane" not in parameters
         assert "support" in parameters
 
+    def test_sketch_batch_operation_schemas_are_discriminated(self):
+        """Batch items must expose per-operation fields instead of unknown arrays."""
+        from freecad_mcp.tools.partdesign import (
+            _SKETCH_CONSTRAINT_OPERATION_ADAPTER,
+            _SKETCH_GEOMETRY_OPERATION_ADAPTER,
+        )
+
+        geometry_schema = _SKETCH_GEOMETRY_OPERATION_ADAPTER.json_schema()
+        constraint_schema = _SKETCH_CONSTRAINT_OPERATION_ADAPTER.json_schema()
+
+        assert geometry_schema["discriminator"]["propertyName"] == "op"
+        assert constraint_schema["discriminator"]["propertyName"] == "op"
+        assert "add_arc" in geometry_schema["discriminator"]["mapping"]
+        assert "delete_constraint" in constraint_schema["discriminator"]["mapping"]
+        assert len(geometry_schema["oneOf"]) > 1
+        assert len(constraint_schema["oneOf"]) > 1
+
     @pytest.mark.asyncio
     async def test_edit_sketch_geometry_batches_operations_atomically(
         self, register_tools, mock_bridge
@@ -308,7 +325,7 @@ class TestPartDesignTools:
         self, register_tools, mock_bridge
     ):
         """Invalid dimensions should fail without starting a FreeCAD operation."""
-        with pytest.raises(ValueError, match="width must be positive"):
+        with pytest.raises(ValueError, match="greater than 0"):
             await register_tools["edit_sketch_geometry"](
                 "Sketch",
                 [{"op": "add_rectangle", "x": 0, "y": 0, "width": 0, "height": 5}],
@@ -355,6 +372,58 @@ class TestPartDesignTools:
         assert '"endpoints_radius"' in generated_code
         assert "Part.Arc(start, arc_midpoint, end)" in generated_code
         assert 'operation["arc_side"]' in generated_code
+        assert '"point_indices": point_indices' in generated_code
+        assert "actual_start = sketch.getPoint(idx, 1)" in generated_code
+
+    @pytest.mark.asyncio
+    async def test_edit_sketch_geometry_applies_construction_to_created_geometry(
+        self, register_tools, mock_bridge
+    ):
+        """construction=true must reach simple and compound Sketcher geometry."""
+        mock_bridge.execute_python = AsyncMock(
+            return_value=ExecutionResult(
+                success=True,
+                result={"name": "Sketch", "operations_applied": 3},
+                stdout="",
+                stderr="",
+                execution_time_ms=1.0,
+            )
+        )
+
+        await register_tools["edit_sketch_geometry"](
+            "Sketch",
+            [
+                {
+                    "op": "add_rectangle",
+                    "x": 0,
+                    "y": 0,
+                    "width": 10,
+                    "height": 5,
+                    "construction": True,
+                },
+                {
+                    "op": "add_circle",
+                    "center_x": 0,
+                    "center_y": 0,
+                    "radius": 2,
+                    "construction": True,
+                },
+                {
+                    "op": "add_arc",
+                    "center_x": 0,
+                    "center_y": 0,
+                    "radius": 2,
+                    "start_angle": 0,
+                    "end_angle": 90,
+                    "construction": True,
+                },
+            ],
+        )
+
+        code = mock_bridge.execute_python.await_args.args[0]
+        assert 'construction = bool(operation["construction"])' in code
+        assert 'sketch.addGeometry(arc, bool(operation["construction"]))' in code
+        assert code.count("'construction': True") == 3
 
     @pytest.mark.asyncio
     async def test_edit_sketch_geometry_supports_tangent_fillet_arc(
@@ -468,6 +537,8 @@ class TestPartDesignTools:
         assert generated_code.count("doc.recompute()") == 1
         assert '"Diameter"' in generated_code
         assert '"delete_constraint"' in generated_code
+        assert '"constraint_number": constraint_index + 1' in generated_code
+        assert '"deleted_constraint_number": constraint_index + 1' in generated_code
 
     @pytest.mark.asyncio
     async def test_edit_sketch_constraints_supports_every_replaced_operation(
@@ -576,8 +647,8 @@ class TestPartDesignTools:
         )
 
         generated_code = mock_bridge.execute_python.await_args.args[0]
-        assert 'rename_constraint(constraint_index, constraint_name)' in generated_code
-        assert 'sketch.setExpression(expression_path, expression)' in generated_code
+        assert "rename_constraint(constraint_index, constraint_name)" in generated_code
+        assert "sketch.setExpression(expression_path, expression)" in generated_code
         assert 'f"Constraints[{constraint_index}]"' in generated_code
         assert '"set_expression"' in generated_code
         assert '"clear_expression"' in generated_code
@@ -589,11 +660,11 @@ class TestPartDesignTools:
     async def test_edit_sketch_constraints_rejects_incomplete_expression_edits(
         self, register_tools, mock_bridge
     ):
-        with pytest.raises(ValueError, match="set_expression requires expression"):
+        with pytest.raises(ValueError, match=r"set_expression\.expression"):
             await register_tools["edit_sketch_constraints"](
                 "Sketch", [{"op": "set_expression", "constraint_index": 0}]
             )
-        with pytest.raises(ValueError, match="clear_expression requires"):
+        with pytest.raises(ValueError, match=r"clear_expression\.constraint_index"):
             await register_tools["edit_sketch_constraints"](
                 "Sketch", [{"op": "clear_expression"}]
             )
@@ -603,25 +674,30 @@ class TestPartDesignTools:
     async def test_edit_sketch_constraints_rejects_expression_on_geometric_constraint(
         self, register_tools, mock_bridge
     ):
-        with pytest.raises(
-            ValueError, match="expression is supported only for dimensional constraints"
-        ):
+        with pytest.raises(ValueError, match="Extra inputs are not permitted"):
             await register_tools["edit_sketch_constraints"](
                 "Sketch",
-                [{"op": "horizontal", "geometry1": 0,
-                  "expression": "Dimensions.Width"}],
+                [
+                    {
+                        "op": "horizontal",
+                        "geometry1": 0,
+                        "expression": "Dimensions.Width",
+                    }
+                ],
             )
         with pytest.raises(
             ValueError, match="expression is supported only for dimensional constraints"
         ):
             await register_tools["edit_sketch_constraints"](
                 "Sketch",
-                [{
-                    "op": "add_constraint",
-                    "constraint_type": "Horizontal",
-                    "geometry1": 0,
-                    "expression": "Dimensions.Width",
-                }],
+                [
+                    {
+                        "op": "add_constraint",
+                        "constraint_type": "Horizontal",
+                        "geometry1": 0,
+                        "expression": "Dimensions.Width",
+                    }
+                ],
             )
         mock_bridge.execute_python.assert_not_awaited()
 
@@ -660,11 +736,11 @@ class TestPartDesignTools:
         self, register_tools, mock_bridge
     ):
         """Named constraints should require the geometry/value they operate on."""
-        with pytest.raises(ValueError, match="distance requires value"):
+        with pytest.raises(ValueError, match=r"distance\.value"):
             await register_tools["edit_sketch_constraints"](
                 "Sketch", [{"op": "distance", "geometry1": 0}]
             )
-        with pytest.raises(ValueError, match="parallel requires geometry2"):
+        with pytest.raises(ValueError, match=r"parallel\.geometry2"):
             await register_tools["edit_sketch_constraints"](
                 "Sketch", [{"op": "parallel", "geometry1": 0}]
             )
@@ -1301,9 +1377,15 @@ class TestPartDesignTools:
 
         assert result["name"] == "Mirrored"
         generated_code = mock_bridge.execute_python.await_args.args[0]
-        assert '_require_current_body_tip(body, feature, "Mirrored feature")' in generated_code
+        assert (
+            '_require_current_body_tip(body, feature, "Mirrored feature")'
+            in generated_code
+        )
         assert "body.Tip = feature" in generated_code
-        assert "transform_mode = _configure_feature_transform_mode(mirror)" in generated_code
+        assert (
+            "transform_mode = _configure_feature_transform_mode(mirror)"
+            in generated_code
+        )
         assert "body.Tip = mirror" in generated_code
         assert "_validate_single_solid_feature(mirror, body)" in generated_code
         assert "_cleanup_failed_partdesign_feature" in generated_code
@@ -1433,7 +1515,10 @@ class TestPartDesignTools:
         assert result["type_id"] == "PartDesign::Line"
         generated_code = mock_bridge.execute_python.await_args.args[0]
         assert 'datum.MapMode = "Deactivated"' in generated_code
-        assert "FreeCAD.Rotation(FreeCAD.Vector(0, 0, 1), target_direction)" in generated_code
+        assert (
+            "FreeCAD.Rotation(FreeCAD.Vector(0, 0, 1), target_direction)"
+            in generated_code
+        )
         assert "datum.Placement.Rotation.multVec" in generated_code
         assert "ObjectXY" not in generated_code
         mock_bridge.execute_python.assert_called_once()
@@ -1610,7 +1695,10 @@ class TestPartDesignTools:
         assert result["name"] == "SubtractivePipe"
         assert result["type_id"] == "PartDesign::SubtractivePipe"
         generated_code = mock_bridge.execute_python.await_args.args[0]
-        assert "Profile and spine must be inside the same PartDesign Body" in generated_code
+        assert (
+            "Profile and spine must be inside the same PartDesign Body"
+            in generated_code
+        )
         assert "_validate_subtractive_feature(pipe, body, base_shape)" in generated_code
         assert "_cleanup_failed_partdesign_feature" in generated_code
         mock_bridge.execute_python.assert_called_once()
@@ -1630,9 +1718,7 @@ class TestPartDesignTools:
         with pytest.raises(ValueError, match="at least two sketches"):
             await register_tools["subtractive_loft"](sketch_names=["Sketch"])
         with pytest.raises(ValueError, match="must be distinct"):
-            await register_tools["subtractive_loft"](
-                sketch_names=["Sketch", "Sketch"]
-            )
+            await register_tools["subtractive_loft"](sketch_names=["Sketch", "Sketch"])
         with pytest.raises(ValueError, match="must be different sketches"):
             await register_tools["subtractive_pipe"](
                 profile_sketch="Sketch", spine_sketch="Sketch"
@@ -1759,9 +1845,9 @@ def test_sketch_geometry_operation_separates_regular_polygon_and_polyline() -> N
     """Regular polygons and explicit polylines must have distinct contracts."""
     from pydantic import ValidationError
 
-    from freecad_mcp.tools.partdesign import SketchGeometryOperation
+    from freecad_mcp.tools.partdesign import _SKETCH_GEOMETRY_OPERATION_ADAPTER
 
-    regular = SketchGeometryOperation.model_validate(
+    regular = _SKETCH_GEOMETRY_OPERATION_ADAPTER.validate_python(
         {
             "op": "add_regular_polygon",
             "center_x": 0,
@@ -1770,7 +1856,7 @@ def test_sketch_geometry_operation_separates_regular_polygon_and_polyline() -> N
             "sides": 6,
         }
     )
-    polyline = SketchGeometryOperation.model_validate(
+    polyline = _SKETCH_GEOMETRY_OPERATION_ADAPTER.validate_python(
         {
             "op": "add_polyline",
             "points": [[0, 0], [4, 0], [4, 2]],
@@ -1781,7 +1867,7 @@ def test_sketch_geometry_operation_separates_regular_polygon_and_polyline() -> N
     assert regular.op == "add_regular_polygon"
     assert polyline.op == "add_polyline"
     with pytest.raises(ValidationError):
-        SketchGeometryOperation.model_validate(
+        _SKETCH_GEOMETRY_OPERATION_ADAPTER.validate_python(
             {"op": "add_polygon", "center_x": 0, "center_y": 0, "radius": 5}
         )
 
@@ -1826,7 +1912,8 @@ async def test_pocket_sketch_exposes_direction_and_explicit_base() -> None:
     code = bridge.execute_python.await_args.args[0]
     assert "_resolve_partdesign_base_feature" in code
     assert "'LinearPatternBands'" in code
-    assert 'pocket.Reversed = \'reversed\' == "reversed"' in code
+    assert "pocket.Reversed = 'reversed' == \"normal\"" in code
+    assert "sketch_normal if pocket.Reversed else sketch_normal * -1.0" in code
     assert '"volume_diagnostics"' in code
 
     await registered["pocket_sketch"](
@@ -1843,13 +1930,9 @@ async def test_pocket_sketch_exposes_direction_and_explicit_base() -> None:
     assert "pocket.UpToFace = up_to_face_reference" in up_to_face_code
 
     with pytest.raises(ValueError, match="requires up_to_face"):
-        await registered["pocket_sketch"](
-            "PocketSketch", 12, type="UpToFace"
-        )
+        await registered["pocket_sketch"]("PocketSketch", 12, type="UpToFace")
     with pytest.raises(ValueError, match="valid only"):
-        await registered["pocket_sketch"](
-            "PocketSketch", 12, up_to_face="Pad.Face3"
-        )
+        await registered["pocket_sketch"]("PocketSketch", 12, up_to_face="Pad.Face3")
 
 
 @pytest.mark.asyncio
@@ -1882,7 +1965,7 @@ async def test_pattern_tools_validate_shape_tip_and_reject_nested_patterns() -> 
     assert "_configure_feature_transform_mode(pattern)" in linear_code
     assert 'pattern.TransformMode = "Features"' not in linear_code
     assert "_pattern_material_change_diagnostics" in linear_code
-    assert "material_change[\"consistent\"]" in linear_code
+    assert 'material_change["consistent"]' in linear_code
     assert "_cleanup_failed_partdesign_feature" in linear_code
     assert '"volume_diagnostics"' in linear_code
     assert '"material_change_diagnostics"' in linear_code
