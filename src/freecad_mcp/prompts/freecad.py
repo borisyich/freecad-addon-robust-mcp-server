@@ -248,6 +248,10 @@ validate_object(object_name="Pad")
 - Additive: `pad_sketch`, `revolution_sketch`, `thread_helix(operation="additive")`, `loft_sketches`, `sweep_sketch`.
 - Subtractive: `pocket_sketch`, `groove_sketch`, `thread_helix(operation="subtractive")`, `create_hole`,
   `create_cylindrical_cut`, `subtractive_loft`, `subtractive_pipe`.
+- Directional subtractive tools default to `direction="auto"`: they try both
+  sides when available and retain only a validated measurable volume decrease.
+  Use an explicit direction only when design intent selects one side; explicit
+  directions never silently fall back.
 - Modifiers: `fillet_edges`, `chamfer_edges`, `draft_feature`, `thickness_feature`.
 - Patterns: `linear_pattern`, `polar_pattern`, `multi_transform_pattern`, `mirrored_feature`.
   Do not chain one pattern directly onto another; use `multi_transform_pattern`.
@@ -609,9 +613,9 @@ Create the base 3D shape:
 
 ### 5. Add Features
 Add additional features as needed:
-- `pocket_sketch` for cuts/holes; 
-  set `direction` explicitly, 
-  use `base_feature_name` when Body history is ambiguous, 
+- `pocket_sketch` for cuts/holes;
+  keep `direction="auto"` unless design intent selects one side,
+  use `base_feature_name` when Body history is ambiguous,
   and pass `up_to_face="Feature.FaceN"` for `UpToFace`
 - `fillet_edges` for rounded edges
 - `chamfer_edges` for beveled edges

@@ -60,6 +60,18 @@ def create_hole_tool(live_bridge: XmlRpcBridge) -> Any:
 
 
 @pytest.fixture
+def pocket_sketch_tool(live_bridge: XmlRpcBridge) -> Any:
+    """Return the real registered pocket_sketch implementation."""
+    collector = _ToolCollector()
+
+    async def get_bridge() -> XmlRpcBridge:
+        return live_bridge
+
+    register_partdesign_tools(collector, get_bridge)
+    return collector.tools["pocket_sketch"]
+
+
+@pytest.fixture
 def create_cylindrical_cut_tool(live_bridge: XmlRpcBridge) -> Any:
     """Return the real registered explicit-axis cylindrical cut tool."""
     collector = _ToolCollector()
@@ -229,6 +241,66 @@ for x in (-20.0, 0.0, 20.0):
 
         assert result["validated"] is True
         assert result["removed_volume"] > 0.0
+        assert result["requested_direction"] == "auto"
+        assert result["direction"] in {"normal", "reversed"}
+        assert any(attempt["ok"] for attempt in result["direction_attempts"])
+    finally:
+        await _close_document(live_bridge, doc_name)
+
+
+@pytest.mark.asyncio
+async def test_face_supported_through_all_pocket_auto_selects_inward_direction(
+    live_bridge: XmlRpcBridge,
+    pocket_sketch_tool: Any,
+) -> None:
+    """Auto must recover when the positive top-face normal points out of the box."""
+    doc_name = "MCPPocketThroughAllAutoDirection"
+    setup = await live_bridge.execute_python(
+        f"""
+import FreeCAD
+import Part
+
+if {doc_name!r} in FreeCAD.listDocuments():
+    FreeCAD.closeDocument({doc_name!r})
+doc = FreeCAD.newDocument({doc_name!r})
+body = doc.addObject("PartDesign::Body", "Body")
+base = body.newObject("PartDesign::Feature", "BaseSolid")
+base.Shape = Part.makeBox(40.0, 30.0, 10.0)
+body.Tip = base
+
+sketch = body.newObject("Sketcher::SketchObject", "PocketSketch")
+if hasattr(sketch, "AttachmentSupport"):
+    sketch.AttachmentSupport = [(base, ["Face6"])]
+else:
+    sketch.Support = (base, ["Face6"])
+sketch.MapMode = "FlatFace"
+sketch.addGeometry(
+    Part.Circle(FreeCAD.Vector(20.0, 15.0, 0.0), FreeCAD.Vector(0, 0, 1), 4.0),
+    False,
+)
+doc.recompute()
+_result_ = {{"base_volume": float(base.Shape.Volume)}}
+"""
+    )
+    assert setup.success, setup.error_traceback
+    try:
+        result = await pocket_sketch_tool(
+            sketch_name="PocketSketch",
+            length=10.0,
+            type="ThroughAll",
+            base_feature_name="BaseSolid",
+            name="PocketAuto",
+            doc_name=doc_name,
+        )
+
+        assert result["validated"] is True
+        assert result["requested_direction"] == "auto"
+        assert result["direction"] == "reversed"
+        assert result["effective_direction"] == pytest.approx([0.0, 0.0, -1.0])
+        assert result["removed_volume"] == pytest.approx(
+            3.141592653589793 * 4.0**2 * 10.0,
+            rel=1e-5,
+        )
     finally:
         await _close_document(live_bridge, doc_name)
 
@@ -453,5 +525,108 @@ _result_ = {{
         assert state.success, state.error_traceback
         assert state.result["shape_valid"] is True
         assert state.result["solid_count"] == 1
+    finally:
+        await _close_document(live_bridge, doc_name)
+
+
+@pytest.mark.asyncio
+async def test_cylindrical_cut_auto_reverses_outward_axis(
+    live_bridge: XmlRpcBridge,
+    create_cylindrical_cut_tool: Any,
+) -> None:
+    """An outward axis hint should be reversed when only its opposite cuts."""
+    doc_name = "MCPCylindricalCutAutoDirection"
+    geometry = """
+sketch.addGeometry(
+    Part.Circle(FreeCAD.Vector(0.0, 0.0, 0.0), FreeCAD.Vector(0, 0, 1), 1.0),
+    True,
+)
+"""
+    await _create_test_body(live_bridge, doc_name, "UnusedReferenceSketch", geometry)
+    try:
+        await live_bridge.execute_python(
+            f"""
+doc = FreeCAD.getDocument({doc_name!r})
+body = doc.getObject("Body")
+body.Tip = doc.getObject("BaseSolid")
+doc.recompute()
+_result_ = True
+"""
+        )
+        result = await create_cylindrical_cut_tool(
+            body_name="Body",
+            axis_origin=[0.0, 0.0, 10.0],
+            axis_direction=[0.0, 0.0, 1.0],
+            diameter=5.0,
+            depth=10.0,
+            name="AutoAxisHole",
+            doc_name=doc_name,
+        )
+
+        assert result["validated"] is True
+        assert result["requested_direction"] == "auto"
+        assert result["direction"] == "reversed"
+        assert result["effective_axis_direction"] == pytest.approx(
+            [0.0, 0.0, -1.0]
+        )
+        assert [attempt["ok"] for attempt in result["direction_attempts"]] == [
+            False,
+            True,
+        ]
+    finally:
+        await _close_document(live_bridge, doc_name)
+
+
+@pytest.mark.asyncio
+async def test_cylindrical_cut_explicit_forward_does_not_fall_back(
+    live_bridge: XmlRpcBridge,
+    create_cylindrical_cut_tool: Any,
+) -> None:
+    """An explicit no-op direction must fail and leave the original Tip intact."""
+    doc_name = "MCPCylindricalCutExplicitDirection"
+    geometry = """
+sketch.addGeometry(
+    Part.Circle(FreeCAD.Vector(0.0, 0.0, 0.0), FreeCAD.Vector(0, 0, 1), 1.0),
+    True,
+)
+"""
+    await _create_test_body(live_bridge, doc_name, "UnusedReferenceSketch", geometry)
+    try:
+        await live_bridge.execute_python(
+            f"""
+doc = FreeCAD.getDocument({doc_name!r})
+body = doc.getObject("Body")
+body.Tip = doc.getObject("BaseSolid")
+doc.recompute()
+_result_ = True
+"""
+        )
+        with pytest.raises(ValueError, match="no valid subtractive result"):
+            await create_cylindrical_cut_tool(
+                body_name="Body",
+                axis_origin=[0.0, 0.0, 10.0],
+                axis_direction=[0.0, 0.0, 1.0],
+                diameter=5.0,
+                depth=10.0,
+                direction="forward",
+                name="WrongAxisHole",
+                doc_name=doc_name,
+            )
+
+        state = await live_bridge.execute_python(
+            f"""
+doc = FreeCAD.getDocument({doc_name!r})
+body = doc.getObject("Body")
+_result_ = {{
+    "tip": getattr(body.Tip, "Name", None),
+    "cuts": [
+        obj.Name for obj in doc.Objects
+        if obj.TypeId == "PartDesign::SubtractiveCylinder"
+    ],
+}}
+"""
+        )
+        assert state.success, state.error_traceback
+        assert state.result == {"tip": "BaseSolid", "cuts": []}
     finally:
         await _close_document(live_bridge, doc_name)

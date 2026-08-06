@@ -203,7 +203,7 @@ DOCUMENTED_CHOICES: dict[tuple[str, str], tuple[str, ...]] = {
         "clear_expression",
     ),
     ("pocket_sketch", "type"): ("Length", "ThroughAll", "UpToFirst", "UpToFace"),
-    ("pocket_sketch", "direction"): ("normal", "reversed"),
+    ("pocket_sketch", "direction"): ("auto", "normal", "reversed"),
     ("revolution_sketch", "axis"): (
         "Base_X",
         "Base_Y",
@@ -212,6 +212,7 @@ DOCUMENTED_CHOICES: dict[tuple[str, str], tuple[str, ...]] = {
         "Sketch_H",
     ),
     ("thread_helix", "operation"): ("additive", "subtractive"),
+    ("thread_helix", "direction"): ("auto", "forward", "reversed"),
     ("thread_helix", "axis"): (
         "Base_X",
         "Base_Y",
@@ -226,9 +227,16 @@ DOCUMENTED_CHOICES: dict[tuple[str, str], tuple[str, ...]] = {
         "Sketch_V",
         "Sketch_H",
     ),
+    ("groove_sketch", "direction"): ("auto", "forward", "reversed"),
     ("create_hole", "hole_type"): ("Dimension", "ThroughAll"),
+    ("create_hole", "direction"): ("auto", "normal", "reversed"),
     ("create_hole", "thread_type"): ("ISO", "ISO_FINE", "UNC", "UNF"),
     ("create_hole", "drill_point"): ("Flat", "Angled"),
+    ("create_cylindrical_cut", "direction"): (
+        "auto",
+        "forward",
+        "reversed",
+    ),
     ("linear_pattern", "direction"): ("X", "Y", "Z"),
     ("polar_pattern", "axis"): ("X", "Y", "Z"),
     ("mirrored_feature", "plane"): ("XY", "XZ", "YZ"),

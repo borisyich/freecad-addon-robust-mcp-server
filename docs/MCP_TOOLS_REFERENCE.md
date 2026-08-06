@@ -791,7 +791,7 @@ pocket_sketch(
     sketch_name: str,
     length: float,
     type: str = "Length",  # "Length", "ThroughAll", "UpToFirst", "UpToFace"
-    direction: str = "normal",  # "normal" or "reversed"
+    direction: str = "auto",  # "auto", "normal", or "reversed"
     base_feature_name: str | None = None,
     up_to_face: str | None = None,  # required for UpToFace: "Pad.Face3"
     name: str | None = None,
@@ -800,10 +800,14 @@ pocket_sketch(
 ```
 
 `direction` is relative to the sketch normal and does not depend on GUI
-selection: `normal` cuts along the positive global sketch normal and `reversed`
-along the negative normal. The tool translates this to Pocket's inverted
-internal `Reversed` convention and reports the actual global
-`effective_direction`. `base_feature_name` is authoritative when supplied.
+selection. The default `auto` tries the negative normal first and then the
+positive normal, retaining the first result that passes Shape/Tip checks and
+measurably decreases Body volume. This makes a face-supported pocket cut into
+the solid even when the face normal points outward. `normal` cuts along the
+positive global sketch normal and `reversed` along the negative normal; explicit
+directions never fall back. The response reports `requested_direction`, the
+selected `direction`, `effective_direction`, and compact `direction_attempts`.
+`base_feature_name` is authoritative when supplied.
 Without it, the tool uses a valid preceding Body Tip when possible, then the
 nearest valid preceding single-solid feature. `type="UpToFace"` requires an
 explicit and prevalidated `up_to_face="Feature.FaceN"`; supplying that parameter
@@ -820,11 +824,16 @@ groove_sketch(
     angle: float = 360.0,
     axis: str = "Base_X",
     symmetric: bool = False,
-    reversed: bool = False,
+    reversed: bool | None = None,  # deprecated compatibility override
+    direction: str = "auto",  # "auto", "forward", or "reversed"
     name: str | None = None,
     doc_name: str | None = None
 ) -> dict
 ```
+
+For a partial groove, `auto` tries both revolution directions and retains the
+first measurable subtraction. Use an explicit direction when both sides of an
+embedded profile intersect material and design intent requires one side.
 
 #### subtractive_loft
 
@@ -871,14 +880,18 @@ thread_helix(
     operation: str = "additive",  # "additive" or "subtractive"
     axis: str = "Sketch_H",       # Base_X/Y/Z or Sketch_V/H
     left_handed: bool = False,
-    reversed: bool = False,
+    reversed: bool | None = None,  # deprecated compatibility override
+    direction: str = "auto",  # "auto", "forward", or "reversed"
     base_feature_name: str | None = None,
     name: str | None = None,
     doc_name: str | None = None,
 ) -> dict
 ```
 
-The response includes the resolved base, axis, turn count, Shape/Tip status, and volume diagnostics.
+The response includes the resolved base, axis, selected direction, attempted
+directions, turn count, Shape/Tip status, and volume diagnostics. `auto` validates
+an actual volume increase for additive helices and an actual decrease for
+subtractive helices.
 
 #### create_hole
 
@@ -898,7 +911,8 @@ create_hole(
     thread_type: str = "ISO",  # "ISO", "ISO_FINE", "UNC", "UNF"
     thread_size: str = "M6",
     drill_point: str = "Flat",  # "Flat" or "Angled" for blind holes
-    reversed: bool | None = None,  # None = try both directions automatically
+    reversed: bool | None = None,  # deprecated compatibility override
+    direction: str = "auto",  # "auto", "normal", or "reversed"
     name: str | None = None,
     doc_name: str | None = None
 ) -> dict
@@ -906,7 +920,10 @@ create_hole(
 
 `ISO_FINE` is normalized to FreeCAD's `ISOMetricFineProfile` enumeration before
 the requested `thread_size` is selected. The size is validated against the
-enumeration advertised by the running FreeCAD build.
+enumeration advertised by the running FreeCAD build. `auto` tries both sides
+and validates material removal at every profile circle. `normal` and `reversed`
+are relative to the global sketch normal and do not fall back. Do not supply an
+explicit `direction` together with the legacy `reversed` flag.
 
 #### create_cylindrical_cut
 
@@ -922,9 +939,19 @@ create_cylindrical_cut(
     diameter: float,
     depth: float,
     name: str | None = None,
-    doc_name: str | None = None
+    doc_name: str | None = None,
+    direction: str = "auto",  # "auto", "forward", or "reversed"
 ) -> dict
 ```
+
+`auto` first tests `axis_direction` and then its negative, retaining the first
+validated material removal. `forward` uses the supplied vector exactly;
+`reversed` uses its negative. The selected world-space vector is returned as
+`effective_axis_direction` together with compact attempt diagnostics.
+
+The boolean `boolean_operation(op_type="cut")`, `subtractive_loft`, and
+`subtractive_pipe` have no two-sided direction property: their subtracting
+geometry or path already defines the operation, so `auto` is not applicable.
 
 ### Edge Operations
 

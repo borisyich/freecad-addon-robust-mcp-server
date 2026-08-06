@@ -683,7 +683,7 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                         },
                         {
                             "name": "pocket_sketch",
-                            "description": "Validated sketch cut with explicit direction and optional base",
+                            "description": "Validated sketch cut with automatic direction and optional base",
                             "key_params": [
                                 "sketch_name",
                                 "length",
@@ -699,8 +699,13 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                         },
                         {
                             "name": "groove_sketch",
-                            "description": "Cut by revolving sketch (subtractive revolve)",
-                            "key_params": ["sketch_name", "axis", "angle"],
+                            "description": "Cut by revolving a sketch with validated automatic direction",
+                            "key_params": [
+                                "sketch_name",
+                                "axis",
+                                "angle",
+                                "direction",
+                            ],
                         },
                         {
                             "name": "thread_helix",
@@ -711,6 +716,7 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                                 "height",
                                 "operation",
                                 "axis",
+                                "direction",
                             ],
                         },
                         {
@@ -744,6 +750,7 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                                 "sketch_name",
                                 "diameter",
                                 "depth",
+                                "direction",
                                 "thread_type",
                                 "thread_size",
                             ],
@@ -760,6 +767,7 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                                 "axis_direction",
                                 "diameter",
                                 "depth",
+                                "direction",
                             ],
                         },
                         {

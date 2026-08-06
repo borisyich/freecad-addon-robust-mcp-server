@@ -127,6 +127,10 @@
 - Prevented false `spreadsheet_apply_batch` success by validating computed
   formulas and flushing GUI events before translating new Report View formula
   diagnostics into `FreeCADReportError`.
+- Added validated `direction="auto"` defaults to directional Pocket, Hole,
+  cylindrical cut, Groove, and Helix operations. Explicit directions remain
+  strict, legacy `reversed` inputs remain compatible, and responses report the
+  selected direction plus compact per-direction diagnostics.
 
 This project uses **component-specific versioning**. Each component has its own
 release notes and version history.

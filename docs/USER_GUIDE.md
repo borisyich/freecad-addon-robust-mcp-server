@@ -372,7 +372,7 @@ pocket_sketch(
     sketch_name="SlotSketch",
     length=5,
     type="ThroughAll",
-    direction="reversed",
+    direction="auto",
     base_feature_name="Pad",
 )
 
@@ -424,7 +424,7 @@ metric; use formal checkpoints only when the task benefits from them.
 
 ## Reliable PartDesign Feature Selection
 
-- `pocket_sketch` accepts `direction="normal"|"reversed"` and an optional explicit `base_feature_name`. `normal` means the positive global sketch normal even though FreeCAD Pocket internally uses an inverted `Reversed` flag. Without an explicit base it prefers a valid preceding Body Tip, then the nearest valid preceding solid.
+- Directional subtractive tools default to `direction="auto"` and retain only a Shape/Tip-valid result with a measurable volume decrease. `pocket_sketch` and `create_hole` use `normal`/`reversed` relative to the global sketch normal; `create_cylindrical_cut`, `groove_sketch`, and `thread_helix` use `forward`/`reversed`. Explicit directions never fall back. For `pocket_sketch`, an optional `base_feature_name` selects the authoritative base; otherwise it prefers a valid preceding Body Tip, then the nearest valid preceding solid.
 - `set_body_tip` changes the active Body result without using `edit_object` or GUI selection and validates the resulting Shape/Tip contract.
 - `linear_pattern` and `polar_pattern` are for one transformation of a non-pattern seed. Use `multi_transform_pattern` for combined linear and polar stages. For drawing reconstruction, accept the single seed through `compare_images` before repeating it.
 - Pattern, Pocket, and thread responses include before/after volume diagnostics. A valid Shape is not proof that the intended amount of material changed.

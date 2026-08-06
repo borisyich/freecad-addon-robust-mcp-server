@@ -1776,7 +1776,7 @@ _result_ = {{
         sketch_name: str,
         length: float,
         type: Literal["Length", "ThroughAll", "UpToFirst", "UpToFace"] = "Length",
-        direction: Literal["normal", "reversed"] = "normal",
+        direction: Literal["auto", "normal", "reversed"] = "auto",
         base_feature_name: str | None = None,
         up_to_face: str | None = None,
         name: str | None = None,
@@ -1784,7 +1784,7 @@ _result_ = {{
     ) -> dict[str, Any]:
         """Create a validated Pocket (cut extrusion) from a sketch.
 
-        The cutting direction is explicit and independent from GUI selection.
+        The cutting direction is semantic and independent from GUI selection.
         The base can be named directly. When omitted, the tool prefers a valid
         current Body Tip that precedes the sketch, then falls back to the nearest
         valid single-solid predecessor in the Body history.
@@ -1793,10 +1793,11 @@ _result_ = {{
             sketch_name: Name of the sketch to pocket.
             length: Pocket depth.
             type: Pocket type: "Length", "ThroughAll", "UpToFirst", "UpToFace".
-            direction: Requested world-space cut direction relative to the sketch:
-                ``normal`` follows its positive normal and ``reversed`` follows
-                the negative normal. The tool translates this semantic direction
-                to FreeCAD Pocket's inverted ``Reversed`` convention.
+            direction: Requested world-space cut direction relative to the sketch.
+                ``auto`` (default) tries the negative and positive sketch-normal
+                directions and keeps the first result that measurably removes
+                material. ``normal`` follows the positive normal and ``reversed``
+                follows the negative normal. Explicit directions never fall back.
             base_feature_name: Optional explicit single-solid feature before the
                 sketch. Avoids relying on Body history when the intended base is
                 not the current Tip.
@@ -1812,6 +1813,8 @@ _result_ = {{
                 - type_id: Object type
                 - validated: Check if the result has a valid shape
                 - removed_volume: Removed volume of the body
+                - direction: Selected normal or reversed sketch direction
+                - direction_attempts: Compact validation evidence per side
                 - base_feature: Feature used as the Pocket base
                 - base_selection: How the base was resolved
                 - effective_direction: Global cut direction vector
@@ -1899,10 +1902,6 @@ try:
     pocket.Profile = sketch
     pocket.Length = {length}
     pocket.Type = {type!r}
-    # PartDesign::Pocket's default direction is opposite the positive sketch
-    # normal. Translate the public geometric direction instead of exposing that
-    # inverted implementation detail to callers.
-    pocket.Reversed = {direction!r} == "normal"
     if up_to_face_reference is not None:
         pocket.UpToFace = up_to_face_reference
 
@@ -1911,15 +1910,52 @@ try:
     except Exception:
         sketch_rotation = sketch.Placement.Rotation
     sketch_normal = sketch_rotation.multVec(FreeCAD.Vector(0, 0, 1))
-    effective_direction_vec = (
-        sketch_normal if pocket.Reversed else sketch_normal * -1.0
-    )
     body.Tip = pocket
 
-    doc.recompute()
-    validation = _validate_subtractive_feature(pocket, body, base_shape)
-    if not validation["ok"]:
-        raise ValueError("Pocket failed: " + "; ".join(validation["reasons"]))
+    requested_direction = {direction!r}
+    direction_candidates = (
+        ["reversed", "normal"]
+        if requested_direction == "auto"
+        else [requested_direction]
+    )
+    direction_attempts = []
+    selected_direction = None
+    effective_direction_vec = None
+    validation = None
+    for candidate_direction in direction_candidates:
+        # PartDesign::Pocket's default direction is opposite the positive sketch
+        # normal. Translate the public geometric direction instead of exposing
+        # that inverted implementation detail to callers.
+        pocket.Reversed = candidate_direction == "normal"
+        candidate_vector = (
+            sketch_normal if pocket.Reversed else sketch_normal * -1.0
+        )
+        doc.recompute()
+        candidate_validation = _validate_subtractive_feature(
+            pocket, body, base_shape
+        )
+        direction_attempts.append({{
+            "direction": candidate_direction,
+            "ok": candidate_validation["ok"],
+            "reasons": candidate_validation["reasons"],
+            "result_volume": candidate_validation["result_volume"],
+        }})
+        if candidate_validation["ok"]:
+            selected_direction = candidate_direction
+            effective_direction_vec = candidate_vector
+            validation = candidate_validation
+            break
+
+    if validation is None or selected_direction is None:
+        details = "; ".join(
+            f"{{attempt['direction']}}: "
+            + (", ".join(attempt["reasons"]) or "unknown failure")
+            for attempt in direction_attempts
+        )
+        raise ValueError(
+            "Pocket produced no valid subtractive result in the tested "
+            "direction(s): " + details
+        )
     doc.commitTransaction()
 except Exception:
     try:
@@ -1948,7 +1984,9 @@ _result_ = {{
     "result_volume": validation["result_volume"],
     "base_feature": base_feature.Name,
     "base_selection": base_selection,
-    "direction": {direction!r},
+    "requested_direction": requested_direction,
+    "direction": selected_direction,
+    "direction_attempts": direction_attempts,
     "up_to_face": {up_to_face!r},
     "effective_direction": [
         float(effective_direction_vec.x),
@@ -2271,7 +2309,8 @@ _result_ = {{
         angle: float = 360.0,
         axis: Literal["Base_X", "Base_Y", "Base_Z", "Sketch_V", "Sketch_H"] = "Base_X",
         symmetric: bool = False,
-        reversed: bool = False,
+        reversed: bool | None = None,
+        direction: Literal["auto", "forward", "reversed"] = "auto",
         name: str | None = None,
         doc_name: str | None = None,
     ) -> dict[str, Any]:
@@ -2289,7 +2328,11 @@ _result_ = {{
                 - "Sketch_V" - Sketch vertical axis
                 - "Sketch_H" - Sketch horizontal axis
             symmetric: Whether to revolve symmetrically. Defaults to False.
-            reversed: Whether to reverse direction. Defaults to False.
+            reversed: Deprecated FreeCAD-property direction override. Prefer
+                ``direction``. It may not be combined with an explicit non-auto
+                direction.
+            direction: ``auto`` (default) tries forward and reversed revolution
+                directions and keeps the first measurable material removal.
             name: Groove feature name. Auto-generated if None.
             doc_name: Document containing the sketch. Uses active document if None.
 
@@ -2300,7 +2343,13 @@ _result_ = {{
                 - type_id: Object type
                 - validated: Check if the result has a valid shape
                 - removed_volume: Removed volume of the body
+                - direction: Selected forward or reversed revolution direction
+                - direction_attempts: Compact validation evidence per side
         """
+        if reversed is not None and direction != "auto":
+            raise ValueError(
+                "Specify direction or the legacy reversed flag, not both"
+            )
         bridge = await get_bridge()
 
         code = f"""
@@ -2326,39 +2375,76 @@ base_feature = _find_preceding_single_solid_feature(body, sketch)
 if base_feature is None:
     raise ValueError("Groove requires a valid single-solid feature before the sketch")
 base_shape = base_feature.Shape.copy()
+original_tip_name = getattr(getattr(body, "Tip", None), "Name", None)
+created_groove_name = None
 
 # Wrap in transaction for undo support
 doc.openTransaction("Groove Sketch")
 try:
     groove_name = {name!r} or "Groove"
     groove = body.newObject("PartDesign::Groove", groove_name)
+    created_groove_name = groove.Name
     groove.Profile = sketch
     groove.Angle = {angle}
     # FreeCAD 1.0 uses Midplane instead of Symmetric
     if {symmetric}:
         groove.Midplane = True
-    groove.Reversed = {reversed}
-
     # Resolve the requested Body or sketch axis.
     axis_name = {axis!r}
     groove.ReferenceAxis, resolved_axis_name = _resolve_revolution_axis(
         body, sketch, axis_name, 'Groove'
     )
 
-    doc.recompute()
+    requested_direction = {direction!r}
+    legacy_reversed = {reversed!r}
+    if legacy_reversed is not None:
+        requested_direction = "reversed" if legacy_reversed else "forward"
+    directions_to_try = (
+        ["forward", "reversed"]
+        if requested_direction == "auto"
+        else [requested_direction]
+    )
+    direction_attempts = []
+    selected_direction = None
+    validation = None
+    for candidate_direction in directions_to_try:
+        groove.Reversed = candidate_direction == "reversed"
+        doc.recompute()
+        candidate_validation = _validate_subtractive_feature(
+            groove, body, base_shape
+        )
+        direction_attempts.append({{
+            "direction": candidate_direction,
+            "ok": candidate_validation["ok"],
+            "reasons": candidate_validation["reasons"],
+            "result_volume": candidate_validation["result_volume"],
+        }})
+        if candidate_validation["ok"]:
+            selected_direction = candidate_direction
+            validation = candidate_validation
+            break
 
-    validation = _validate_subtractive_feature(groove, body, base_shape)
-    if not validation["ok"]:
-        details = "; ".join(validation["reasons"])
+    if validation is None or selected_direction is None:
+        details = "; ".join(
+            f"{{attempt['direction']}}: "
+            + (", ".join(attempt["reasons"]) or "unknown failure")
+            for attempt in direction_attempts
+        )
         raise ValueError(
-            'Groove' + " failed: " + details +
-            ". Common causes: the groove profile does not intersect the base "
-            "solid, the profile is open, or the selected axis is incorrect."
+            "Groove produced no valid subtractive result in the tested "
+            "direction(s): " + details + ". Common causes: the groove profile "
+            "does not intersect the base solid, the profile is open, or the "
+            "selected axis is incorrect."
         )
 
     doc.commitTransaction()
 except Exception:
-    doc.abortTransaction()
+    try:
+        doc.abortTransaction()
+    finally:
+        _cleanup_failed_partdesign_feature(
+            doc, body, created_groove_name, original_tip_name
+        )
     raise
 
 _result_ = {{
@@ -2367,6 +2453,9 @@ _result_ = {{
     "type_id": groove.TypeId,
     "validated": validation["ok"],
     "removed_volume": validation["removed_volume"],
+    "requested_direction": requested_direction,
+    "direction": selected_direction,
+    "direction_attempts": direction_attempts,
 }}
 """
         result = await bridge.execute_python(code)
@@ -2384,7 +2473,8 @@ _result_ = {{
             "Base_X", "Base_Y", "Base_Z", "Sketch_V", "Sketch_H"
         ] = "Sketch_H",
         left_handed: bool = False,
-        reversed: bool = False,
+        reversed: bool | None = None,
+        direction: Literal["auto", "forward", "reversed"] = "auto",
         base_feature_name: str | None = None,
         name: str | None = None,
         doc_name: str | None = None,
@@ -2403,18 +2493,28 @@ _result_ = {{
             operation: Add material or subtract material.
             axis: Body origin or sketch axis lying in the sketch plane.
             left_handed: Create a left-handed helix.
-            reversed: Reverse the axial helix direction.
+            reversed: Deprecated FreeCAD-property direction override. Prefer
+                ``direction``. It may not be combined with an explicit non-auto
+                direction.
+            direction: ``auto`` (default) tries both axial directions and keeps
+                the first valid volume change: increase for additive operation,
+                decrease for subtractive operation.
             base_feature_name: Optional explicit single-solid base before sketch.
             name: Feature name. Auto-generated if None.
             doc_name: Document containing the sketch. Uses active if None.
 
         Returns:
-            Created helix information, resolved base/axis and volume diagnostics.
+            Created helix information, selected direction, resolved base/axis,
+            and volume diagnostics.
         """
         if pitch <= 0:
             raise ValueError("Thread pitch must be greater than zero")
         if height <= 0:
             raise ValueError("Thread height must be greater than zero")
+        if reversed is not None and direction != "auto":
+            raise ValueError(
+                "Specify direction or the legacy reversed flag, not both"
+            )
         bridge = await get_bridge()
         code = f"""
 {REVOLUTION_AXIS_RUNTIME_HELPERS}
@@ -2465,18 +2565,48 @@ try:
     helix.Angle = 0.0
     helix.Growth = 0.0
     helix.LeftHanded = {left_handed}
-    helix.Reversed = {reversed}
     body.Tip = helix
 
-    doc.recompute()
-    validation = (
-        _validate_additive_feature(helix, body, base_shape)
-        if operation_name == "additive"
-        else _validate_subtractive_feature(helix, body, base_shape)
+    requested_direction = {direction!r}
+    legacy_reversed = {reversed!r}
+    if legacy_reversed is not None:
+        requested_direction = "reversed" if legacy_reversed else "forward"
+    directions_to_try = (
+        ["forward", "reversed"]
+        if requested_direction == "auto"
+        else [requested_direction]
     )
-    if not validation["ok"]:
+    direction_attempts = []
+    selected_direction = None
+    validation = None
+    for candidate_direction in directions_to_try:
+        helix.Reversed = candidate_direction == "reversed"
+        doc.recompute()
+        candidate_validation = (
+            _validate_additive_feature(helix, body, base_shape)
+            if operation_name == "additive"
+            else _validate_subtractive_feature(helix, body, base_shape)
+        )
+        direction_attempts.append({{
+            "direction": candidate_direction,
+            "ok": candidate_validation["ok"],
+            "reasons": candidate_validation["reasons"],
+            "result_volume": candidate_validation["result_volume"],
+        }})
+        if candidate_validation["ok"]:
+            selected_direction = candidate_direction
+            validation = candidate_validation
+            break
+
+    if validation is None or selected_direction is None:
+        details = "; ".join(
+            f"{{attempt['direction']}}: "
+            + (", ".join(attempt["reasons"]) or "unknown failure")
+            for attempt in direction_attempts
+        )
         raise ValueError(
-            "Thread helix failed: " + "; ".join(validation["reasons"])
+            "Thread helix produced no valid material change in the tested "
+            "direction(s): " + details
         )
     doc.commitTransaction()
 except Exception:
@@ -2510,6 +2640,9 @@ _result_ = {{
     "result_volume": result_volume,
     "added_volume": validation.get("added_volume"),
     "removed_volume": validation.get("removed_volume"),
+    "requested_direction": requested_direction,
+    "direction": selected_direction,
+    "direction_attempts": direction_attempts,
     "volume_diagnostics": volume_diagnostics,
 }}
 """
@@ -2531,6 +2664,7 @@ _result_ = {{
         thread_size: str = "M6",
         drill_point: Literal["Flat", "Angled"] = "Flat",
         reversed: bool | None = None,
+        direction: Literal["auto", "normal", "reversed"] = "auto",
         name: str | None = None,
         doc_name: str | None = None,
     ) -> dict[str, Any]:
@@ -2540,7 +2674,8 @@ _result_ = {{
         may be consumed by only one PartDesign feature. The operation succeeds
         only when FreeCAD produces one valid solid and the body's volume is
         measurably reduced. If the default direction does not cut the body, the
-        opposite direction is tried automatically unless ``reversed`` is set.
+        opposite direction is tried automatically unless an explicit direction
+        is set. The legacy ``reversed`` flag remains available for compatibility.
 
         Prefer a sketch attached to an actual planar face of the solid. Origin
         planes are allowed, but can be ambiguous in a complex Body. Sketches on
@@ -2560,8 +2695,12 @@ _result_ = {{
             thread_size: Thread designation, for example ``M6`` or ``1/4``.
             drill_point: Blind-hole bottom shape: ``Flat`` (default) or
                 ``Angled``. ``Angled`` adds the drill-tip cone.
-            reversed: Explicit cutting direction. If None, both directions are
-                tried and the first valid subtractive result is retained.
+            reversed: Deprecated FreeCAD-property direction override. Prefer
+                ``direction``. It may not be combined with an explicit non-auto
+                ``direction`` value.
+            direction: ``auto`` (default) tries both sides and keeps the first
+                valid subtractive result. ``normal`` follows the positive global
+                sketch normal; ``reversed`` follows the negative normal.
             name: Hole feature name. Auto-generated if None.
             doc_name: Existing document containing the sketch. Uses the active
                 document if None. A missing document is never created silently.
@@ -2573,11 +2712,18 @@ _result_ = {{
                 - type_id: Object type
                 - validated: Check if the result has a valid shape
                 - removed_volume: Removed volume of the body
+                - direction: Selected normal or reversed sketch direction
+                - effective_direction: Selected world-space unit vector
+                - direction_attempts: Compact validation evidence per side
         """
         if diameter <= 0:
             raise ValueError("Hole diameter must be greater than zero")
         if depth <= 0:
             raise ValueError("Hole depth must be greater than zero")
+        if reversed is not None and direction != "auto":
+            raise ValueError(
+                "Specify direction or the legacy reversed flag, not both"
+            )
 
         normalized_hole_type = hole_type.strip().lower().replace("_", "")
         hole_type_map = {
@@ -2857,14 +3003,19 @@ try:
         hole.Threaded = False
         hole.Diameter = {diameter}
 
-    requested_reversed = {reversed!r}
+    requested_direction = {direction!r}
+    legacy_reversed = {reversed!r}
+    if legacy_reversed is not None:
+        requested_direction = "normal" if legacy_reversed else "reversed"
     directions_to_try = (
-        [requested_reversed] if requested_reversed is not None else [False, True]
+        ["reversed", "normal"]
+        if requested_direction == "auto"
+        else [requested_direction]
     )
     attempts = []
     selected = None
-    for direction in directions_to_try:
-        hole.Reversed = bool(direction)
+    for candidate_direction in directions_to_try:
+        hole.Reversed = candidate_direction == "normal"
         doc.recompute()
         validation = _validate_subtractive_feature(
             hole,
@@ -2911,7 +3062,8 @@ try:
                     + ", ".join(str(index) for index in missing_locations)
                 )
         attempts.append({{
-            "reversed": bool(direction),
+            "direction": candidate_direction,
+            "reversed": bool(hole.Reversed),
             "ok": validation["ok"],
             "reasons": validation["reasons"],
             "status": validation["status"],
@@ -2919,7 +3071,8 @@ try:
         }})
         if validation["ok"]:
             selected = {{
-                "reversed": bool(direction),
+                "direction": candidate_direction,
+                "reversed": bool(hole.Reversed),
                 "result_volume": validation["result_volume"],
                 "solid_count": validation["solid_count"],
                 "removed_solid_count": validation["removed_solid_count"],
@@ -2930,7 +3083,7 @@ try:
 
     if selected is None:
         details = "; ".join(
-            f"reversed={{attempt['reversed']}}: "
+            f"{{attempt['direction']}}: "
             + (", ".join(attempt["reasons"]) or "unknown failure")
             for attempt in attempts
         )
@@ -2971,6 +3124,14 @@ _result_ = {{
     "type_id": hole.TypeId,
     "validated": True,
     "removed_volume": removed_volume,
+    "requested_direction": requested_direction,
+    "direction": selected["direction"],
+    "effective_direction": [
+        float((sketch_normal if selected["reversed"] else sketch_normal * -1.0).x),
+        float((sketch_normal if selected["reversed"] else sketch_normal * -1.0).y),
+        float((sketch_normal if selected["reversed"] else sketch_normal * -1.0).z),
+    ],
+    "direction_attempts": attempts,
 }}
 """
         result = await bridge.execute_python(code)
@@ -2988,6 +3149,7 @@ _result_ = {{
         depth: float,
         name: str | None = None,
         doc_name: str | None = None,
+        direction: Literal["auto", "forward", "reversed"] = "auto",
     ) -> dict[str, Any]:
         """Create a validated cylindrical cut with an explicit world-space axis.
 
@@ -2995,7 +3157,9 @@ _result_ = {{
         other cylindrical cuts that do not start from an actual planar face.
         Unlike ``create_hole``, it does not require a sketch or datum-plane
         attachment. The cylinder starts at ``axis_origin`` and extends by
-        ``depth`` along the normalized ``axis_direction``.
+        ``depth`` along the normalized ``axis_direction``. By default the tool
+        tries that vector and its opposite, retaining the first direction that
+        measurably removes material.
 
         Args:
             body_name: Existing PartDesign Body to cut.
@@ -3006,6 +3170,9 @@ _result_ = {{
             name: Feature name. Defaults to ``CylindricalCut``.
             doc_name: Existing document containing the Body. Uses the active
                 document if None. A missing document is never created silently.
+            direction: ``auto`` (default) tries ``axis_direction`` first and
+                then its opposite. ``forward`` uses the vector exactly;
+                ``reversed`` uses its negative. Explicit modes never fall back.
 
         Returns:
             Dictionary with created cylindrical cut information:
@@ -3014,6 +3181,9 @@ _result_ = {{
                 - type_id: Object type
                 - validated: Check if the result has a valid shape
                 - removed_volume: Removed volume of the body
+                - direction: Selected forward or reversed axis direction
+                - effective_axis_direction: Selected world-space unit vector
+                - direction_attempts: Compact validation evidence per side
         """
         if len(axis_origin) != 3:
             raise ValueError("axis_origin must contain exactly three coordinates")
@@ -3097,39 +3267,76 @@ try:
     cut.Height = float({depth})
     if hasattr(cut, "Angle"):
         cut.Angle = 360.0
-    cut.Placement = FreeCAD.Placement(
-        origin,
-        FreeCAD.Rotation(FreeCAD.Vector(0, 0, 1), direction),
+    requested_direction = {direction!r}
+    direction_candidates = (
+        ["forward", "reversed"]
+        if requested_direction == "auto"
+        else [requested_direction]
     )
-    doc.recompute()
-
-    validation = _validate_subtractive_feature(
-        cut,
-        body,
-        base_shape,
-        volume_tolerance=volume_tolerance,
-    )
-    if not validation["ok"]:
-        details = "; ".join(validation["reasons"])
-        raise ValueError(
-            "Cylindrical cut failed: " + details + ". Check that the axis "
-            "starts at or outside the material, points through the Body, and "
-            "uses sufficient depth."
+    direction_attempts = []
+    selected_direction = None
+    selected_axis_direction = None
+    validation = None
+    for candidate_direction in direction_candidates:
+        candidate_axis_direction = (
+            direction
+            if candidate_direction == "forward"
+            else direction * -1.0
         )
+        cut.Placement = FreeCAD.Placement(
+            origin,
+            FreeCAD.Rotation(
+                FreeCAD.Vector(0, 0, 1), candidate_axis_direction
+            ),
+        )
+        doc.recompute()
 
-    # Confirm that material was removed specifically along the requested axis.
-    requested_tool = Part.makeCylinder(
-        float({diameter}) / 2.0,
-        float({depth}),
-        origin,
-        direction,
-    )
-    removed_shape = base_shape.cut(cut.Shape)
-    axis_removed_volume = float(removed_shape.common(requested_tool).Volume)
-    if axis_removed_volume <= volume_tolerance:
+        candidate_validation = _validate_subtractive_feature(
+            cut,
+            body,
+            base_shape,
+            volume_tolerance=volume_tolerance,
+        )
+        axis_removed_volume = 0.0
+        if candidate_validation["ok"]:
+            requested_tool = Part.makeCylinder(
+                float({diameter}) / 2.0,
+                float({depth}),
+                origin,
+                candidate_axis_direction,
+            )
+            removed_shape = base_shape.cut(cut.Shape)
+            axis_removed_volume = float(
+                removed_shape.common(requested_tool).Volume
+            )
+            if axis_removed_volume <= volume_tolerance:
+                candidate_validation["ok"] = False
+                candidate_validation["reasons"].append(
+                    "removed no material along the candidate axis"
+                )
+        direction_attempts.append({{
+            "direction": candidate_direction,
+            "ok": candidate_validation["ok"],
+            "reasons": candidate_validation["reasons"],
+            "result_volume": candidate_validation["result_volume"],
+            "axis_removed_volume": axis_removed_volume,
+        }})
+        if candidate_validation["ok"]:
+            selected_direction = candidate_direction
+            selected_axis_direction = candidate_axis_direction
+            validation = candidate_validation
+            break
+
+    if validation is None or selected_direction is None:
+        details = "; ".join(
+            f"{{attempt['direction']}}: "
+            + (", ".join(attempt["reasons"]) or "unknown failure")
+            for attempt in direction_attempts
+        )
         raise ValueError(
-            "Cylindrical cut changed the Body but removed no material along "
-            "the requested axis"
+            "Cylindrical cut produced no valid subtractive result in the "
+            "tested direction(s): " + details + ". Check that the axis origin "
+            "and depth can reach the Body."
         )
 
     doc.commitTransaction()
@@ -3151,6 +3358,14 @@ _result_ = {{
     "type_id": cut.TypeId,
     "validated": True,
     "removed_volume": validation["removed_volume"],
+    "requested_direction": requested_direction,
+    "direction": selected_direction,
+    "effective_axis_direction": [
+        float(selected_axis_direction.x),
+        float(selected_axis_direction.y),
+        float(selected_axis_direction.z),
+    ],
+    "direction_attempts": direction_attempts,
 }}
 """
         result = await bridge.execute_python(code)

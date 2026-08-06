@@ -945,6 +945,10 @@ class TestPartDesignTools:
         result = await pocket_sketch(sketch_name="Sketch", length=5)
 
         assert result["name"] == "Pocket"
+        generated_code = mock_bridge.execute_python.await_args.args[0]
+        assert "requested_direction = 'auto'" in generated_code
+        assert '["reversed", "normal"]' in generated_code
+        assert "direction_attempts" in generated_code
         mock_bridge.execute_python.assert_called_once()
 
     @pytest.mark.asyncio
@@ -1005,6 +1009,10 @@ class TestPartDesignTools:
         result = await groove(sketch_name="Sketch", angle=180)
 
         assert result["name"] == "Groove"
+        generated_code = mock_bridge.execute_python.await_args.args[0]
+        assert "requested_direction = 'auto'" in generated_code
+        assert '["forward", "reversed"]' in generated_code
+        assert "direction_attempts" in generated_code
         mock_bridge.execute_python.assert_called_once()
 
     @pytest.mark.asyncio
@@ -1204,7 +1212,24 @@ class TestPartDesignTools:
 
         generated_code = mock_bridge.execute_python.await_args.args[0]
         assert "resolved_thread_profile = 'ISOMetricProfile'" in generated_code
-        assert "[False, True]" in generated_code
+        assert '["reversed", "normal"]' in generated_code
+        assert "requested_direction = 'auto'" in generated_code
+
+    @pytest.mark.asyncio
+    async def test_create_hole_rejects_conflicting_direction_inputs(
+        self, register_tools, mock_bridge
+    ):
+        """The semantic direction and legacy bool must not conflict."""
+        create_hole = register_tools["create_hole"]
+
+        with pytest.raises(ValueError, match="not both"):
+            await create_hole(
+                sketch_name="HoleSketch",
+                direction="normal",
+                reversed=False,
+            )
+
+        mock_bridge.execute_python.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_create_hole_accepts_iso_fine_with_underscore(
@@ -1275,7 +1300,8 @@ class TestPartDesignTools:
         assert result["removed_volume"] == 250.0
         generated_code = mock_bridge.execute_python.await_args.args[0]
         assert 'body.newObject("PartDesign::SubtractiveCylinder"' in generated_code
-        assert "FreeCAD.Rotation(FreeCAD.Vector(0, 0, 1), direction)" in generated_code
+        assert '["forward", "reversed"]' in generated_code
+        assert "candidate_axis_direction" in generated_code
         assert "axis_removed_volume" in generated_code
 
     @pytest.mark.asyncio
@@ -1301,6 +1327,42 @@ class TestPartDesignTools:
                 diameter=5,
                 depth=10,
             )
+
+        mock_bridge.execute_python.assert_not_called()
+
+    def test_directional_subtractive_tools_default_to_auto(self, register_tools):
+        """Every two-sided material-removal tool should expose auto by default."""
+        for tool_name in (
+            "pocket_sketch",
+            "groove_sketch",
+            "thread_helix",
+            "create_hole",
+            "create_cylindrical_cut",
+        ):
+            parameter = inspect.signature(register_tools[tool_name]).parameters[
+                "direction"
+            ]
+            assert parameter.default == "auto", tool_name
+
+    @pytest.mark.asyncio
+    async def test_legacy_reversed_conflicts_with_explicit_direction(
+        self, register_tools, mock_bridge
+    ):
+        """Legacy boolean direction must not override an explicit semantic mode."""
+        calls = (
+            ("groove_sketch", {"sketch_name": "GrooveSketch"}),
+            (
+                "thread_helix",
+                {"sketch_name": "ThreadSketch", "pitch": 1.0, "height": 5.0},
+            ),
+        )
+        for tool_name, arguments in calls:
+            with pytest.raises(ValueError, match="not both"):
+                await register_tools[tool_name](
+                    **arguments,
+                    direction="forward",
+                    reversed=True,
+                )
 
         mock_bridge.execute_python.assert_not_called()
 
@@ -1923,7 +1985,9 @@ async def test_pocket_sketch_exposes_direction_and_explicit_base() -> None:
     code = bridge.execute_python.await_args.args[0]
     assert "_resolve_partdesign_base_feature" in code
     assert "'LinearPatternBands'" in code
-    assert "pocket.Reversed = 'reversed' == \"normal\"" in code
+    assert "requested_direction = 'reversed'" in code
+    assert 'else [requested_direction]' in code
+    assert 'pocket.Reversed = candidate_direction == "normal"' in code
     assert "sketch_normal if pocket.Reversed else sketch_normal * -1.0" in code
     assert '"volume_diagnostics"' in code
 
@@ -2089,6 +2153,8 @@ async def test_thread_helix_and_set_body_tip_are_registered_and_validated() -> N
     assert '"PartDesign::AdditiveHelix"' in helix_code
     assert "helix.Pitch = 1.5" in helix_code
     assert "_validate_additive_feature" in helix_code
+    assert '["forward", "reversed"]' in helix_code
+    assert "direction_attempts" in helix_code
 
     tip = await registered["set_body_tip"]("Body", "Pad")
     tip_code = bridge.execute_python.await_args_list[1].args[0]

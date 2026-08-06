@@ -94,14 +94,14 @@ Geometry-changing operations are transaction-backed where applicable. Use `histo
 | `edit_sketch_geometry` | Apply geometry edits to one sketch in a single transaction, including endpoint/radius arcs and tangent line fillets. |
 | `edit_sketch_constraints` | Apply constraint edits and Spreadsheet expressions in one transaction; Fix/Block may cover at most 50% of sketch geometry. |
 | `pad_sketch` | Create a Pad (extrusion) from a sketch. |
-| `pocket_sketch` | Create a validated Pocket with explicit direction and optional base feature. |
+| `pocket_sketch` | Create a validated Pocket; automatic direction is the default and an explicit base is optional. |
 | `fillet_edges` | Add fillet (rounded edges) to an object. |
 | `chamfer_edges` | Add chamfer (beveled edges) to an object. |
 | `revolution_sketch` | Create a Revolution (rotational extrusion) from a sketch. |
-| `groove_sketch` | Create a Groove (subtractive revolution) from a sketch. |
-| `thread_helix` | Create additive or subtractive editable helical thread geometry. |
-| `create_hole` | Create a validated Hole feature from a face- or origin-plane sketch. |
-| `create_cylindrical_cut` | Create a validated cylindrical cut with an explicit world-space axis. |
+| `groove_sketch` | Create a Groove with automatic or explicit revolution direction. |
+| `thread_helix` | Create additive or subtractive editable helical geometry with validated automatic direction. |
+| `create_hole` | Create a validated Hole with automatic or explicit sketch-normal direction. |
+| `create_cylindrical_cut` | Create a validated cylindrical cut; automatically try the supplied world-space axis and its reverse. |
 | `linear_pattern` | Create a Linear Pattern from a PartDesign feature. |
 | `polar_pattern` | Create and validate a Polar Pattern from one non-pattern feature. |
 | `multi_transform_pattern` | Combine linear and polar stages in one native PartDesign MultiTransform. |
