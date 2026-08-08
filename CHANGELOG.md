@@ -155,6 +155,27 @@
   thickness, clearance/interference, minimum gap, and point-to-face evidence.
 - Extended `inspect_object` and `select_subshapes` with paged semantic
   `VertexN` records so point measurements no longer require guessed indices.
+  - Added eight dedicated measurement tools for fast/optimal local/world bounding
+  boxes, distance, angle, radius/diameter, validated wall thickness,
+  clearance/interference, minimum gap, and point-to-face evidence. The strict
+  `measure_geometry` dispatcher remains available for compatibility.
+- Fixed invisible native SheetMetal results by attaching the same operation-
+  specific GUI ViewProvider classes used by the SheetMetal Workbench. Creation
+  and inspection responses now report visibility, display mode, available modes,
+  and ViewProvider evidence, and reject `DisplayMode = None` in GUI sessions.
+- Hardened SheetMetal inspection and unfolding: the formed input must be the
+  current Body Tip with native SheetMetal history, while unsupported additive or
+  copied PartDesign features after the final native SheetMetal feature make the
+  model explicitly not unfold-ready. Valid subtractive hole/cut features remain
+  supported.
+- Prevented parametric-validation bypasses through audit-only expressions such
+  as `0 * (Parameters.Width + Parameters.Height)` and `0 mm * (...)`; structurally
+  neutralized references are now reported but do not count as solid-driving.
+- Added protocol-level sheet-metal planning instructions: when a source drawing
+  includes a flat pattern, agents must inventory the complete blank, panel
+  regions, bend lines/directions, thickness, radius, and neutral-axis rule before
+  modeling, use native SheetMetal bends, then unfold and compare against the
+  source instead of substituting PartDesign construction.
 
 This project uses **component-specific versioning**. Each component has its own
 release notes and version history.

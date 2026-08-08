@@ -644,6 +644,9 @@ class TestMcpInstructions:
             "use select_subshapes rather than manual Face/Edge enumeration",
             "save every explicit non-starred dimension",
             "bind the alias to the dimensional constraint expression path",
+            "when a flat pattern is supplied, inventory the complete blank",
+            "do not substitute additive PartDesign features for sheet-metal bends",
+            "unfold with explicit material data",
             "compare_images",
             "Compare one seed element before applying any pattern",
             "validate_parametric_model",
@@ -704,7 +707,7 @@ class TestMcpInstructions:
         assert '"title":' not in payload
         assert description_bytes < 10_000
         assert largest_tool_bytes < 8_000
-        # The eight measurement contracts share one discriminated schema. Keep
-        # both the total payload and average bounded for the 123-tool surface.
-        assert payload_bytes < 94_000
-        assert payload_bytes / len(listed) < 770
+        # Eight dedicated measurement schemas trade a modest registry increase
+        # for substantially clearer agent calls. Keep the 131-tool payload bounded.
+        assert payload_bytes < 103_000
+        assert payload_bytes / len(listed) < 780

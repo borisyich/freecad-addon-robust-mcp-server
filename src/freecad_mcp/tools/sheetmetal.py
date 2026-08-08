@@ -223,6 +223,18 @@ def _sm_body_for(obj):
     return None
 
 
+def _sm_require_current_tip(base):
+    body = _sm_body_for(base)
+    if body is not None:
+        tip = getattr(body, "Tip", None)
+        if tip is not None and tip is not base:
+            raise ValueError(
+                f"Base feature {base.Name!r} is not the current Body Tip {tip.Name!r}; "
+                "inspect and continue the linear sheet-metal history from the Tip"
+            )
+    return body
+
+
 def _sm_require_workbench():
     import importlib
     try:
@@ -259,18 +271,107 @@ def _sm_validate_refs(base, refs, allowed_types):
 def _sm_new_feature(doc, base, name, allow_body=True):
     if doc.getObject(name) is not None:
         raise ValueError(f"Object {name!r} already exists in document {doc.Name!r}")
-    body = _sm_body_for(base) if allow_body else None
+    body = _sm_require_current_tip(base) if allow_body else None
     if body is not None:
-        tip = getattr(body, "Tip", None)
-        if tip is not None and tip is not base:
-            raise ValueError(
-                f"Base feature {base.Name!r} is not the current Body Tip {tip.Name!r}; "
-                "sheet-metal histories must remain linear"
-            )
         feature = body.newObject("PartDesign::FeaturePython", name)
     else:
         feature = doc.addObject("Part::FeaturePython", name)
     return feature, body
+
+
+def _sm_attach_view_provider(feature, module_name, tree_class, flat_class=None, body=None):
+    # Attach the same GUI provider as the SheetMetal command implementation.
+    if not bool(getattr(FreeCAD, "GuiUp", False)):
+        return None
+    import importlib
+    module = importlib.import_module(module_name)
+    class_name = flat_class if body is not None and flat_class else tree_class
+    provider = getattr(module, class_name)
+    provider(feature.ViewObject)
+    return class_name
+
+
+def _sm_set_visibility(obj, visible):
+    try:
+        obj.ViewObject.Visibility = bool(visible)
+        return True
+    except Exception:
+        try:
+            obj.Visibility = bool(visible)
+            return True
+        except Exception:
+            return False
+
+
+def _sm_view_evidence(feature, body=None):
+    if not bool(getattr(FreeCAD, "GuiUp", False)):
+        return {"gui_available": False}
+    view = feature.ViewObject
+    modes = list(view.listDisplayModes())
+    display_mode = str(getattr(view, "DisplayMode", ""))
+    if (not display_mode or display_mode == "None") and modes:
+        try:
+            view.DisplayMode = modes[0]
+            display_mode = str(view.DisplayMode)
+        except Exception:
+            pass
+    view.Visibility = True
+    if body is not None:
+        _sm_set_visibility(body, True)
+    if not display_mode or display_mode == "None":
+        raise ValueError(
+            f"Sheet-metal feature {feature.Name!r} has no usable GUI display mode; "
+            "its SheetMetal ViewProvider was not initialized"
+        )
+    return {
+        "gui_available": True,
+        "view_provider_type": type(getattr(view, "Proxy", None)).__name__,
+        "display_mode": display_mode,
+        "available_display_modes": modes,
+        "visible": bool(view.Visibility),
+        "body_visible": None if body is None else bool(body.ViewObject.Visibility),
+    }
+
+
+def _sm_unfold_history_evidence(base):
+    # Reject formed states that left native sheet-metal construction semantics.
+    body = _sm_body_for(base)
+    if body is None:
+        proxy_type = type(getattr(base, "Proxy", None)).__name__
+        native = proxy_type.startswith("SM")
+        return {
+            "native_history": native,
+            "unsupported_post_sheet_features": [],
+            "supported": native,
+        }
+    items = list(getattr(body, "Group", []))
+    native_indexes = [
+        index for index, item in enumerate(items)
+        if type(getattr(item, "Proxy", None)).__name__.startswith("SM")
+    ]
+    unsupported = []
+    if native_indexes:
+        for item in items[max(native_indexes) + 1:]:
+            type_id = str(getattr(item, "TypeId", ""))
+            if type(getattr(item, "Proxy", None)).__name__.startswith("SM"):
+                continue
+            if type_id.startswith("Sketcher::") or type_id in {
+                "PartDesign::Plane", "PartDesign::Line", "PartDesign::Point",
+                "PartDesign::CoordinateSystem",
+            }:
+                continue
+            if type_id.startswith("PartDesign::") and any(
+                token in type_id for token in ("Pocket", "Hole", "Subtractive", "Groove")
+            ):
+                continue
+            shape = getattr(item, "Shape", None)
+            if shape is not None and not shape.isNull():
+                unsupported.append({"name": item.Name, "type_id": type_id})
+    return {
+        "native_history": bool(native_indexes),
+        "unsupported_post_sheet_features": unsupported,
+        "supported": bool(native_indexes) and not unsupported,
+    }
 
 
 def _sm_shape_evidence(feature, base=None, body=None):
@@ -318,8 +419,9 @@ def _sm_finish(doc, feature, base=None, body=None):
     feature.touch()
     doc.recompute()
     evidence = _sm_shape_evidence(feature, base, body)
-    if base is not None and hasattr(base, "Visibility"):
-        base.Visibility = False
+    evidence["view"] = _sm_view_evidence(feature, body)
+    if base is not None:
+        _sm_set_visibility(base, False)
     return evidence
 """
 
@@ -344,7 +446,9 @@ def register_sheetmetal_tools(
 
         Use this once before a sheet-metal workflow. It distinguishes a missing
         workbench from an unsupported feature and returns the exact compact
-        operation vocabulary accepted by ``create_sheet_metal_feature``.
+        operation vocabulary accepted by ``create_sheet_metal_feature``. If a
+        drawing includes an explicit flat pattern, inventory its entire outline,
+        panel regions, and bend table before creating the first feature.
         """
         bridge = await get_bridge()
         code = r"""
@@ -431,7 +535,10 @@ _result_ = {
         An open wire creates connected walls using ``wall_length`` and
         ``radius``. Put the sketch in a PartDesign Body to keep one editable
         manufactured-part history. The operation is transactional and rejects
-        null, invalid, empty, or multi-solid results.
+        null, invalid, empty, or multi-solid results. For a drawing with an
+        explicit flat pattern, prefer a fully constrained sketch of the complete
+        blank followed by native ``fold`` operations along recorded bend lines;
+        do not silently reduce the source to its largest panel.
         """
         if thickness <= 0 or radius <= 0 or wall_length <= 0:
             raise ValueError("thickness, radius, and wall_length must be positive")
@@ -450,6 +557,9 @@ try:
         raise ValueError(f"{{sketch.Name!r}} is not a Sketcher object")
     feature, body = _sm_new_feature(doc, sketch, {name!r}, True)
     SMBaseBend(feature, sketch)
+    _result_view_provider = _sm_attach_view_provider(
+        feature, "SheetMetalBaseCmd", "SMBaseViewProvider", body=body
+    )
     feature.Thickness = {float(thickness)!r}
     feature.Radius = {float(radius)!r}
     feature.Length = {float(wall_length)!r}
@@ -458,6 +568,7 @@ try:
     feature.Reverse = {bool(reverse)!r}
     _result_ = _sm_finish(doc, feature, sketch, body)
     _result_["operation"] = "base"
+    _result_["view_provider"] = _result_view_provider
     _result_["thickness"] = float(feature.Thickness.Value)
     _result_["radius"] = float(feature.Radius.Value)
     doc.commitTransaction()
@@ -483,7 +594,9 @@ except Exception:
         ``from_solid`` and exposes only that operation's valid fields. Resolve
         topology with ``select_subshapes`` first; do not guess ``EdgeN`` or
         ``FaceN``. A PartDesign base must be the current Body Tip, keeping the
-        history linear and the final result one valid solid.
+        history linear and the final result one valid solid. Use ``fold`` for a
+        source-defined bend line in a complete flat blank; use ``flange`` when
+        constructing from a formed-only drawing's base panel.
         """
         normalized = _normalize_operation(operation)
         payload = normalized.model_dump()
@@ -517,6 +630,9 @@ try:
         refs = _sm_validate_refs(base, operation["edges"], {{"Edge"}})
         from SheetMetalCmd import SMBendWall
         SMBendWall(feature, base, refs)
+        _result_view_provider = _sm_attach_view_provider(
+            feature, "SheetMetalCmd", "SMViewProviderTree", "SMViewProviderFlat", body
+        )
         feature.length = operation["length"]
         feature.radius = operation["radius"]
         feature.angle = operation["angle"]
@@ -544,6 +660,9 @@ try:
             raise ValueError(f"{{bend_line.Name!r}} is not a Sketcher object")
         from SheetMetalFoldCmd import SMFoldWall
         SMFoldWall(feature, base, refs, bend_line)
+        _result_view_provider = _sm_attach_view_provider(
+            feature, "SheetMetalFoldCmd", "SMFoldViewProvider", body=body
+        )
         feature.radius = operation["radius"]
         feature.angle = operation["angle"]
         feature.kfactor = operation["k_factor"]
@@ -554,16 +673,25 @@ try:
         refs = _sm_validate_refs(base, operation["edges"], {{"Edge"}})
         from SheetMetalJunction import SMJunction
         SMJunction(feature, base, refs)
+        _result_view_provider = _sm_attach_view_provider(
+            feature, "SheetMetalJunction", "SMJViewProviderTree", body=body
+        )
         feature.gap = operation["gap"]
     elif op == "relief":
         refs = _sm_validate_refs(base, operation["vertices"], {{"Vertex"}})
         from SheetMetalRelief import SMRelief
         SMRelief(feature, base, refs)
+        _result_view_provider = _sm_attach_view_provider(
+            feature, "SheetMetalRelief", "SMReliefViewProviderTree", body=body
+        )
         feature.relief = operation["size"]
     elif op == "corner_relief":
         refs = _sm_validate_refs(base, operation["edges"], {{"Edge"}})
         from SheetMetalCornerReliefCmd import SMCornerRelief
         SMCornerRelief(feature, base, refs)
+        _result_view_provider = _sm_attach_view_provider(
+            feature, "SheetMetalCornerReliefCmd", "SMCornerReliefVP", body=body
+        )
         feature.ReliefSketch = {{
             "circle": "Circle", "circle_scaled": "Circle-Scaled",
             "square": "Square", "square_scaled": "Square-Scaled",
@@ -580,6 +708,9 @@ try:
             sketch = _sm_object(doc, operation["sketch"], "Extend sketch")
         from SheetMetalExtendCmd import SMExtrudeWall
         SMExtrudeWall(feature, base, refs, sketch)
+        _result_view_provider = _sm_attach_view_provider(
+            feature, "SheetMetalExtendCmd", "SMViewProviderTree", body=body
+        )
         feature.length = operation["length"]
         feature.gap1 = operation["gap_left"]
         feature.gap2 = operation["gap_right"]
@@ -591,6 +722,9 @@ try:
         refs = _sm_validate_refs(base, operation["edges"], {{"Edge"}})
         from SheetMetalHem import SMHem
         SMHem(feature, base, refs)
+        _result_view_provider = _sm_attach_view_provider(
+            feature, "SheetMetalHem", "SMViewProviderTree", "SMViewProviderFlat", body
+        )
         feature.HemType = operation["hem_type"].title()
         feature.width = operation["width"]
         feature.radius = operation["radius"]
@@ -613,6 +747,9 @@ try:
         refs = _sm_validate_refs(base, operation["edges"], {{"Edge"}})
         from SheetMetalBend import SMSolidBend
         SMSolidBend(feature, base, refs)
+        _result_view_provider = _sm_attach_view_provider(
+            feature, "SheetMetalBend", "SMBendViewProviderFlat", body=body
+        )
         feature.radius = operation["radius"]
     elif op == "from_solid":
         refs = _sm_validate_refs(
@@ -620,6 +757,9 @@ try:
         )
         from SheetMetalFromSolid import SMFromSolid
         SMFromSolid(feature, base, refs)
+        _result_view_provider = _sm_attach_view_provider(
+            feature, "SheetMetalFromSolid", "SMFromSolidViewProvider", body=body
+        )
         feature.Thickness = operation["thickness"]
         feature.Radius = operation["radius"]
         feature.Invert = operation["invert"]
@@ -628,6 +768,7 @@ try:
     _result_ = _sm_finish(doc, feature, base, body)
     _result_["operation"] = op
     _result_["references"] = refs
+    _result_["view_provider"] = _result_view_provider
     doc.commitTransaction()
 except Exception:
     doc.abortTransaction()
@@ -675,6 +816,19 @@ doc.openTransaction("Unfold Sheet Metal")
 try:
     _sm_require_workbench()
     base = _sm_object(doc, {feature_name!r}, "Formed feature")
+    body = _sm_require_current_tip(base)
+    history_evidence = _sm_unfold_history_evidence(base)
+    if not history_evidence["supported"]:
+        if not history_evidence["native_history"]:
+            raise ValueError(
+                "Unfold requires a native SheetMetal feature history; use "
+                "create_sheet_metal_base or the from_solid operation first"
+            )
+        raise ValueError(
+            "Unfold rejected unsupported shape-producing features after the last "
+            "native SheetMetal feature: "
+            + str(history_evidence["unsupported_post_sheet_features"])
+        )
     refs = _sm_validate_refs(base, [{stationary_face!r}], {{"Face"}})
     selected_face = base.getSubObject(refs[0])
     surface_name = type(selected_face.Surface).__name__
@@ -685,6 +839,9 @@ try:
     feature, _unused_body = _sm_new_feature(doc, base, {name!r}, False)
     from SheetMetalUnfoldCmd import SMUnfold
     SMUnfold(feature, base, refs)
+    _result_view_provider = _sm_attach_view_provider(
+        feature, "SheetMetalUnfoldCmd", "SMUnfoldViewProvider"
+    )
     if material["material_sheet"] is not None:
         sheet = _sm_object(doc, material["material_sheet"], "Material sheet")
         if getattr(sheet, "TypeId", "") != "Spreadsheet::Sheet":
@@ -706,7 +863,9 @@ try:
     )
     _result_["k_factor_standard"] = str(feature.KFactorStandard)
     _result_["generated_sketches"] = list(feature.UnfoldSketches)
-    base.Visibility = True
+    _result_["view_provider"] = _result_view_provider
+    _result_["history_evidence"] = history_evidence
+    _sm_set_visibility(base, True)
     doc.commitTransaction()
 except Exception:
     doc.abortTransaction()
@@ -742,6 +901,7 @@ if shape is None or shape.isNull():
     raise ValueError(f"{{obj.Name!r}} has no inspectable shape")
 body = _sm_body_for(obj)
 history_objects = list(getattr(body, "Group", [])) if body is not None else [obj]
+history_evidence = _sm_unfold_history_evidence(obj)
 history = []
 declared_thicknesses = []
 for item in history_objects:
@@ -751,7 +911,10 @@ for item in history_objects:
         history.append({{
             "name": item.Name,
             "proxy_type": proxy_type,
-            "visible": bool(getattr(item, "Visibility", False)),
+            "visible": bool(getattr(getattr(item, "ViewObject", None), "Visibility", False)),
+            "display_mode": str(
+                getattr(getattr(item, "ViewObject", None), "DisplayMode", "")
+            ),
         }})
     for prop_name in ("Thickness", "thickness"):
         if hasattr(item, prop_name):
@@ -798,6 +961,20 @@ if not declared_thicknesses and estimated_thickness is None:
     warnings.append("Nominal thickness could not be established")
 if thickness_warning:
     warnings.append("Thickness estimate failed: " + thickness_warning)
+if body is not None and getattr(body, "Tip", None) is not obj:
+    warnings.append("Object is not the current Body Tip; continue from the Tip before unfold")
+if not history_evidence["native_history"]:
+    warnings.append("No native SheetMetal feature exists in the active history")
+if history_evidence["unsupported_post_sheet_features"]:
+    warnings.append(
+        "Unsupported shape-producing features follow the last native SheetMetal "
+        "feature: " + str(history_evidence["unsupported_post_sheet_features"])
+    )
+view = getattr(obj, "ViewObject", None)
+display_mode = str(getattr(view, "DisplayMode", ""))
+visible = bool(getattr(view, "Visibility", False))
+if bool(getattr(FreeCAD, "GuiUp", False)) and (not display_mode or display_mode == "None"):
+    warnings.append("Object has no usable GUI display mode (missing SheetMetal ViewProvider)")
 _result_ = {{
     "object": obj.Name,
     "type_id": obj.TypeId,
@@ -815,7 +992,17 @@ _result_ = {{
     "stationary_face_candidates": planar[:8],
     "sheet_metal_history": history,
     "native_sheet_metal_history": bool(history),
-    "unfold_ready": bool(shape.isValid() and len(shape.Solids) == 1 and planar),
+    "history_evidence": history_evidence,
+    "display_mode": display_mode,
+    "visible": visible,
+    "unfold_ready": bool(
+        shape.isValid()
+        and len(shape.Solids) == 1
+        and planar
+        and (body is None or getattr(body, "Tip", None) is obj)
+        and history_evidence["supported"]
+        and (not bool(getattr(FreeCAD, "GuiUp", False)) or bool(display_mode and display_mode != "None"))
+    ),
     "warnings": warnings,
 }}
 """

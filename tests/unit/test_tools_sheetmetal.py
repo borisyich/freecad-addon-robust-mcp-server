@@ -160,6 +160,9 @@ async def test_create_base_is_native_transactional_and_validated(
     assert result["proxy_type"] == "SMBaseBend"
     assert 'doc.openTransaction("Create Sheet Metal Base")' in code
     assert "from SheetMetalBaseCmd import SMBaseBend" in code
+    assert '"SheetMetalBaseCmd", "SMBaseViewProvider"' in code
+    assert "_sm_view_evidence(feature, body)" in code
+    assert 'display_mode == "None"' in code
     assert "feature.Thickness = 1.5" in code
     assert "feature.BendSide = 'Middle'" in code
     assert "doc.abortTransaction()" in code
@@ -297,6 +300,9 @@ async def test_every_feature_variant_dispatches_to_native_proxy(
     assert 'doc.openTransaction("Create Sheet Metal Feature")' in code
     assert "doc.abortTransaction()" in code
     assert "tip is not base" in code
+    assert "_sm_attach_view_provider" in code
+    assert '"SheetMetalCmd", "SMViewProviderTree", "SMViewProviderFlat"' in code
+    assert '"SheetMetalHem", "SMViewProviderTree", "SMViewProviderFlat"' in code
 
 
 @pytest.mark.asyncio
@@ -340,8 +346,12 @@ async def test_unfold_keeps_formed_body_and_uses_explicit_manual_rule(
     assert "False)" in code
     assert 'feature.MaterialSheet = "_manual"' in code
     assert 'feature.KFactor = material["k_factor"]' in code
-    assert "base.Visibility = True" in code
+    assert "_sm_set_visibility(base, True)" in code
     assert '"Plane" not in surface_name' in code
+    assert "_sm_require_current_tip(base)" in code
+    assert "_sm_unfold_history_evidence(base)" in code
+    assert "unsupported_post_sheet_features" in code
+    assert '"SheetMetalUnfoldCmd", "SMUnfoldViewProvider"' in code
 
 
 @pytest.mark.asyncio
@@ -385,6 +395,8 @@ async def test_inspector_reports_manufacturing_evidence(registered_tools, mock_b
         "stationary_face_candidates",
         "cylindrical_bend_face_count",
         "sheet_metal_history",
+        "history_evidence",
+        "display_mode",
         "unfold_ready",
         "warnings",
     ):

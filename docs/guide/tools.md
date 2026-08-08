@@ -1,6 +1,6 @@
 # Tools Reference
 
-The server currently registers **123 MCP tools**. This page is generated from the actual `@mcp.tool()` definitions in `src/freecad_mcp/tools` and is the exact inventory.
+The server currently registers **131 MCP tools**. This page is generated from the actual `@mcp.tool()` definitions in `src/freecad_mcp/tools` and is the exact inventory.
 
 Geometry-changing operations are transaction-backed where applicable. Use `history(action="undo")` for explicit recovery, `get_console_output` for console diagnostics, and `recompute_document` for document recomputation.
 
@@ -11,7 +11,7 @@ Geometry-changing operations are transaction-backed where applicable. Use `histo
 | [Execution](#execution) | `src/freecad_mcp/tools/execution.py` | 5 |
 | [Documents](#documents) | `src/freecad_mcp/tools/documents.py` | 7 |
 | [Objects / Part](#objects-part) | `src/freecad_mcp/tools/objects.py` | 33 |
-| [Measurements](#measurements) | `src/freecad_mcp/tools/measurements.py` | 1 |
+| [Measurements](#measurements) | `src/freecad_mcp/tools/measurements.py` | 9 |
 | [PartDesign / Sketcher](#partdesign-sketcher) | `src/freecad_mcp/tools/partdesign.py` | 28 |
 | [Sheet Metal](#sheet-metal) | `src/freecad_mcp/tools/sheetmetal.py` | 5 |
 | [Spreadsheet](#spreadsheet) | `src/freecad_mcp/tools/spreadsheet.py` | 11 |
@@ -22,7 +22,7 @@ Geometry-changing operations are transaction-backed where applicable. Use `histo
 | [Validation](#validation) | `src/freecad_mcp/tools/validation.py` | 5 |
 | [Export / Import](#export-import) | `src/freecad_mcp/tools/export.py` | 2 |
 | [Macros](#macros) | `src/freecad_mcp/tools/macros.py` | 6 |
-| **Total** |  | **123** |
+| **Total** |  | **131** |
 
 ## Execution
 
@@ -88,14 +88,24 @@ Geometry-changing operations are transaction-backed where applicable. Use `histo
 
 ## Measurements
 
-`measure_geometry` is headless-safe, forces target-object recompute by default,
-uses millimetres/degrees, and accepts `FaceN`, `EdgeN`, or `VertexN` references
-returned by `select_subshapes`. Its required discriminator `measurement.kind`
-selects one strict parameter variant, so unrelated fields cannot be mixed.
+Use the dedicated `measure_bounding_box`, `measure_distance`, `measure_angle`,
+`measure_radius`, `measure_wall_thickness`, `measure_clearance`,
+`measure_minimum_gap`, and `measure_point_to_face` tools. Their schemas expose
+only relevant arguments, use millimetres/degrees, and accept `FaceN`, `EdgeN`,
+or `VertexN` references returned by `select_subshapes`. `measure_geometry`
+remains as a strict discriminated compatibility dispatcher for older clients.
 
 | Tool | Description |
 |---|---|
-| `measure_geometry` | Select `bbox`, `distance`, `angle`, `radius`, `wall_thickness`, `clearance`, `minimum_gap`, or `point_to_face` through `measurement.kind`; returns OCCT and recompute evidence. |
+| `measure_bounding_box` | Measure fast or optimal local/world OCCT bounds and optional gap evidence. |
+| `measure_distance` | Measure exact minimum distance and closest-point support evidence. |
+| `measure_angle` | Measure directed or undirected angle between selected edges/faces. |
+| `measure_radius` | Measure constant radius and diameter on circular/axial geometry. |
+| `measure_wall_thickness` | Validate opposing faces and measure sheet or wall thickness. |
+| `measure_clearance` | Check actual clearance and interference against a requirement. |
+| `measure_minimum_gap` | Find the smallest pairwise gap in a bounded reference set. |
+| `measure_point_to_face` | Measure a world point or selected vertex to a selected face. |
+| `measure_geometry` | Compatibility dispatcher selecting a strict variant through `measurement.kind`. |
 
 ## PartDesign / Sketcher
 
@@ -135,7 +145,9 @@ selects one strict parameter variant, so unrelated fields cannot be mixed.
 These tools require the external FreeCAD SheetMetal Workbench. They create its
 native parametric `FeaturePython` objects, not final copied shapes. Keep one
 linear PartDesign Body history for the formed part; the unfolded manufacturing
-representation is created outside that Body.
+representation is created outside that Body. GUI sessions also require the
+matching SheetMetal ViewProvider; tool results and inspection report visibility
+and display-mode evidence.
 
 | Tool | Description |
 |---|---|
@@ -147,18 +159,22 @@ representation is created outside that Body.
 
 Recommended sequence:
 
-1. Call `sheet_metal_capabilities` once and create/constrain the base sketch.
-2. Call `create_sheet_metal_base`. A closed sketch represents a flat blank; an
+1. Call `sheet_metal_capabilities` once and verify the required operations.
+2. If the source includes a flat pattern, inventory the complete blank, split it
+   into panel regions, and record every bend line/direction before 3D modeling.
+   Do not reduce the source to only the largest panel.
+3. Create and fully constrain the base sketch, then call
+   `create_sheet_metal_base`. A closed sketch represents a flat blank; an
    open wire represents a wall profile.
-3. Use `select_subshapes` to resolve the intended topology. Pass those exact
+4. Use `select_subshapes` to resolve the intended topology. Pass those exact
    references to `create_sheet_metal_feature`; never guess `EdgeN`, `FaceN`, or
    `VertexN`.
-4. After each major flange or fold, inspect the formed feature and verify the
+5. After each major flange or fold, inspect the formed feature and verify the
    expected panel normal and silhouette. The next operation must use the current
    Body Tip as `base_feature`.
-5. Call `inspect_sheet_metal`, choose a planar stationary face from evidence,
+6. Call `inspect_sheet_metal`, choose a planar stationary face from evidence,
    and create the manufacturing representation with `unfold_sheet_metal`.
-6. Compare the unfold outline, bend lines, holes, and cutouts against the flat
+7. Compare the unfold outline, bend lines, holes, and cutouts against the flat
    drawing. A successful unfold does not by itself prove shop-floor bend
    sequence, tooling access, or deep-draw manufacturability.
 

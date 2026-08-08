@@ -894,10 +894,11 @@ Use compact `inspect_object()` for metrics and paged
 Use `select_subshapes` to turn those properties into candidate `FaceN`/`EdgeN`/`VertexN`
 references; do not write manual topology loops for ordinary selection tasks.
 
-For numerical evidence, use `measure_geometry` and select its strict `kind`:
-`bbox`, `distance`, `angle`, `radius`, `wall_thickness`, `clearance`,
-`minimum_gap`, or `point_to_face`. Do not derive dimensions from screenshots
-or cached bounds.
+For numerical evidence, use the dedicated `measure_bounding_box`,
+`measure_distance`, `measure_angle`, `measure_radius`,
+`measure_wall_thickness`, `measure_clearance`, `measure_minimum_gap`, or
+`measure_point_to_face` tool. Do not derive dimensions from screenshots or
+cached bounds. `measure_geometry` exists only for compatibility.
 
 ## Detailed Analysis with Typed Tools
 

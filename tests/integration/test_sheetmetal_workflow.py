@@ -26,9 +26,7 @@ INSIDE_RADIUS = 1.64
 K_FACTOR = 0.38
 BEND_ANGLE_DEG = 90.0
 MOLD_LINE_DISTANCE = 50.0
-BEND_ALLOWANCE = math.radians(BEND_ANGLE_DEG) * (
-    INSIDE_RADIUS + THICKNESS * K_FACTOR
-)
+BEND_ALLOWANCE = math.radians(BEND_ANGLE_DEG) * (INSIDE_RADIUS + THICKNESS * K_FACTOR)
 LEG_LENGTH = MOLD_LINE_DISTANCE - BEND_ALLOWANCE / 2.0
 FLANGE_LENGTH = INSIDE_RADIUS + THICKNESS + LEG_LENGTH
 
@@ -49,9 +47,7 @@ async def _require_sheetmetal(
     return capabilities
 
 
-async def _create_body_sketch(
-    tools: dict[str, Any], doc: str, sketch: str
-) -> None:
+async def _create_body_sketch(tools: dict[str, Any], doc: str, sketch: str) -> None:
     await _call(tools, "create_partdesign_body", name="Body", doc_name=doc)
     await _call(
         tools,
@@ -160,6 +156,9 @@ async def test_upstream_reference_l_profile_unfolds_to_100_mm_blank(
     )
     assert base["validated"] is True
     assert base["proxy_type"] == "SMBaseBend"
+    assert base["view"]["visible"] is True
+    assert base["view"]["display_mode"] != "None"
+    assert base["view_provider"] == "SMBaseViewProvider"
 
     inspection = await _call(
         tools,
@@ -170,6 +169,8 @@ async def test_upstream_reference_l_profile_unfolds_to_100_mm_blank(
     assert inspection["shape_valid"] is True
     assert inspection["solid_count"] == 1
     assert inspection["unfold_ready"] is True
+    assert inspection["visible"] is True
+    assert inspection["display_mode"] != "None"
     assert inspection["cylindrical_bend_face_count"] >= 1
     stationary_face = inspection["stationary_face_candidates"][0]["face"]
 
@@ -188,6 +189,9 @@ async def test_upstream_reference_l_profile_unfolds_to_100_mm_blank(
     assert unfolded["validated"] is True
     assert unfolded["material_source"] == "manual_k_factor"
     assert unfolded["generated_sketches"]
+    assert unfolded["view"]["visible"] is True
+    assert unfolded["view"]["display_mode"] != "None"
+    assert unfolded["view_provider"] == "SMUnfoldViewProvider"
 
     bounds = await _call(
         tools,
@@ -287,6 +291,8 @@ async def test_semantic_edge_flange_and_unfold_workflow(
         doc_name=doc,
     )
     assert base["validated"] is True
+    assert base["view"]["visible"] is True
+    assert base["view"]["display_mode"] != "None"
 
     selected = await _call(
         tools,
@@ -330,6 +336,9 @@ async def test_semantic_edge_flange_and_unfold_workflow(
     assert flange["validated"] is True
     assert flange["proxy_type"] == "SMBendWall"
     assert flange["references"] == selected["references"]
+    assert flange["view"]["visible"] is True
+    assert flange["view"]["display_mode"] != "None"
+    assert flange["view_provider"] == "SMViewProviderFlat"
 
     inspection = await _call(
         tools,
@@ -340,6 +349,8 @@ async def test_semantic_edge_flange_and_unfold_workflow(
     assert inspection["native_sheet_metal_history"] is True
     assert inspection["tip"] == "EdgeFlange"
     assert inspection["cylindrical_bend_face_count"] >= 1
+    assert inspection["visible"] is True
+    assert inspection["display_mode"] != "None"
     assert inspection["warnings"] == []
 
     unfolded = await _call(
@@ -354,6 +365,8 @@ async def test_semantic_edge_flange_and_unfold_workflow(
     assert unfolded["shape_valid"] is True
     assert unfolded["solid_count"] == 1
     assert unfolded["generated_sketches"]
+    assert unfolded["view"]["visible"] is True
+    assert unfolded["view"]["display_mode"] != "None"
 
     validation = await _assert_valid_model(tools, doc, ["BlankWidth", "BlankDepth"])
     usage = {
@@ -361,3 +374,82 @@ async def test_semantic_edge_flange_and_unfold_workflow(
         for item in validation["dimension_inventory"]["usage"]
     }
     assert usage == {"BlankWidth": "solid_driving", "BlankDepth": "solid_driving"}
+
+
+@pytest.mark.asyncio
+async def test_inspection_and_unfold_reject_ad_hoc_post_sheet_reconstruction(
+    live_tools: dict[str, Any],
+) -> None:
+    """A copied/additive PartDesign tail must not masquerade as unfold-ready."""
+    tools = live_tools
+    doc = "McpAuditSheetMetalBypass"
+    await _require_sheetmetal(tools, "base", "unfold")
+    await _fresh(tools, doc)
+    await _create_body_sketch(tools, doc, "BlankSketch")
+    await _call(
+        tools,
+        "edit_sketch_geometry",
+        sketch_name="BlankSketch",
+        operations=[
+            {
+                "op": "add_rectangle",
+                "x": 0.0,
+                "y": 0.0,
+                "width": 40.0,
+                "height": 25.0,
+            }
+        ],
+        doc_name=doc,
+    )
+    await _call(
+        tools,
+        "create_sheet_metal_base",
+        sketch_name="BlankSketch",
+        thickness=2.0,
+        radius=2.0,
+        name="NativeBase",
+        doc_name=doc,
+    )
+    await _call(
+        tools,
+        "execute_python",
+        code=f"""
+doc = FreeCAD.getDocument({doc!r})
+body = doc.getObject("Body")
+base = doc.getObject("NativeBase")
+bypass = body.newObject("PartDesign::Feature", "AdHocPadReconstruction")
+bypass.Shape = base.Shape.copy()
+body.Tip = bypass
+base.ViewObject.Visibility = False
+bypass.ViewObject.Visibility = True
+doc.recompute()
+_result_ = {{"tip": body.Tip.Name, "valid": bool(bypass.Shape.isValid())}}
+""",
+    )
+
+    inspection = await _call(
+        tools,
+        "inspect_sheet_metal",
+        object_name="AdHocPadReconstruction",
+        doc_name=doc,
+    )
+    assert inspection["shape_valid"] is True
+    assert inspection["native_sheet_metal_history"] is True
+    assert inspection["unfold_ready"] is False
+    assert inspection["history_evidence"]["unsupported_post_sheet_features"] == [
+        {"name": "AdHocPadReconstruction", "type_id": "PartDesign::Feature"}
+    ]
+    assert any(
+        "Unsupported shape-producing features" in item
+        for item in inspection["warnings"]
+    )
+
+    with pytest.raises(ValueError, match="unsupported shape-producing features"):
+        await _call(
+            tools,
+            "unfold_sheet_metal",
+            feature_name="AdHocPadReconstruction",
+            stationary_face=inspection["stationary_face_candidates"][0]["face"],
+            material={"k_factor": 0.38, "standard": "ansi"},
+            doc_name=doc,
+        )

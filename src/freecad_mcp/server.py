@@ -77,6 +77,14 @@ Use dedicated measure_* tools for numerical geometric evidence; obtain their
 FaceN/EdgeN/VertexN inputs from select_subshapes instead of guessing indices.
 For Spreadsheet-driven sketch dimensions, bind the alias to the dimensional
 constraint expression path and verify it with get_sketch_info.
+For sheet-metal drawings:
+- call sheet_metal_capabilities before modeling;
+- when a flat pattern is supplied, inventory the complete blank, panel regions,
+  bend lines/directions, thickness, radius, and neutral-axis rule first;
+- construct bends with native SheetMetal features and keep a linear Body Tip;
+  do not substitute additive PartDesign features for sheet-metal bends;
+- inspect the formed Tip, unfold with explicit material data, and compare the
+  generated flat pattern with the source.
 After every major feature:
 - recompute;
 - inspect the result;
@@ -88,6 +96,7 @@ Before completing a geometry-changing task, call
 validate_parametric_model and report significant findings. For drawing/sketch
 input, pass all saved dimension identifiers as required_dimension_names.
 """
+
 
 def _concise_tool_description(func: Any) -> str:
     """Use the tool's purpose paragraph without arbitrary character clipping."""

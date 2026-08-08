@@ -1,6 +1,6 @@
 # FreeCAD Robust MCP Server Tools Reference
 
-This document provides detailed signatures and examples for core MCP tools. It is not the exact inventory of all registered tools. Use [Tools Overview](guide/tools.md) or the MCP client's discovered tool list for the authoritative 123-tool inventory.
+This document provides detailed signatures and examples for core MCP tools. It is not the exact inventory of all registered tools. Use [Tools Overview](guide/tools.md) or the MCP client's discovered tool list for the authoritative 131-tool inventory.
 
 ---
 
@@ -15,7 +15,7 @@ The exact generated inventory is grouped as follows:
 | Execution | 5 |
 | Documents | 7 |
 | Objects / Part | 33 |
-| Measurements | 1 |
+| Measurements | 9 |
 | PartDesign / Sketcher | 28 |
 | Sheet Metal | 5 |
 | Spreadsheet | 11 |
@@ -26,7 +26,7 @@ The exact generated inventory is grouped as follows:
 | Validation | 5 |
 | Export / Import | 2 |
 | Macros | 6 |
-| **Total** | **123** |
+| **Total** | **131** |
 
 The sections below retain deeper examples for commonly used tools; they do not repeat every generated entry.
 
@@ -333,7 +333,7 @@ every listed type must occur among the edge's adjacent faces.
 
 Vertex location uses `point_bounds` in world coordinates. Vertex filters also
 accept minimum/maximum adjacent edge and face counts. Use the returned
-`VertexN` directly with `measure_geometry(measurement={"kind": ...})`; do not
+`VertexN` directly with the relevant dedicated `measure_*` tool; do not
 infer the vertex index from an edge endpoint.
 
 #### create_object
@@ -512,23 +512,15 @@ specific topology kind it rejects the wrong kind early. Resolve references with
 `select_subshapes`; `FaceN`, `EdgeN`, and `VertexN` remain transient topology
 names and must be selected again after geometry-changing recomputes.
 
-### measure_geometry
+There are eight dedicated tools: `measure_bounding_box`, `measure_distance`,
+`measure_angle`, `measure_radius`, `measure_wall_thickness`,
+`measure_clearance`, `measure_minimum_gap`, and `measure_point_to_face`. Their
+schemas expose only the relevant fields, which makes incorrect agent calls
+fail early and keeps tool discovery readable. All accept optional `doc_name`
+and `force_recompute` arguments. The older `measure_geometry` discriminated
+dispatcher remains available for compatibility.
 
-```python
-measure_geometry(
-    measurement: MeasurementRequest,  # strict variant selected by measurement.kind
-    doc_name: str | None = None,
-    force_recompute: bool = True,
-) -> dict
-```
-
-Supported kinds are `bbox`, `distance`, `angle`, `radius`, `wall_thickness`,
-`clearance`, `minimum_gap`, and `point_to_face`. Put operation-specific fields
-inside `measurement`; unknown or cross-kind fields are rejected. `doc_name` and
-`force_recompute` are common outer arguments. The public API intentionally has
-no per-operation aliases: always call this tool and choose a kind.
-
-#### `kind="bbox"`
+### measure_bounding_box
 
 `fast` uses cached `TopoShape.BoundBox`/OCCT `BRepBndLib::Add`; `optimal` uses
 `TopoShape.optimalBoundingBox`/OCCT `BRepBndLib::AddOptimal`. The response names
@@ -543,32 +535,30 @@ tolerances. `use_shape_tolerance=True` asks the optimal algorithm to enlarge
 bounds by topology tolerances; triangulation use is explicit and reported.
 
 ```python
-bounds = await measure_geometry(
-    measurement={"kind": "bbox", "object_name": "ImportedHousing",
-                 "mode": "optimal", "coordinate_system": "world",
-                 "use_triangulation": False, "use_shape_tolerance": False},
+bounds = await measure_bounding_box(
+    object_name="ImportedHousing", mode="optimal", coordinate_system="world",
+    use_triangulation=False, use_shape_tolerance=False,
     force_recompute=True,
 )
 assert bounds["mode"] == "optimal"
 ```
 
-#### `kind="distance"`
+### measure_distance
 
 Measure the OCCT minimum distance between complete Shapes or any supported
 subshape pair. The response includes all closest-point solutions up to a safe
 limit, OCCT support tuples, the method, tolerance, and contact classification.
 
 ```python
-distance = await measure_geometry(
-    measurement={"kind": "distance",
-                 "first": {"object_name": "Shaft", "subshape": "Face2"},
-                 "second": {"object_name": "Housing", "subshape": "Face7"},
-                 "tolerance_mm": 1e-6},
+distance = await measure_distance(
+    first={"object_name": "Shaft", "subshape": "Face2"},
+    second={"object_name": "Housing", "subshape": "Face7"},
+    tolerance_mm=1e-6,
     doc_name="Assembly",
 )
 ```
 
-#### `kind="angle"`
+### measure_angle
 
 Measure between explicit `EdgeN` or `FaceN` references. Stable directions come
 from line/circle axes, planar normals, or axial surfaces. Undirected mode treats
@@ -576,29 +566,27 @@ an axis and its reverse as equivalent (0–90 degrees); directed mode retains
 orientation (0–180 degrees).
 
 ```python
-angle = await measure_geometry(
-    measurement={"kind": "angle",
-                 "first": {"object_name": "Bracket", "subshape": "Face1"},
-                 "second": {"object_name": "Bracket", "subshape": "Face4"},
-                 "orientation": "undirected"},
+angle = await measure_angle(
+    first={"object_name": "Bracket", "subshape": "Face1"},
+    second={"object_name": "Bracket", "subshape": "Face4"},
+    orientation="undirected",
 )
 ```
 
-#### `kind="radius"`
+### measure_radius
 
 Returns both `radius_mm` and `diameter_mm` for circular edges, cylinders, and
 spheres. A toroid requires `radius_kind="major"` or `"minor"`. A conical face is
 rejected because it has no constant radius; select its circular boundary edge.
 
 ```python
-diameter = await measure_geometry(
-    measurement={"kind": "radius",
-                 "reference": {"object_name": "Bore", "subshape": "Face1"},
-                 "radius_kind": "auto"},
+diameter = await measure_radius(
+    reference={"object_name": "Bore", "subshape": "Face1"},
+    radius_kind="auto",
 )
 ```
 
-#### `kind="wall_thickness"`
+### measure_wall_thickness
 
 Requires two explicit `FaceN` references. Strict mode (the default) validates
 parallel planar faces or coaxial cylindrical faces before accepting their
@@ -611,15 +599,14 @@ outer = await select_subshapes(
     criteria={"kind": "face", "surface_types": ["Cylinder"],
               "sort_by": "area", "sort_order": "desc", "limit": 2},
 )
-thickness = await measure_geometry(
-    measurement={"kind": "wall_thickness",
-                 "first_face": {"object_name": "Tube", "subshape": outer["references"][0]},
-                 "second_face": {"object_name": "Tube", "subshape": outer["references"][1]},
-                 "strict": True},
+thickness = await measure_wall_thickness(
+    first_face={"object_name": "Tube", "subshape": outer["references"][0]},
+    second_face={"object_name": "Tube", "subshape": outer["references"][1]},
+    strict=True,
 )
 ```
 
-#### `kind="clearance"`
+### measure_clearance
 
 Compares actual minimum distance with `required_clearance_mm`. For complete
 object Shapes at contact distance, it also computes OCCT boolean-common volume
@@ -628,17 +615,17 @@ zero. Subshape clearance reports contact/distance evidence but not interference
 volume.
 
 ```python
-clearance = await measure_geometry(
-    measurement={"kind": "clearance",
-                 "first": {"object_name": "MovingJaw"},
-                 "second": {"object_name": "Guard"},
-                 "required_clearance_mm": 0.5, "tolerance_mm": 1e-6},
+clearance = await measure_clearance(
+    first={"object_name": "MovingJaw"},
+    second={"object_name": "Guard"},
+    required_clearance_mm=0.5,
+    tolerance_mm=1e-6,
 )
 if not clearance["passes"]:
     raise ValueError(clearance)
 ```
 
-#### `kind="minimum_gap"`
+### measure_minimum_gap
 
 Evaluates every pair among 2–30 complete Shapes or subshape references and
 returns `minimum_gap_mm`, `closest_pair`, and `pair_count`. Use it for a bounded
@@ -646,15 +633,15 @@ set of semantically selected candidates, not an unfiltered assembly with
 thousands of components.
 
 ```python
-gap = await measure_geometry(
-    measurement={"kind": "minimum_gap", "references": [
+gap = await measure_minimum_gap(
+    references=[
         {"object_name": "Gear"}, {"object_name": "Cover"},
         {"object_name": "Shaft", "subshape": "Face3"}],
-        "tolerance_mm": 1e-6},
+    tolerance_mm=1e-6,
 )
 ```
 
-#### `kind="point_to_face"`
+### measure_point_to_face
 
 Supply exactly one point source: a world-coordinate `[x, y, z]`, or a selected
 `VertexN`. The target must be an explicit `FaceN`. The response includes the
@@ -666,17 +653,15 @@ vertex = await select_subshapes(
     criteria={"kind": "vertex", "point_bounds": {"z_min": 99.9},
               "sort_by": "point_z", "sort_order": "desc", "limit": 1},
 )
-result = await measure_geometry(
-    measurement={"kind": "point_to_face",
-                 "face": {"object_name": "DatumPlate", "subshape": "Face1"},
-                 "vertex": {"object_name": "Probe", "subshape": vertex["references"][0]}},
+result = await measure_point_to_face(
+    face={"object_name": "DatumPlate", "subshape": "Face1"},
+    vertex={"object_name": "Probe", "subshape": vertex["references"][0]},
 )
 
 # Or use an explicit world point:
-result = await measure_geometry(
-    measurement={"kind": "point_to_face",
-                 "face": {"object_name": "DatumPlate", "subshape": "Face1"},
-                 "point": [25.0, 10.0, 100.0]},
+result = await measure_point_to_face(
+    face={"object_name": "DatumPlate", "subshape": "Face1"},
+    point=[25.0, 10.0, 100.0],
 )
 ```
 
@@ -1289,12 +1274,17 @@ the Body so it cannot replace the formed part's Tip.
 A reliable agent workflow is:
 
 1. call `sheet_metal_capabilities` once and check the exact installed operations;
-2. create and fully constrain a closed blank or open wall-path sketch;
-3. create a native base, inspect it, and keep the Body history linear;
-4. resolve every `FaceN`/`EdgeN` with `select_subshapes` or inspection evidence;
-5. add manufacturing features, inspecting after each major bend;
-6. unfold with an explicit K-factor convention or a material Spreadsheet;
-7. finish with `validate_parametric_model`.
+2. when the source includes a flat pattern, inventory its entire perimeter,
+   cutouts, panel regions, bend lines, bend directions, thickness, radius, and
+   neutral-axis rule before creating 3D geometry;
+3. create and fully constrain a closed blank or open wall-path sketch;
+4. create a native base, inspect its visibility/display evidence, and keep the
+   Body history linear;
+5. resolve every `FaceN`/`EdgeN` with `select_subshapes` or inspection evidence;
+6. add native manufacturing features, inspecting after each major bend;
+7. unfold with an explicit K-factor convention or a material Spreadsheet and
+   compare the generated blank/bend lines with the source flat pattern;
+8. finish with `validate_parametric_model`.
 
 Do not model a bent part as unrelated Pads, boxes, or fused solids. Such a
 shape may look correct but has no trustworthy neutral axis, bend allowance, or
@@ -1340,7 +1330,8 @@ create_sheet_metal_base(
   SheetMetal, not the mold-line leg. For a 90-degree bend, the upstream
   calculator expresses this as `flange_length = radius + thickness + leg_length`.
 - Put the sketch in the intended Body. The tool rejects a null, invalid,
-  multi-solid result and reports the native proxy, volume, Body, and Tip.
+  multi-solid result and reports the native proxy, volume, Body, Tip, GUI
+  ViewProvider, visibility, and display mode.
 
 ### create_sheet_metal_feature
 
@@ -1385,7 +1376,11 @@ inspect_sheet_metal(
 
 The report includes validity and solid count, declared and estimated
 thickness, native SheetMetal history, Body/Tip evidence, cylindrical bend-face
-count, warnings, and up to eight planar `stationary_face_candidates`. Use a
+count, visibility/display evidence, warnings, and up to eight planar
+`stationary_face_candidates`. `unfold_ready` is false when the object is not the
+current Body Tip, has no native SheetMetal history, has a missing ViewProvider,
+or has unsupported shape-producing PartDesign features after the final native
+SheetMetal feature. Use a
 candidate as evidence for unfold; use `select_subshapes` when the design intent
 requires a particular normal, location, or area.
 
@@ -1412,7 +1407,9 @@ unfold_sheet_metal(
 Exactly one bend-allowance source is mandatory. Manual values require an
 explicit ANSI or DIN convention; production workflows may instead name a real
 `Spreadsheet::Sheet` material table. The stationary face must resolve to a
-planar face. The result reports its material source, generated sketch objects,
+planar face. The input must be the current Body Tip and retain a native
+sheet-metal history; ad-hoc additive PartDesign reconstruction is rejected.
+The result reports its material source, generated sketch objects,
 and geometric validation evidence.
 
 ### Example: upstream 100 mm L-profile flat pattern
@@ -1936,6 +1933,10 @@ only when a compact response has identified a specific constraint-level problem.
 A source dimension counts only when the server can trace it to the active final
 solid. A named constraint on construction-only geometry, an inactive sketch,
 datum/helper object, or metadata-only property is reported as not solid-driving.
+References that are structurally neutralized by multiplication by zero (for
+example `0 * (Parameters.Width + Parameters.Height)`) are also reported as
+non-driving; they cannot be used as an audit-only expression bridge. This is a
+targeted structural guard, not a complete symbolic algebra proof.
 
 Before final completion, investigate every unused Spreadsheet alias: connect it
 to the tree if it was intended to drive geometry, or remove it if it is

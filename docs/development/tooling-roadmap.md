@@ -2,7 +2,7 @@
 
 This is the prioritized TODO list for making FreeCAD MCP reliable for autonomous mechanical modeling.
 
-Status was re-audited against the 123-tool registry and live FreeCAD 1.0 tests
+Status was re-audited against the 131-tool registry and live FreeCAD 1.0 tests
 on 2026-08-08. A partially implemented umbrella item remains unchecked until
 every capability named by that item has a public, tested contract.
 
@@ -62,7 +62,7 @@ FreeCAD documents the topological naming problem and recommends modeling practic
 
 ## Measurement and geometric evidence
 
-- [x] Add `measure_geometry(measurement={"kind": "bbox", ...})` with fast and
+- [x] Add `measure_bounding_box(...)` with fast and
   optimal OCCT modes, forced recompute, gap/tolerance reporting, and local/world
   coordinates. Fast mode can skip the optimal comparison with
   `report_gap=False`; every response
@@ -71,7 +71,8 @@ FreeCAD documents the topological naming problem and recommends modeling practic
   minimum-gap, and point-to-face measurements. These share strict
   `FaceN`/`EdgeN`/`VertexN` references with `select_subshapes`, return closest
   points/support evidence, and distinguish separation from solid interference.
-  All eight operations use one discriminated public tool so the registry stays
+  All eight operations have dedicated public tools with a discriminated
+  `measure_geometry` compatibility dispatcher, so agent-visible schemas stay
   compact without weakening per-kind validation.
 - [ ] Add mass properties: volume, area, center of mass, inertia tensor, principal axes, and material-based mass.
 - [ ] Add section and probe tools: plane section, ray intersections, cylinder/box probe volume, and void continuity checks.

@@ -75,6 +75,14 @@ TOOL_SCENARIOS: dict[str, str] = {
     "part_loft": "objects",
     "part_sweep": "objects",
     # Tolerance-aware geometric evidence.
+    "measure_bounding_box": "measurements",
+    "measure_distance": "measurements",
+    "measure_angle": "measurements",
+    "measure_radius": "measurements",
+    "measure_wall_thickness": "measurements",
+    "measure_clearance": "measurements",
+    "measure_minimum_gap": "measurements",
+    "measure_point_to_face": "measurements",
     "measure_geometry": "measurements",
     # PartDesign and Sketcher.
     "create_partdesign_body": "partdesign",
@@ -357,13 +365,37 @@ _result_ = True
     )
 
 
-def test_runtime_registry_has_explicit_123_tool_coverage() -> None:
+def test_runtime_registry_has_explicit_131_tool_coverage() -> None:
     async def registered() -> set[str]:
         return {tool.name for tool in await production_mcp.list_tools()}
 
     actual = asyncio.run(registered())
-    assert len(actual) == 123
+    assert len(actual) == 131
     assert set(TOOL_SCENARIOS) == actual
+
+
+def test_dedicated_measurement_runtime_schemas_are_operation_specific() -> None:
+    async def schemas() -> dict[str, dict[str, Any]]:
+        return {
+            tool.name: tool.inputSchema
+            for tool in await production_mcp.list_tools()
+            if tool.name.startswith("measure_") and tool.name != "measure_geometry"
+        }
+
+    input_schemas = asyncio.run(schemas())
+    assert set(input_schemas) == {
+        "measure_bounding_box",
+        "measure_distance",
+        "measure_angle",
+        "measure_radius",
+        "measure_wall_thickness",
+        "measure_clearance",
+        "measure_minimum_gap",
+        "measure_point_to_face",
+    }
+    assert "measurement" not in input_schemas["measure_distance"]["properties"]
+    assert {"first", "second"}.issubset(input_schemas["measure_distance"]["properties"])
+    assert "reference" in input_schemas["measure_radius"]["properties"]
 
 
 def test_create_sketch_runtime_schema_has_only_typed_support() -> None:

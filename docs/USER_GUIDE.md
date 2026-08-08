@@ -530,34 +530,31 @@ Body Tip before creating topology-sensitive downstream features.
 
 ### Measurement evidence
 
-Use `measure_geometry` instead of deriving dimensions from a screenshot or
-cached `inspect_object` bounds. It forces recompute by default and accepts
-references returned by `select_subshapes`. Choose one strict operation through
-`measurement.kind`; all operation-specific fields belong inside `measurement`.
+Use the dedicated `measure_*` tools instead of deriving dimensions from a
+screenshot or cached `inspect_object` bounds. They force recompute by default,
+accept references returned by `select_subshapes`, and expose only the fields
+needed by the selected operation. `measure_geometry` remains for compatibility.
 
 ```python
-bounds = await measure_geometry(
-    measurement={"kind": "bbox", "object_name": "Body", "mode": "optimal",
-                 "coordinate_system": "world", "use_triangulation": False,
-                 "use_shape_tolerance": False},
+bounds = await measure_bounding_box(
+    object_name="Body", mode="optimal", coordinate_system="world",
+    use_triangulation=False, use_shape_tolerance=False,
 )
 
-clearance = await measure_geometry(
-    measurement={"kind": "clearance", "first": {"object_name": "PartA"},
-                 "second": {"object_name": "PartB"},
-                 "required_clearance_mm": 0.25},
+clearance = await measure_clearance(
+    first={"object_name": "PartA"}, second={"object_name": "PartB"},
+    required_clearance_mm=0.25,
 )
 
-point_gap = await measure_geometry(
-    measurement={"kind": "point_to_face",
-                 "face": {"object_name": "PartA", "subshape": "Face3"},
-                 "vertex": {"object_name": "PartB", "subshape": "Vertex7"}},
+point_gap = await measure_point_to_face(
+    face={"object_name": "PartA", "subshape": "Face3"},
+    vertex={"object_name": "PartB", "subshape": "Vertex7"},
 )
 ```
 
-Use `kind="distance"` for a scalar minimum with closest-point evidence;
-`kind="clearance"` when a pass/fail requirement and solid interference matter;
-and `kind="minimum_gap"` to find the closest pair within a bounded reference
+Use `measure_distance` for a scalar minimum with closest-point evidence;
+`measure_clearance` when a pass/fail requirement and solid interference matter;
+and `measure_minimum_gap` to find the closest pair within a bounded reference
 set. `kind="wall_thickness"` validates opposing planar/cylindrical faces before
 accepting their distance as thickness.
 

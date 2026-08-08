@@ -136,7 +136,9 @@ MeasurementRequest = Annotated[
 _MEASUREMENT_ADAPTER: TypeAdapter[MeasurementRequest] = TypeAdapter(MeasurementRequest)
 
 
-def _measurement_request(value: MeasurementRequest | dict[str, Any]) -> MeasurementRequest:
+def _measurement_request(
+    value: MeasurementRequest | dict[str, Any],
+) -> MeasurementRequest:
     """Normalize direct Python calls as well as FastMCP-validated calls."""
     if isinstance(value, _MeasurementBase):
         return value
@@ -650,7 +652,11 @@ MEASUREMENT_RUNTIME = dedent(
 
 
 def _document_expression(doc_name: str | None) -> str:
-    return "FreeCAD.ActiveDocument" if doc_name is None else f"FreeCAD.getDocument({doc_name!r})"
+    return (
+        "FreeCAD.ActiveDocument"
+        if doc_name is None
+        else f"FreeCAD.getDocument({doc_name!r})"
+    )
 
 
 def _measurement_code(
@@ -673,12 +679,16 @@ _result_ = {expression}
 """
 
 
-async def _execute_measurement(get_bridge: Callable[[], Awaitable[Any]], code: str) -> dict[str, Any]:
+async def _execute_measurement(
+    get_bridge: Callable[[], Awaitable[Any]], code: str
+) -> dict[str, Any]:
     bridge = await get_bridge()
     result = await bridge.execute_python(code)
     if result.success and isinstance(result.result, dict):
         return result.result
-    raise ValueError(result.error_traceback or result.stderr or "FreeCAD measurement failed")
+    raise ValueError(
+        result.error_traceback or result.stderr or "FreeCAD measurement failed"
+    )
 
 
 def register_measurement_tools(
@@ -686,20 +696,11 @@ def register_measurement_tools(
 ) -> None:
     """Register the compact, tolerance-aware geometric measurement API."""
 
-    @mcp.tool()
-    async def measure_geometry(
+    async def _run_measurement(
         measurement: MeasurementRequest,
         doc_name: str | None = None,
         force_recompute: bool = True,
     ) -> dict[str, Any]:
-        """Measure geometry with one strict operation selected by ``kind``.
-
-        Supported kinds are ``bbox``, ``distance``, ``angle``, ``radius``,
-        ``wall_thickness``, ``clearance``, ``minimum_gap``, and
-        ``point_to_face``. Each kind exposes only its relevant fields. Use
-        ``select_subshapes`` references for FaceN, EdgeN, and VertexN inputs.
-        Results include OCCT evidence and forced-recompute evidence.
-        """
         request = _measurement_request(measurement)
 
         if isinstance(request, BoundingBoxMeasurement):
@@ -722,13 +723,13 @@ def register_measurement_tools(
             first = _reference_payload(request.first)
             second = _reference_payload(request.second)
             names = [first["object_name"], second["object_name"]]
-            expression = f"_m_angle(doc, {first!r}, {second!r}, {request.orientation!r})"
+            expression = (
+                f"_m_angle(doc, {first!r}, {second!r}, {request.orientation!r})"
+            )
         elif isinstance(request, RadiusMeasurement):
             reference = _reference_payload(request.reference)
             names = [reference["object_name"]]
-            expression = (
-                f"_m_radius(doc, {reference!r}, {request.radius_kind!r})"
-            )
+            expression = f"_m_radius(doc, {reference!r}, {request.radius_kind!r})"
         elif isinstance(request, WallThicknessMeasurement):
             first = _reference_payload(request.first_face)
             second = _reference_payload(request.second_face)
@@ -770,7 +771,9 @@ def register_measurement_tools(
         else:
             face = _reference_payload(request.face)
             vertex = (
-                _reference_payload(request.vertex) if request.vertex is not None else None
+                _reference_payload(request.vertex)
+                if request.vertex is not None
+                else None
             )
             names = [face["object_name"]]
             if vertex is not None:
@@ -782,3 +785,181 @@ def register_measurement_tools(
 
         code = _measurement_code(doc_name, names, force_recompute, expression)
         return await _execute_measurement(get_bridge, code)
+
+    @mcp.tool()
+    async def measure_bounding_box(  # noqa: PLR0917
+        object_name: str,
+        mode: Literal["fast", "optimal"] = "fast",
+        coordinate_system: Literal["world", "local"] = "world",
+        use_triangulation: bool = False,
+        use_shape_tolerance: bool = False,
+        report_gap: bool = True,
+        doc_name: str | None = None,
+        force_recompute: bool = True,
+    ) -> dict[str, Any]:
+        """Measure one object's axis-aligned bounding box and extents.
+
+        Use ``coordinate_system='world'`` for drawing/model verification. Choose
+        ``optimal`` only when the faster OCCT box is not sufficiently tight.
+        """
+        return await _run_measurement(
+            BoundingBoxMeasurement(
+                kind="bbox",
+                object_name=object_name,
+                mode=mode,
+                coordinate_system=coordinate_system,
+                use_triangulation=use_triangulation,
+                use_shape_tolerance=use_shape_tolerance,
+                report_gap=report_gap,
+            ),
+            doc_name,
+            force_recompute,
+        )
+
+    @mcp.tool()
+    async def measure_distance(
+        first: GeometryReference,
+        second: GeometryReference,
+        tolerance_mm: float = 1e-7,
+        doc_name: str | None = None,
+        force_recompute: bool = True,
+    ) -> dict[str, Any]:
+        """Measure the exact minimum OCCT distance between two references."""
+        return await _run_measurement(
+            DistanceMeasurement(
+                kind="distance", first=first, second=second, tolerance_mm=tolerance_mm
+            ),
+            doc_name,
+            force_recompute,
+        )
+
+    @mcp.tool()
+    async def measure_angle(
+        first: GeometryReference,
+        second: GeometryReference,
+        orientation: Literal["undirected", "directed"] = "undirected",
+        doc_name: str | None = None,
+        force_recompute: bool = True,
+    ) -> dict[str, Any]:
+        """Measure the angle between two linear edges or planar/cylindrical faces."""
+        return await _run_measurement(
+            AngleMeasurement(
+                kind="angle", first=first, second=second, orientation=orientation
+            ),
+            doc_name,
+            force_recompute,
+        )
+
+    @mcp.tool()
+    async def measure_radius(
+        reference: GeometryReference,
+        radius_kind: Literal["auto", "primary", "major", "minor"] = "auto",
+        doc_name: str | None = None,
+        force_recompute: bool = True,
+    ) -> dict[str, Any]:
+        """Measure radius and diameter of constant-radius edge or face geometry."""
+        return await _run_measurement(
+            RadiusMeasurement(
+                kind="radius", reference=reference, radius_kind=radius_kind
+            ),
+            doc_name,
+            force_recompute,
+        )
+
+    @mcp.tool()
+    async def measure_wall_thickness(  # noqa: PLR0917
+        first_face: GeometryReference,
+        second_face: GeometryReference,
+        tolerance_mm: float = 1e-7,
+        strict: bool = True,
+        doc_name: str | None = None,
+        force_recompute: bool = True,
+    ) -> dict[str, Any]:
+        """Measure separation of two opposing faces and validate parallelism."""
+        return await _run_measurement(
+            WallThicknessMeasurement(
+                kind="wall_thickness",
+                first_face=first_face,
+                second_face=second_face,
+                tolerance_mm=tolerance_mm,
+                strict=strict,
+            ),
+            doc_name,
+            force_recompute,
+        )
+
+    @mcp.tool()
+    async def measure_clearance(  # noqa: PLR0917
+        first: GeometryReference,
+        second: GeometryReference,
+        required_clearance_mm: float = 0.0,
+        tolerance_mm: float = 1e-7,
+        doc_name: str | None = None,
+        force_recompute: bool = True,
+    ) -> dict[str, Any]:
+        """Check actual minimum clearance and interference against a requirement."""
+        return await _run_measurement(
+            ClearanceMeasurement(
+                kind="clearance",
+                first=first,
+                second=second,
+                required_clearance_mm=required_clearance_mm,
+                tolerance_mm=tolerance_mm,
+            ),
+            doc_name,
+            force_recompute,
+        )
+
+    @mcp.tool()
+    async def measure_minimum_gap(
+        references: Annotated[
+            list[GeometryReference], Field(min_length=2, max_length=30)
+        ],
+        tolerance_mm: float = 1e-7,
+        doc_name: str | None = None,
+        force_recompute: bool = True,
+    ) -> dict[str, Any]:
+        """Find the smallest exact pairwise gap in a bounded reference set."""
+        return await _run_measurement(
+            MinimumGapMeasurement(
+                kind="minimum_gap", references=references, tolerance_mm=tolerance_mm
+            ),
+            doc_name,
+            force_recompute,
+        )
+
+    @mcp.tool()
+    async def measure_point_to_face(  # noqa: PLR0917
+        face: GeometryReference,
+        point: FinitePoint | None = None,
+        vertex: GeometryReference | None = None,
+        tolerance_mm: float = 1e-7,
+        doc_name: str | None = None,
+        force_recompute: bool = True,
+    ) -> dict[str, Any]:
+        """Measure from exactly one world-space point or VertexN to a FaceN."""
+        return await _run_measurement(
+            PointToFaceMeasurement(
+                kind="point_to_face",
+                face=face,
+                point=point,
+                vertex=vertex,
+                tolerance_mm=tolerance_mm,
+            ),
+            doc_name,
+            force_recompute,
+        )
+
+    @mcp.tool()
+    async def measure_geometry(
+        measurement: MeasurementRequest,
+        doc_name: str | None = None,
+        force_recompute: bool = True,
+    ) -> dict[str, Any]:
+        """Compatibility dispatcher for a strict measurement selected by ``kind``.
+
+        Prefer the dedicated ``measure_*`` tools: their schemas expose only the
+        arguments needed for one operation and are substantially easier for an
+        agent to call correctly. This dispatcher remains for existing clients.
+        """
+        return await _run_measurement(measurement, doc_name, force_recompute)

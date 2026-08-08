@@ -42,9 +42,21 @@ def registered_tools():
     return tools, bridge
 
 
-def test_only_compact_measurement_tool_is_registered(registered_tools):
+def test_dedicated_measurement_tools_and_compatibility_dispatcher_are_registered(
+    registered_tools,
+):
     tools, _ = registered_tools
-    assert set(tools) == {"measure_geometry"}
+    assert set(tools) == {
+        "measure_bounding_box",
+        "measure_distance",
+        "measure_angle",
+        "measure_radius",
+        "measure_wall_thickness",
+        "measure_clearance",
+        "measure_minimum_gap",
+        "measure_point_to_face",
+        "measure_geometry",
+    }
 
 
 def test_geometry_reference_rejects_unsupported_or_zero_subshape_indices():
@@ -56,14 +68,11 @@ def test_geometry_reference_rejects_unsupported_or_zero_subshape_indices():
 @pytest.mark.asyncio
 async def test_bbox_uses_both_occt_modes_and_forced_recompute(registered_tools):
     tools, bridge = registered_tools
-    await tools["measure_geometry"](
-        measurement={
-            "kind": "bbox",
-            "object_name": "Body",
-            "mode": "optimal",
-            "coordinate_system": "local",
-            "use_shape_tolerance": True,
-        },
+    await tools["measure_bounding_box"](
+        object_name="Body",
+        mode="optimal",
+        coordinate_system="local",
+        use_shape_tolerance=True,
         force_recompute=True,
         doc_name="Model",
     )
@@ -79,27 +88,27 @@ async def test_bbox_uses_both_occt_modes_and_forced_recompute(registered_tools):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("measurement", "expected_code"),
+    ("tool_name", "measurement", "expected_code"),
     [
         (
+            "measure_distance",
             {
-                "kind": "distance",
                 "first": {"object_name": "Body", "subshape": "Face2"},
                 "second": {"object_name": "Tool", "subshape": "Edge3"},
             },
             "_m_public_distance(_m_distance",
         ),
         (
+            "measure_angle",
             {
-                "kind": "angle",
                 "first": {"object_name": "Body", "subshape": "Face2"},
                 "second": {"object_name": "Tool", "subshape": "Edge3"},
             },
             "_m_angle(doc",
         ),
         (
+            "measure_clearance",
             {
-                "kind": "clearance",
                 "first": {"object_name": "Body", "subshape": "Face2"},
                 "second": {"object_name": "Tool", "subshape": "Edge3"},
                 "required_clearance_mm": 0.5,
@@ -109,12 +118,12 @@ async def test_bbox_uses_both_occt_modes_and_forced_recompute(registered_tools):
     ],
 )
 async def test_pair_measurements_accept_selector_references(
-    registered_tools, measurement, expected_code
+    registered_tools, tool_name, measurement, expected_code
 ):
     tools, bridge = registered_tools
-    await tools["measure_geometry"](measurement=measurement, doc_name="Model")
+    await tools[tool_name](**measurement, doc_name="Model")
     code = bridge.execute_python.await_args.args[0]
-    compile(code, f"<measure-{measurement['kind']}>", "exec")
+    compile(code, f"<{tool_name}>", "exec")
     assert "'subshape': 'Face2'" in code
     assert "'subshape': 'Edge3'" in code
     assert expected_code in code
@@ -123,35 +132,24 @@ async def test_pair_measurements_accept_selector_references(
 @pytest.mark.asyncio
 async def test_specialized_measurements_keep_runtime_validation(registered_tools):
     tools, bridge = registered_tools
-    measure = tools["measure_geometry"]
-
-    await measure(
-        measurement={
-            "kind": "wall_thickness",
-            "first_face": {"object_name": "Tube", "subshape": "Face1"},
-            "second_face": {"object_name": "Tube", "subshape": "Face2"},
-        }
+    await tools["measure_wall_thickness"](
+        first_face={"object_name": "Tube", "subshape": "Face1"},
+        second_face={"object_name": "Tube", "subshape": "Face2"},
     )
     wall_code = bridge.execute_python.await_args.args[0]
     assert '_m_resolve(doc, first_spec, "Face")' in wall_code
     assert "coaxial_cylinders" in wall_code
 
-    await measure(
-        measurement={
-            "kind": "radius",
-            "reference": {"object_name": "Cylinder", "subshape": "Face1"},
-        }
+    await tools["measure_radius"](
+        reference={"object_name": "Cylinder", "subshape": "Face1"},
     )
     radius_code = bridge.execute_python.await_args.args[0]
     assert "A conical face has no constant radius" in radius_code
     assert "MajorRadius" in radius_code
 
-    await measure(
-        measurement={
-            "kind": "point_to_face",
-            "face": {"object_name": "Box", "subshape": "Face6"},
-            "vertex": {"object_name": "Cylinder", "subshape": "Vertex1"},
-        }
+    await tools["measure_point_to_face"](
+        face={"object_name": "Box", "subshape": "Face6"},
+        vertex={"object_name": "Cylinder", "subshape": "Vertex1"},
     )
     point_code = bridge.execute_python.await_args.args[0]
     assert 'vertex_spec, "Vertex"' in point_code
@@ -162,15 +160,12 @@ async def test_specialized_measurements_keep_runtime_validation(registered_tools
 @pytest.mark.asyncio
 async def test_minimum_gap_checks_every_pair(registered_tools):
     tools, bridge = registered_tools
-    await tools["measure_geometry"](
-        measurement={
-            "kind": "minimum_gap",
-            "references": [
-                {"object_name": "A"},
-                {"object_name": "B"},
-                {"object_name": "C", "subshape": "Face1"},
-            ],
-        }
+    await tools["measure_minimum_gap"](
+        references=[
+            {"object_name": "A"},
+            {"object_name": "B"},
+            {"object_name": "C", "subshape": "Face1"},
+        ],
     )
     code = bridge.execute_python.await_args.args[0]
     assert "for _j in range(_i + 1" in code
@@ -224,10 +219,7 @@ async def test_bridge_errors_are_not_hidden(registered_tools):
         error_traceback="Traceback: OCCT failure",
     )
     with pytest.raises(ValueError, match="OCCT failure"):
-        await tools["measure_geometry"](
-            measurement={
-                "kind": "distance",
-                "first": {"object_name": "A"},
-                "second": {"object_name": "B"},
-            }
+        await tools["measure_distance"](
+            first={"object_name": "A"},
+            second={"object_name": "B"},
         )

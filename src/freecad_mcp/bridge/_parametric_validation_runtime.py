@@ -45,6 +45,74 @@ def _text_uses_token(text, token):
     ) is not None
 
 
+def _zero_multiplier_spans(text):
+    """Return expression spans whose value is structurally multiplied by zero.
+
+    This intentionally handles the common validation-bypass forms ``0 * (...)``,
+    ``0 mm * (...)``, ``(...) * 0``, and direct ``0 * Parameter`` references.
+    It is a conservative structural check, not a general symbolic algebra engine.
+    """
+    value = str(text or "")
+    spans = []
+    left_pattern = re.compile(
+        r"(?<![A-Za-z0-9_.])0(?:\.0+)?"
+        r"(?:\s+[A-Za-zµ°][A-Za-z0-9_/*^°-]*)?\s*\*\s*\("
+    )
+    for match in left_pattern.finditer(value):
+        opening = value.find("(", match.start(), match.end())
+        depth = 0
+        for index in range(opening, len(value)):
+            if value[index] == "(":
+                depth += 1
+            elif value[index] == ")":
+                depth -= 1
+                if depth == 0:
+                    spans.append((match.start(), index + 1))
+                    break
+
+    stack = []
+    pairs = []
+    for index, character in enumerate(value):
+        if character == "(":
+            stack.append(index)
+        elif character == ")" and stack:
+            pairs.append((stack.pop(), index + 1))
+    right_zero = re.compile(
+        r"\s*\*\s*0(?:\.0+)?"
+        r"(?:\s+[A-Za-zµ°][A-Za-z0-9_/*^°-]*)?(?![A-Za-z0-9_.])"
+    )
+    for opening, closing in pairs:
+        match = right_zero.match(value, closing)
+        if match:
+            spans.append((opening, match.end()))
+    return spans
+
+
+def _text_uses_effective_token(text, token):
+    value = str(text or "")
+    token_pattern = re.compile(
+        rf"(?<![A-Za-z0-9_]){re.escape(token)}(?![A-Za-z0-9_])"
+    )
+    spans = _zero_multiplier_spans(value)
+    zero_before = re.compile(
+        r"0(?:\.0+)?(?:\s+[A-Za-zµ°][A-Za-z0-9_/*^°-]*)?\s*\*\s*$"
+    )
+    zero_after = re.compile(
+        r"^\s*\*\s*0(?:\.0+)?"
+        r"(?:\s+[A-Za-zµ°][A-Za-z0-9_/*^°-]*)?(?![A-Za-z0-9_.])"
+    )
+    for match in token_pattern.finditer(value):
+        inside_zero_span = any(
+            start <= match.start() and match.end() <= end for start, end in spans
+        )
+        direct_zero = bool(zero_before.search(value[:match.start()])) or bool(
+            zero_after.match(value[match.end():])
+        )
+        if not inside_zero_span and not direct_zero:
+            return True
+    return False
+
+
 def _object_ref(obj):
     if obj is None:
         return None
@@ -367,7 +435,16 @@ def _spreadsheet_summary(sheet, expression_bindings):
                 not str(binding.get("object_type", "")).startswith("Spreadsheet::")
                 and any(_text_uses_token(expression, token) for token in tokens)
             ):
-                references.append(binding)
+                reference = dict(binding)
+                if not any(
+                    _text_uses_effective_token(expression, token) for token in tokens
+                ):
+                    reference["solid_driving"] = False
+                    reference["neutralized_reference"] = True
+                    reference["influence_reason"] = (
+                        "parameter reference is structurally multiplied by zero"
+                    )
+                references.append(reference)
 
         cell_summary = {
             "cell": cell,
@@ -434,10 +511,10 @@ def _resolve_spreadsheet_connectivity(spreadsheets):
             content = source["content"] or ""
             dependencies = set()
             for token, node_ids in token_to_node_ids.items():
-                if _text_uses_token(content, token):
+                if _text_uses_effective_token(content, token):
                     dependencies.update(node_ids)
             for token, node_id in {**local_cells, **local_aliases}.items():
-                if _text_uses_token(content, token):
+                if _text_uses_effective_token(content, token):
                     dependencies.add(node_id)
             dependencies.discard(source["node_id"])
             source["dependencies"] = sorted(dependencies)

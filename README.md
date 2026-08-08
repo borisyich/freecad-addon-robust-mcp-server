@@ -83,7 +83,7 @@ An [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server that 
 
 ## Features
 
-- **123 MCP Tools**: Compact CAD operations including primitives, PartDesign, measurements, booleans, and export
+- **131 MCP Tools**: Compact CAD operations including primitives, PartDesign, measurements, booleans, and export
 - **Multiple Connection Modes**: XML-RPC (recommended), JSON-RPC socket, or embedded
 - **GUI & Headless Support**: Full modeling in headless mode, plus screenshots/colors in GUI mode
 - **Macro Development**: Create, edit, run, and template FreeCAD macros via MCP
@@ -348,7 +348,7 @@ FREECAD_MODE=embedded freecad-mcp
 
 ### Available Tools
 
-The server currently registers **123 MCP tools**. The tables below list common tools rather than duplicating the exact inventory. See the generated [Tools Overview](docs/guide/tools.md) or the MCP client's discovered tool list for the authoritative inventory; [MCP Tools Reference](docs/MCP_TOOLS_REFERENCE.md) provides detailed examples for core tools, while `freecad://capabilities` is a curated runtime overview. Tools marked with **GUI** require FreeCAD to be running in GUI mode; they return a structured error in headless mode.
+The server currently registers **131 MCP tools**. The tables below list common tools rather than duplicating the exact inventory. See the generated [Tools Overview](docs/guide/tools.md) or the MCP client's discovered tool list for the authoritative inventory; [MCP Tools Reference](docs/MCP_TOOLS_REFERENCE.md) provides detailed examples for core tools, while `freecad://capabilities` is a curated runtime overview. Tools marked with **GUI** require FreeCAD to be running in GUI mode; they return a structured error in headless mode.
 
 #### Execution & Debugging (5 tools)
 
@@ -430,7 +430,8 @@ The server currently registers **123 MCP tools**. The tables below list common t
 
 Requires the external FreeCAD SheetMetal Workbench. These tools create native,
 editable SheetMetal `FeaturePython` history and a separate flat-pattern
-manufacturing representation.
+manufacturing representation. Every created feature receives the matching
+SheetMetal GUI ViewProvider, so the result remains visible and inspectable.
 
 | Tool | Description | Mode |
 | ---- | ----------- | ---- |
@@ -484,7 +485,8 @@ immediately before the final response and summarize the actual Bodies, Tips,
 history, sketches, solver state, source-dimension usage, Spreadsheet connectivity,
 direct solids, and warnings. For drawing/sketch tasks, pass the complete saved
 identifier list as `required_dimension_names`. The report is informative and
-does not by itself prove drawing correspondence.
+does not by itself prove drawing correspondence. Parameter references multiplied
+by zero are treated as non-driving rather than accepted as validation bridges.
 
 #### Validation & diagnostics (5 tools)
 

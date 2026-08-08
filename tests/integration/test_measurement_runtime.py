@@ -206,89 +206,65 @@ def test_wall_thickness_and_point_to_face_reject_topology_guessing(
 async def test_registered_measurement_tools_run_end_to_end(
     measurement_tools: dict[str, Any], measurement_document: str
 ) -> None:
-    """Exercise every kind through the compact public measurement wrapper."""
+    """Exercise every dedicated public measurement tool against live OCCT."""
     bbox = await _call(
         measurement_tools,
-        "measure_geometry",
-        measurement={
-            "kind": "bbox",
-            "object_name": "BoxA",
-            "mode": "fast",
-            "report_gap": False,
-        },
+        "measure_bounding_box",
+        object_name="BoxA",
+        mode="fast",
+        report_gap=False,
         doc_name=measurement_document,
     )
     distance = await _call(
         measurement_tools,
-        "measure_geometry",
-        measurement={
-            "kind": "distance",
-            "first": {"object_name": "BoxA"},
-            "second": {"object_name": "BoxB"},
-        },
+        "measure_distance",
+        first={"object_name": "BoxA"},
+        second={"object_name": "BoxB"},
         doc_name=measurement_document,
     )
     angle = await _call(
         measurement_tools,
-        "measure_geometry",
-        measurement={
-            "kind": "angle",
-            "first": {"object_name": "BoxA", "subshape": "Face1"},
-            "second": {"object_name": "BoxA", "subshape": "Face3"},
-        },
+        "measure_angle",
+        first={"object_name": "BoxA", "subshape": "Face1"},
+        second={"object_name": "BoxA", "subshape": "Face3"},
         doc_name=measurement_document,
     )
     radius = await _call(
         measurement_tools,
-        "measure_geometry",
-        measurement={
-            "kind": "radius",
-            "reference": {"object_name": "Cylinder", "subshape": "Face1"},
-        },
+        "measure_radius",
+        reference={"object_name": "Cylinder", "subshape": "Face1"},
         doc_name=measurement_document,
     )
     thickness = await _call(
         measurement_tools,
-        "measure_geometry",
-        measurement={
-            "kind": "wall_thickness",
-            "first_face": {"object_name": "BoxA", "subshape": "Face1"},
-            "second_face": {"object_name": "BoxA", "subshape": "Face2"},
-        },
+        "measure_wall_thickness",
+        first_face={"object_name": "BoxA", "subshape": "Face1"},
+        second_face={"object_name": "BoxA", "subshape": "Face2"},
         doc_name=measurement_document,
     )
     clearance = await _call(
         measurement_tools,
-        "measure_geometry",
-        measurement={
-            "kind": "clearance",
-            "first": {"object_name": "BoxA"},
-            "second": {"object_name": "BoxB"},
-            "required_clearance_mm": 4.0,
-        },
+        "measure_clearance",
+        first={"object_name": "BoxA"},
+        second={"object_name": "BoxB"},
+        required_clearance_mm=4.0,
         doc_name=measurement_document,
     )
     minimum_gap = await _call(
         measurement_tools,
-        "measure_geometry",
-        measurement={
-            "kind": "minimum_gap",
-            "references": [
-                {"object_name": "BoxA"},
-                {"object_name": "BoxB"},
-                {"object_name": "Cylinder"},
-            ],
-        },
+        "measure_minimum_gap",
+        references=[
+            {"object_name": "BoxA"},
+            {"object_name": "BoxB"},
+            {"object_name": "Cylinder"},
+        ],
         doc_name=measurement_document,
     )
     point_to_face = await _call(
         measurement_tools,
-        "measure_geometry",
-        measurement={
-            "kind": "point_to_face",
-            "face": {"object_name": "BoxA", "subshape": "Face6"},
-            "point": [105.0, 5.0, 40.0],
-        },
+        "measure_point_to_face",
+        face={"object_name": "BoxA", "subshape": "Face6"},
+        point=[105.0, 5.0, 40.0],
         doc_name=measurement_document,
     )
     selected_vertex = await _call(
@@ -312,26 +288,20 @@ async def test_registered_measurement_tools_run_end_to_end(
     )
     selected_vertex_distance = await _call(
         measurement_tools,
-        "measure_geometry",
-        measurement={
-            "kind": "point_to_face",
-            "face": {"object_name": "BoxB", "subshape": "Face1"},
-            "vertex": {
-                "object_name": "BoxA",
-                "subshape": selected_vertex["references"][0],
-            },
+        "measure_point_to_face",
+        face={"object_name": "BoxB", "subshape": "Face1"},
+        vertex={
+            "object_name": "BoxA",
+            "subshape": selected_vertex["references"][0],
         },
         doc_name=measurement_document,
     )
     with pytest.raises(ValueError, match="overlapping parallel planar faces"):
         await _call(
             measurement_tools,
-            "measure_geometry",
-            measurement={
-                "kind": "wall_thickness",
-                "first_face": {"object_name": "BoxA", "subshape": "Face6"},
-                "second_face": {"object_name": "BoxB", "subshape": "Face6"},
-            },
+            "measure_wall_thickness",
+            first_face={"object_name": "BoxA", "subshape": "Face6"},
+            second_face={"object_name": "BoxB", "subshape": "Face6"},
             doc_name=measurement_document,
         )
 

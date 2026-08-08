@@ -646,9 +646,49 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                     "note": "Measurements force recompute by default and consume semantic topology references from select_subshapes",
                     "tools": [
                         {
+                            "name": "measure_bounding_box",
+                            "description": "Fast or optimal local/world OCCT bounds",
+                            "key_params": ["object_name", "mode", "coordinate_system"],
+                        },
+                        {
+                            "name": "measure_distance",
+                            "description": "Exact minimum distance and closest-point evidence",
+                            "key_params": ["first", "second", "tolerance_mm"],
+                        },
+                        {
+                            "name": "measure_angle",
+                            "description": "Angle between selected directional references",
+                            "key_params": ["first", "second", "orientation"],
+                        },
+                        {
+                            "name": "measure_radius",
+                            "description": "Radius and diameter of constant-radius geometry",
+                            "key_params": ["reference", "radius_kind"],
+                        },
+                        {
+                            "name": "measure_wall_thickness",
+                            "description": "Validated separation of opposing faces",
+                            "key_params": ["first_face", "second_face", "strict"],
+                        },
+                        {
+                            "name": "measure_clearance",
+                            "description": "Clearance and solid-interference requirement check",
+                            "key_params": ["first", "second", "required_clearance_mm"],
+                        },
+                        {
+                            "name": "measure_minimum_gap",
+                            "description": "Smallest pairwise gap in a bounded reference set",
+                            "key_params": ["references", "tolerance_mm"],
+                        },
+                        {
+                            "name": "measure_point_to_face",
+                            "description": "Point or vertex distance to a selected face",
+                            "key_params": ["face", "point", "vertex"],
+                        },
+                        {
                             "name": "measure_geometry",
-                            "description": "One strict kind-based tool for bounds, dimensions, clearance, gap, thickness, and point-to-face evidence",
-                            "key_params": ["measurement.kind", "measurement", "force_recompute"],
+                            "description": "Compatibility-only strict kind-based dispatcher for existing clients",
+                            "key_params": ["measurement.kind", "measurement"],
                         },
                     ],
                 },

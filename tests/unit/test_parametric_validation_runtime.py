@@ -227,6 +227,7 @@ def test_generated_report_describes_body_tip_history_and_sketch(monkeypatch) -> 
         ExpressionEngine=[
             ("Length", "Params.HalfWidth"),
             ("Length2", "Params.Width2"),
+            ("AuditNeutralized", "0 * (Params.Orphan)"),
         ],
         InList=[sketch],
         OutList=[],
@@ -301,6 +302,9 @@ def test_generated_report_describes_body_tip_history_and_sketch(monkeypatch) -> 
     assert parameters["HalfWidth"]["reference_count"] == 1
     assert parameters["HalfWidth"]["connected_to_tree"] is True
     assert parameters["HalfWidth"]["connected_to_final_solid"] is True
+    assert parameters["Orphan"]["reference_count"] == 1
+    assert parameters["Orphan"]["references"][0]["neutralized_reference"] is True
+    assert parameters["Orphan"]["references"][0]["solid_driving"] is False
     assert [item["alias"] for item in spreadsheet["unused_parameters"]] == ["Orphan"]
     categories = {item["category"] for item in report["findings"]}
     assert "required_dimension_missing" in categories
@@ -320,6 +324,21 @@ def test_generated_report_describes_body_tip_history_and_sketch(monkeypatch) -> 
     )
     assert drives_solid is False
     assert reason == "expression is attached to a dynamic/custom metadata property"
+
+    # Regression for the exact neutral-expression bridge used in the supplied log.
+    expression = (
+        "Params.ProfileRadiusR25 + 0 * (Params.SheetThickness + Params.Width) "
+        "+ 0 mm * (Params.NeutralFactor + sin(Params.BendAngle))"
+    )
+    effective = namespace["_text_uses_effective_token"]
+    assert effective(expression, "Params.ProfileRadiusR25") is True
+    assert effective(expression, "Params.SheetThickness") is False
+    assert effective(expression, "Params.Width") is False
+    assert effective(expression, "Params.NeutralFactor") is False
+    assert effective(expression, "Params.BendAngle") is False
+    assert effective("Params.Width * 0", "Params.Width") is False
+    assert effective("(Params.Width + Params.Height) * 0", "Params.Height") is False
+    assert effective("2 * Params.Width", "Params.Width") is True
 
 
 def test_reference_only_body_without_tip_is_incomplete_not_broken(monkeypatch) -> None:
