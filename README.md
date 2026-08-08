@@ -104,6 +104,7 @@ This section covers installation and usage for end users who want to use the Rob
 | Resource                                                                              | Description                                   |
 | ------------------------------------------------------------------------------------- | --------------------------------------------- |
 | [**Documentation**](https://spkane.github.io/freecad-addon-robust-mcp-server/)        | Full documentation, guides, and API reference |
+| [Codex setup on Windows](CODEX_MCP_SETUP_WINDOWS.md)                                  | Connect Codex to a local FreeCAD MCP bridge    |
 | [Docker Hub](https://hub.docker.com/r/spkane/freecad-robust-mcp)                      | Pre-built Docker images for easy deployment   |
 | [PyPI](https://pypi.org/project/freecad-robust-mcp/)                                  | Python package for pip installation           |
 | [GitHub Releases](https://github.com/spkane/freecad-addon-robust-mcp-server/releases) | Release archives and changelogs               |
