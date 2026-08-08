@@ -84,6 +84,115 @@ OCCT exposes both ordinary and optimal bounding-box algorithms; the tool should 
 - [ ] Add local validation scopes so Spreadsheet or metadata edits are not rejected because an unrelated empty Body exists.
 - [ ] Add a machine-readable operation journal suitable for replay, regression tests, and SFT/RL trajectory generation.
 
+## Sheet metal design
+
+Sheet-metal modeling is a distinct manufacturing domain, not a PartDesign
+variant. The primary design object is a constant-thickness, developable sheet:
+planar panels are connected by cylindrical bend zones, flat-domain features
+remain attached to their panels, and bend allowance connects the formed and
+unfolded representations. Deep drawing and stretch forming are intentionally
+outside this first architecture because their blanks require material and
+tooling simulation rather than ordinary K-factor equations.
+
+### Architecture and invariants
+
+The MCP layer wraps the native, installed
+[FreeCAD SheetMetal Workbench](https://github.com/shaise/FreeCAD_SheetMetal)
+`FeaturePython` proxies. It must not replace them with final `Part::Feature`
+B-reps: native proxies preserve parameters, feature history, recomputation, and
+unfold capability.
+
+```text
+engineering intent / flat-pattern panel graph
+                    |
+                    v
+typed MCP contract + semantic topology references
+                    |
+                    v
+native SheetMetal FeaturePython proxy in a linear Body history
+                    |
+          +---------+----------+
+          |                    |
+          v                    v
+formed-state inspection   parametric Unfold outside Body
+          |                    |
+          +---------+----------+
+                    v
+     dimensional + visual manufacturing checks
+```
+
+Every geometry-changing operation is one transaction and must either commit a
+valid, non-empty, single solid or roll back. A PartDesign operation accepts only
+the current Body Tip as its base; this prevents hidden branches. Agent-supplied
+topology references are checked for the expected subshape type, and agents must
+derive them with `select_subshapes`. All responses return proxy type, Body/Tip,
+solid count, shape validity, volume before/after, and the resolved references.
+
+Neutral-axis data is safety-critical. `unfold_sheet_metal` therefore requires
+exactly one explicit source: a manual K-factor with its ANSI/DIN convention, or
+a SheetMetal material-definition Spreadsheet. It never silently uses the GUI
+default. The flat pattern is a separate manufacturing representation and stays
+outside the formed PartDesign Body so unfolding cannot replace its Tip.
+
+### Compact tool surface
+
+- [x] Add `sheet_metal_capabilities` to report installed version and availability
+  of every wrapped native proxy. Missing workbench and missing operation are
+  separate actionable states.
+- [x] Add `create_sheet_metal_base` for a closed flat blank or open wall profile
+  from a Sketcher sketch, with explicit thickness, inside radius, wall length,
+  material side, midplane, and direction.
+- [x] Add one discriminated `create_sheet_metal_feature` tool instead of one MCP
+  tool per toolbar button. Its strict operation variants cover `flange`, `fold`,
+  `junction`, `relief`, `corner_relief`, `extend`, `hem`, `solid_bend`, and
+  `from_solid`; each variant exposes only meaningful parameters.
+- [x] Add `unfold_sheet_metal` for a planar stationary face, explicit neutral
+  rule, optional separated outline/internal/bend-line sketches, and bend-angle
+  labels.
+- [x] Add `inspect_sheet_metal` for native proxy history, nominal/estimated
+  thickness, planar stationary-face candidates, cylindrical bend-face count,
+  one-solid validity, Body Tip, and unfold readiness.
+- [ ] Add batch flange/fold creation from a validated panel-and-bend graph after
+  persistent semantic topology recipes exist. A batch must stop at the first
+  failed bend and return the last valid graph checkpoint.
+- [ ] Add formed-vs-unfolded correspondence diagnostics: panel area, transformed
+  hole centers, bend-line length/count, blank bounds, and shape-difference
+  evidence.
+- [ ] Add material-library authoring and validation for radius/thickness K-factor
+  tables, including monotonic lookup checks and explicit ANSI/DIN conversion.
+- [ ] Add manufacturing checks for minimum bend radius, bend-to-hole distance,
+  relief sufficiency, flange collision, self-intersection, grain direction, and
+  press-brake tooling access.
+- [ ] Add formed-feature APIs for wrapped cutouts and local forming only after
+  thickness-continuity postconditions are available. Beads, dimples, louvers,
+  embosses, and deep draws must be labelled as formed/stamped operations and
+  must not claim an exact developed blank without process data.
+
+### Testing strategy
+
+- [x] Unit-test discriminated schemas, forbidden extra fields, positive
+  dimensions, K-factor/material-sheet exclusivity, module/class dispatch,
+  transaction rollback, semantic reference type checks, and result evidence.
+- [x] Keep the registered-tool/documentation catalog test authoritative so the
+  five tools cannot be added without agent-facing documentation.
+- [ ] Add live canonical parts when SheetMetal is installed in CI: an L-bracket
+  (base + flange), a sketch-line fold reconstructed from a flat blank, a hemmed
+  enclosure corner with relief/junction, and solid-to-sheet conversion.
+- [ ] For each live part, mutate thickness, radius, angle, and K-factor and prove
+  downstream recomputation. Validate formed volume/solid count and compare the
+  unfold outline, bend lines, and flat-domain holes against stored invariants.
+- [ ] Add negative regressions for stale Body bases, wrong Face/Edge/Vertex
+  references, non-planar unfold roots, missing material rules, multi-solid
+  results, self-intersection, disconnected flanges, and unavailable workbench
+  modules. Every failure must leave no new feature and preserve the prior Tip.
+
+The engineering workflow and panel/bend graph are documented in
+`.agents/skills/freecad-engineering/references/sheet-metal-flat-patterns.md`.
+Upstream command semantics are tracked against the
+[SheetMetal repository](https://github.com/shaise/FreeCAD_SheetMetal),
+[FreeCAD SheetMetal wiki](https://wiki.freecad.org/SheetMetal_Workbench), and
+[workbench discussion thread](https://forum.freecad.org/viewtopic.php?f=3&t=60818).
+
 ## Testing
 
 - [x] Add a complete bracket regression with wrong-direction rollback, additive-volume validation, final-hole ordering, parameter bindings, dimensional checks, void probes, and optional screenshot output.

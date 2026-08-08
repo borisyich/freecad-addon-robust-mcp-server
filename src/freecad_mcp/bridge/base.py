@@ -12,11 +12,11 @@ Based on learnings from existing implementations:
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 
-class ViewAngle(str, Enum):
+class ViewAngle(StrEnum):
     """Standard view angles for screenshots."""
 
     ISOMETRIC = "Isometric"
@@ -29,7 +29,7 @@ class ViewAngle(str, Enum):
     FIT_ALL = "FitAll"
 
 
-class ObjectType(str, Enum):
+class ObjectType(StrEnum):
     """FreeCAD object type categories."""
 
     PART = "Part"
@@ -398,11 +398,6 @@ class FreecadBridge(ABC):
 
         Args:
             doc_name: Document name (uses active if None).
-            fit_all: Fit visible geometry after setting the view.
-            background: FreeCAD saveImage background mode, usually White or Current.
-            save_to_disk: Persist the PNG instead of using only a temporary file.
-            output_path: Optional explicit PNG path for disk output.
-            return_data: Return base64 PNG data in addition to optional disk output.
 
         Returns:
             List of ObjectInfo for each object.

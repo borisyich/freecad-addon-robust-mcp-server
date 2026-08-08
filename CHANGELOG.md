@@ -142,6 +142,14 @@
 - Added live Spreadsheet regressions for dependent-formula rollback and the
   rectangular `A1:B2` range, plus numeric response-size budgets for compact tool
   modes.
+- Added a compact native SheetMetal toolset for capability discovery, base-wall
+  creation, nine typed manufacturing-feature variants, inspection, and
+  explicit-material/K-factor unfolding with transactional shape and Body-Tip
+  validation.
+- Added Sheet Metal architecture and tool documentation plus live FreeCAD
+  integration regressions for the upstream 100 mm L-profile calculation and a
+  semantically selected edge flange. The registry audit now covers all 122 MCP
+  tools and preserves the nine-variant public Sheet Metal schema.
 
 This project uses **component-specific versioning**. Each component has its own
 release notes and version history.

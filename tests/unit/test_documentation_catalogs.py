@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import ast
+import re
 from pathlib import Path
-
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -88,6 +88,40 @@ def test_prompts_page_contains_every_registered_prompt() -> None:
     assert missing == []
 
 
+def test_every_sheet_metal_reference_example_is_live_tested() -> None:
+    """The public Sheet Metal recipes must not drift into unexecuted pseudocode."""
+    reference = (ROOT / "docs/MCP_TOOLS_REFERENCE.md").read_text(encoding="utf-8")
+    section = reference.split("## Sheet Metal Tools", 1)[1].split(
+        "## Spreadsheet Tools", 1
+    )[0]
+    examples = re.findall(r"```python\n(.*?)```", section, flags=re.DOTALL)
+    marker = re.compile(
+        r"^# Verified by: "
+        r"(tests/integration/test_sheetmetal_workflow\.py)::([a-zA-Z0-9_]+)$",
+        flags=re.MULTILINE,
+    )
+
+    assert len(examples) == 2
+    targets: set[str] = set()
+    test_source = (ROOT / "tests/integration/test_sheetmetal_workflow.py").read_text(
+        encoding="utf-8"
+    )
+    for example in examples:
+        match = marker.search(example)
+        assert match is not None, "Every Sheet Metal Python example needs a live-test marker"
+        test_name = match.group(2)
+        assert f"async def {test_name}(" in test_source
+        targets.add(test_name)
+
+        indented = "\n".join(f"    {line}" for line in example.splitlines())
+        ast.parse(f"async def _documented_example():\n{indented}\n")
+
+    assert targets == {
+        "test_upstream_reference_l_profile_unfolds_to_100_mm_blank",
+        "test_semantic_edge_flange_and_unfold_workflow",
+    }
+
+
 def test_freecad_engineering_skill_covers_flat_pattern_reconstruction() -> None:
     skill_path = ROOT / ".agents/skills/freecad-engineering/SKILL.md"
     reference_path = (
@@ -141,8 +175,6 @@ def test_freecad_engineering_skill_has_codex_routing_metadata() -> None:
     metadata = (
         ROOT / ".agents/skills/freecad-engineering/agents/openai.yaml"
     ).read_text(encoding="utf-8")
-    agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
-
     assert skill.startswith("---\nname: freecad-engineering\n")
     assert "validate_parametric_model" in skill
     assert 'allow_implicit_invocation: true' in metadata

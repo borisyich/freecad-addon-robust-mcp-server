@@ -9,8 +9,7 @@ the real XML-RPC bridge, not mocked bridge responses.
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 import pytest_asyncio
@@ -19,6 +18,9 @@ from PIL import Image
 from freecad_mcp.bridge.xmlrpc import XmlRpcBridge
 from freecad_mcp.server import mcp as production_mcp
 from freecad_mcp.tools import register_all_tools
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 pytestmark = [pytest.mark.integration, pytest.mark.slow]
 
@@ -101,6 +103,12 @@ TOOL_SCENARIOS: dict[str, str] = {
     "subtractive_loft": "partdesign",
     "subtractive_pipe": "partdesign",
     "get_sketch_info": "partdesign",
+    # Native SheetMetal Workbench operations.
+    "sheet_metal_capabilities": "sheetmetal",
+    "create_sheet_metal_base": "sheetmetal",
+    "create_sheet_metal_feature": "sheetmetal",
+    "unfold_sheet_metal": "sheetmetal",
+    "inspect_sheet_metal": "sheetmetal",
     # Spreadsheet, Draft, files, macros and GUI.
     "spreadsheet_create": "io_gui",
     "spreadsheet_set_cell": "io_gui",
@@ -149,6 +157,17 @@ TOOL_SCENARIOS: dict[str, str] = {
 
 
 DOCUMENTED_CHOICES: dict[tuple[str, str], tuple[str, ...]] = {
+    ("create_sheet_metal_feature", "operation.op"): (
+        "flange",
+        "fold",
+        "junction",
+        "relief",
+        "corner_relief",
+        "extend",
+        "hem",
+        "solid_bend",
+        "from_solid",
+    ),
     ("create_primitive", "primitive.kind"): (
         "box",
         "cylinder",
@@ -282,7 +301,7 @@ class ToolCollector:
     def __init__(self) -> None:
         self.tools: dict[str, Any] = {}
 
-    def tool(self, *args: Any, **kwargs: Any) -> Any:  # noqa: ARG002
+    def tool(self, *args: Any, **kwargs: Any) -> Any:
         name = kwargs.get("name")
 
         def decorator(function: Any) -> Any:
@@ -336,12 +355,12 @@ _result_ = True
     )
 
 
-def test_runtime_registry_has_explicit_117_tool_coverage() -> None:
+def test_runtime_registry_has_explicit_122_tool_coverage() -> None:
     async def registered() -> set[str]:
         return {tool.name for tool in await production_mcp.list_tools()}
 
     actual = asyncio.run(registered())
-    assert len(actual) == 117
+    assert len(actual) == 122
     assert set(TOOL_SCENARIOS) == actual
 
 
@@ -390,6 +409,25 @@ def test_sketch_batch_runtime_schemas_expose_discriminated_operations() -> None:
         assert items["discriminator"]["propertyName"] == "op"
         assert set(items["discriminator"]["mapping"]) == operation_names
         assert len(items["oneOf"]) > 1
+
+
+def test_sheet_metal_runtime_schema_exposes_every_feature_variant() -> None:
+    """The MCP tools/list schema must preserve the compact discriminated API."""
+
+    async def schema() -> dict[str, Any]:
+        tool = next(
+            tool
+            for tool in await production_mcp.list_tools()
+            if tool.name == "create_sheet_metal_feature"
+        )
+        return tool.inputSchema
+
+    operation = asyncio.run(schema())["properties"]["operation"]
+    assert operation["discriminator"]["propertyName"] == "op"
+    assert set(operation["discriminator"]["mapping"]) == set(
+        DOCUMENTED_CHOICES[("create_sheet_metal_feature", "operation.op")]
+    )
+    assert len(operation["oneOf"]) == 9
 
 
 def test_documented_choice_catalog_is_nonempty_and_unique() -> None:

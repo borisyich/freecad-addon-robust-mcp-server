@@ -150,16 +150,26 @@ defined blank.
 
 ### Dedicated sheet-metal capability available
 
-1. Use `workbench(action="list")` to determine whether an appropriate
-   sheet-metal workbench is installed.
-2. Prefer a base-wall/fold workflow that preserves sheet-metal semantics and can
-   produce both formed and unfolded states.
-3. For a drawing whose flat blank is explicit, prefer folding that blank along
-   its bend lines rather than independently guessing flange lengths from the
-   isometric view.
-4. The current MCP surface may not expose dedicated sheet-metal operations. Use
-   `execute_python`, `safe_execute`, or a tested macro only because the required
-   semantic operation is unavailable as a standard MCP tool.
+1. Call `sheet_metal_capabilities()` to confirm the installed workbench version
+   and the exact native operations available in the current FreeCAD process.
+2. Create a closed flat blank or open base-wall profile with
+   `create_sheet_metal_base`. It creates the native `SMBaseBend` proxy rather
+   than a disposable B-rep.
+3. Use `create_sheet_metal_feature` for native `flange`, `fold`, `junction`,
+   `relief`, `corner_relief`, `extend`, `hem`, `solid_bend`, or `from_solid`
+   operations. Resolve all Face/Edge/Vertex inputs with `select_subshapes` and
+   keep the PartDesign base at the current Body Tip.
+4. For a drawing whose flat blank is explicit, prefer `fold` operations along
+   its bend-line sketches rather than independently guessing flange lengths from
+   the isometric view.
+5. Call `inspect_sheet_metal` on the formed Tip. Select a planar stationary face
+   from geometric evidence, then call `unfold_sheet_metal` with exactly one
+   explicit neutral-axis source: a K-factor and its ANSI/DIN convention, or a
+   material-definition Spreadsheet.
+6. Use `execute_python`, `safe_execute`, or a tested macro only when
+   `sheet_metal_capabilities` reports that the required semantic operation is
+   not exposed. Such code must still create native editable history where the
+   installed workbench supports it.
 
 ### Dedicated capability unavailable
 

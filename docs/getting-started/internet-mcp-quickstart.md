@@ -1,6 +1,6 @@
 # Internet-Accessible FreeCAD MCP Server
 
-> **Two-component installation:** The external MCP server runs from this repository, while the bridge workbench runs inside FreeCAD from its installed `Mod\FreecadRobustMCPBridge` directory. Changes under `freecad/RobustMCPBridge` require updating that exact installed workbench and restarting FreeCAD. See [`COMPONENTS_AND_UPDATE.md`](../../COMPONENTS_AND_UPDATE.md).
+> **Two-component installation:** The external MCP server runs from this repository, while the bridge workbench runs inside FreeCAD from its installed `Mod\FreecadRobustMCPBridge` directory. Changes under `freecad/RobustMCPBridge` require updating that exact installed workbench and restarting FreeCAD. See [`COMPONENTS_AND_UPDATE.md`](https://github.com/borisyich/freecad-addon-robust-mcp-server/blob/main/COMPONENTS_AND_UPDATE.md).
 
 
 This guide exposes the local FreeCAD MCP server through a stable public HTTPS URL protected by a fixed Bearer token.

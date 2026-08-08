@@ -256,6 +256,11 @@ detail and should be created earlier.
 
 - Start with the largest functional planar panel or the panel that best controls
   the coordinate system, then establish the nominal thickness.
+- Before calling dedicated operations, use `sheet_metal_capabilities()` once.
+  Create the first native wall with `create_sheet_metal_base`; add flanges,
+  sketch-line folds, hems, junctions, and reliefs with the discriminated
+  `create_sheet_metal_feature` tool. Do not substitute PartDesign Pad/Fillet
+  chains when a SheetMetal proxy expresses the manufacturing intent.
 - When a **flat pattern/developed blank** is present, treat it as a manufacturing
   representation rather than an orthographic view of the formed part. It defines
   the planar blank perimeter, flat-domain hole/cutout locations, bend lines, and
@@ -272,6 +277,10 @@ detail and should be created earlier.
   constant nominal thickness. Holes and cutouts belong to their panels and must
   rotate with those panels during folding. Verify overlap, gaps, and bend
   direction after every major flange.
+- Resolve every topology input with `select_subshapes`; pass its references to
+  the sheet-metal tool instead of guessing `EdgeN`, `FaceN`, or `VertexN`.
+  Keep the history linear: the base of the next native operation is the current
+  Body Tip.
 - A bend deforms material around a neutral axis; do **not** generically simulate
   it by adding volume on one side and subtracting an equal volume on the other.
   Use sheet-metal/bend features when available. If they are unavailable, use a
@@ -284,6 +293,11 @@ detail and should be created earlier.
 - Verify both representations when possible: the formed state against formed or
   isometric views, and the unfolded state against the supplied flat contour,
   bend lines, and feature locations.
+- After the formed state is stable, call `inspect_sheet_metal` and use one of its
+  planar candidates as evidence for the stationary face. Create the flat pattern
+  with `unfold_sheet_metal`, supplying either an explicit K-factor plus ANSI/DIN
+  convention or a named material-definition Spreadsheet. Never rely on an
+  implicit workbench K-factor default.
 - Separate bend-dominated stamped parts from stretch-formed or deep-drawn
   parts. Ordinary bend allowance/K-factor reasoning applies to developable bend
   zones, not to material stretched over dies. Do not claim an exact blank for a

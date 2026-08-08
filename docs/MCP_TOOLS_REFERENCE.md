@@ -1,6 +1,6 @@
 # FreeCAD Robust MCP Server Tools Reference
 
-This document provides detailed signatures and examples for core MCP tools. It is not the exact inventory of all registered tools. Use [Tools Overview](guide/tools.md) or the MCP client's discovered tool list for the authoritative 116-tool inventory.
+This document provides detailed signatures and examples for core MCP tools. It is not the exact inventory of all registered tools. Use [Tools Overview](guide/tools.md) or the MCP client's discovered tool list for the authoritative 122-tool inventory.
 
 ---
 
@@ -16,15 +16,16 @@ The exact generated inventory is grouped as follows:
 | Documents | 7 |
 | Objects / Part | 33 |
 | PartDesign / Sketcher | 28 |
+| Sheet Metal | 5 |
 | Spreadsheet | 11 |
 | Draft | 6 |
 | Images | 3 |
 | Checkpoints | 1 |
-| View / GUI / History | 9 |
+| View / GUI / History | 10 |
 | Validation | 5 |
 | Export / Import | 2 |
 | Macros | 6 |
-| **Total** | **116** |
+| **Total** | **122** |
 
 The sections below retain deeper examples for commonly used tools; they do not repeat every generated entry.
 
@@ -1064,6 +1065,249 @@ mirrored_feature(
     doc_name: str | None = None
 ) -> dict
 ```
+
+---
+
+## Sheet Metal Tools
+
+These five tools wrap the installed
+[FreeCAD SheetMetal Workbench](https://github.com/shaise/FreeCAD_SheetMetal)
+as native, editable `FeaturePython` history. They are intended for one
+constant-thickness part per `PartDesign::Body`; an unfold is generated outside
+the Body so it cannot replace the formed part's Tip.
+
+A reliable agent workflow is:
+
+1. call `sheet_metal_capabilities` once and check the exact installed operations;
+2. create and fully constrain a closed blank or open wall-path sketch;
+3. create a native base, inspect it, and keep the Body history linear;
+4. resolve every `FaceN`/`EdgeN` with `select_subshapes` or inspection evidence;
+5. add manufacturing features, inspecting after each major bend;
+6. unfold with an explicit K-factor convention or a material Spreadsheet;
+7. finish with `validate_parametric_model`.
+
+Do not model a bent part as unrelated Pads, boxes, or fused solids. Such a
+shape may look correct but has no trustworthy neutral axis, bend allowance, or
+flat pattern.
+
+### sheet_metal_capabilities
+
+Report whether the external workbench is importable, its package version, and
+which native proxy classes are available.
+
+```text
+sheet_metal_capabilities() -> dict
+```
+
+The `operations` mapping contains `base`, `flange`, `fold`, `junction`,
+`relief`, `corner_relief`, `extend`, `hem`, `solid_bend`, `from_solid`, and
+`unfold`. Check the operations needed by the planned workflow rather than
+assuming that every SheetMetal release has the same Python API.
+
+### create_sheet_metal_base
+
+Create a native `SMBaseBend` from a Sketcher object.
+
+```text
+create_sheet_metal_base(
+    sketch_name: str,
+    thickness: float,
+    radius: float,
+    wall_length: float = 100.0,
+    bend_side: "outside" | "inside" | "middle" = "outside",
+    midplane: bool = False,
+    reverse: bool = False,
+    name: str = "BaseBend",
+    doc_name: str | None = None,
+) -> dict
+```
+
+- A closed sketch creates a flat base wall. `wall_length` is then immaterial to
+  its footprint.
+- An open polyline creates connected walls whose extrusion width is
+  `wall_length`.
+- For an open sketch, each segment dimension is the full flange length used by
+  SheetMetal, not the mold-line leg. For a 90-degree bend, the upstream
+  calculator expresses this as `flange_length = radius + thickness + leg_length`.
+- Put the sketch in the intended Body. The tool rejects a null, invalid,
+  multi-solid result and reports the native proxy, volume, Body, and Tip.
+
+### create_sheet_metal_feature
+
+Create one native manufacturing feature. One discriminated `operation`
+argument keeps the public surface compact while exposing only fields valid for
+the chosen operation.
+
+```text
+create_sheet_metal_feature(
+    operation: SheetMetalFeatureOperation,
+    name: str | None = None,
+    doc_name: str | None = None,
+) -> dict
+```
+
+| `operation.op` | Purpose | Required topology / primary inputs |
+| --- | --- | --- |
+| `flange` | Bend one or more boundary edges into a wall | `base_feature`, `edges`, `length`, `radius`; optional angle, bend and length conventions, gaps and relief |
+| `fold` | Bend a sheet along a sketch line | `base_feature`, planar `face`, `bend_line_sketch`, `radius`, `k_factor` |
+| `junction` | Open a seam/rip | `base_feature`, `edges`, `gap` |
+| `relief` | Add relief at selected vertices | `base_feature`, `vertices`, `size` |
+| `corner_relief` | Relieve the intersection of two bends | exactly two `edges`, `size`, `k_factor` |
+| `extend` | Extend a wall or merge a sketched extension | `base_feature`, face/edge `subelements`, `length` |
+| `hem` | Create flat, open, teardrop, or rolled hems | `base_feature`, `edges`, `hem_type`; optional width, radius and opening |
+| `solid_bend` | Bend a suitable thin solid along edges | `base_feature`, `edges`, `radius` |
+| `from_solid` | Convert a thin solid to SheetMetal history | `base_feature`, faces/edges to remove or rip, `thickness`, `radius` |
+
+All topology strings are validated before the native proxy is constructed.
+For a Body feature, `base_feature` must be the current Tip. The tool then
+requires one valid non-empty solid and advances the Tip transactionally.
+
+### inspect_sheet_metal
+
+Inspect whether an object is a usable constant-thickness sheet-metal part.
+
+```text
+inspect_sheet_metal(
+    object_name: str,
+    doc_name: str | None = None,
+) -> dict
+```
+
+The report includes validity and solid count, declared and estimated
+thickness, native SheetMetal history, Body/Tip evidence, cylindrical bend-face
+count, warnings, and up to eight planar `stationary_face_candidates`. Use a
+candidate as evidence for unfold; use `select_subshapes` when the design intent
+requires a particular normal, location, or area.
+
+### unfold_sheet_metal
+
+Create a native `SMUnfold` flat pattern while preserving the formed Body Tip.
+
+```text
+unfold_sheet_metal(
+    feature_name: str,
+    stationary_face: str,
+    material: {
+        "k_factor": float,
+        "standard": "ansi" | "din",
+    } | {"material_sheet": str},
+    generate_sketch: bool = True,
+    separate_layers: bool = True,
+    show_bend_angles: bool = True,
+    name: str = "Unfold",
+    doc_name: str | None = None,
+) -> dict
+```
+
+Exactly one bend-allowance source is mandatory. Manual values require an
+explicit ANSI or DIN convention; production workflows may instead name a real
+`Spreadsheet::Sheet` material table. The stationary face must resolve to a
+planar face. The result reports its material source, generated sketch objects,
+and geometric validation evidence.
+
+### Example: upstream 100 mm L-profile flat pattern
+
+The upstream
+[`calc-unfold.py`](https://github.com/shaise/FreeCAD_SheetMetal/blob/master/tools/calc-unfold.py)
+uses `t=2 mm`, inside `R=1.64 mm`, ANSI `K=0.38`, and a 90-degree bend.
+It calculates a 48.12 mm mold-line leg and a 51.76 mm full flange. The fully
+constrained open `ProfileSketch` therefore uses the full flange length on both
+segments; unfolding must recover a 100 mm developed strip.
+
+```python
+# Verified by: tests/integration/test_sheetmetal_workflow.py::test_upstream_reference_l_profile_unfolds_to_100_mm_blank
+base = await create_sheet_metal_base(
+    sketch_name="ProfileSketch",
+    thickness=2.0,
+    radius=1.64,
+    wall_length=30.0,
+    bend_side="inside",
+    name="ReferenceLProfile",
+    doc_name="McpAuditSheetMetalReference",
+)
+inspection = await inspect_sheet_metal(
+    object_name="ReferenceLProfile",
+    doc_name="McpAuditSheetMetalReference",
+)
+flat = await unfold_sheet_metal(
+    feature_name="ReferenceLProfile",
+    stationary_face=inspection["stationary_face_candidates"][0]["face"],
+    material={"k_factor": 0.38, "standard": "ansi"},
+    generate_sketch=True,
+    separate_layers=True,
+    show_bend_angles=True,
+    name="ReferenceFlatPattern",
+    doc_name="McpAuditSheetMetalReference",
+)
+```
+
+The linked live test constructs and fully constrains the sketch, verifies the
+native `SMBaseBend`, checks the bend surface and thickness evidence, unfolds it,
+measures the resulting B-rep as `100.00 +/- 0.05 mm`, and runs final parametric
+validation with both named flange dimensions.
+
+### Example: semantic edge flange
+
+Never guess that the desired boundary is `Edge1`. This example selects the
+80 mm top boundary of an 80 x 50 x 2 mm closed base by geometry and location,
+then creates and unfolds a 20 mm flange.
+
+```python
+# Verified by: tests/integration/test_sheetmetal_workflow.py::test_semantic_edge_flange_and_unfold_workflow
+edge = await select_subshapes(
+    object_name="BaseBlank",
+    criteria={
+        "kind": "edge",
+        "curve_types": ["Line"],
+        "direction": [1.0, 0.0, 0.0],
+        "length_min": 79.99,
+        "length_max": 80.01,
+        "centroid_bounds": {
+            "y_min": 49.99, "y_max": 50.01,
+            "z_min": 1.99, "z_max": 2.01,
+        },
+        "limit": 1,
+    },
+    detail_level="summary",
+    doc_name="McpAuditSheetMetalFlange",
+)
+flange = await create_sheet_metal_feature(
+    operation={
+        "op": "flange",
+        "base_feature": "BaseBlank",
+        "edges": edge["references"],
+        "length": 20.0,
+        "radius": 2.0,
+        "angle": 90.0,
+        "bend_type": "material_outside",
+        "length_spec": "leg",
+    },
+    name="EdgeFlange",
+    doc_name="McpAuditSheetMetalFlange",
+)
+inspection = await inspect_sheet_metal(
+    object_name="EdgeFlange",
+    doc_name="McpAuditSheetMetalFlange",
+)
+flat = await unfold_sheet_metal(
+    feature_name="EdgeFlange",
+    stationary_face=inspection["stationary_face_candidates"][0]["face"],
+    material={"k_factor": 0.38, "standard": "ansi"},
+    name="FlangeFlatPattern",
+    doc_name="McpAuditSheetMetalFlange",
+)
+```
+
+The linked live test also proves that the selector returns exactly one edge,
+the feature is an `SMBendWall` and the Body Tip, the model has a cylindrical
+bend face and no inspection warnings, the unfold is one valid solid with
+generated sketches, and both named blank dimensions still drive the result.
+
+Unit tests additionally dispatch every operation in the table to its native
+proxy and reject misspelled fields, wrong topology kinds, invalid dimensions,
+and ambiguous unfold material rules. The registry-driven integration audit
+requires all five Sheet Metal tools and all nine feature variants to remain in
+the public schema.
 
 ---
 

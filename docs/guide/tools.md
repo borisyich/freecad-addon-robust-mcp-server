@@ -1,6 +1,6 @@
 # Tools Reference
 
-The server currently registers **117 MCP tools**. This page is generated from the actual `@mcp.tool()` definitions in `src/freecad_mcp/tools` and is the exact inventory.
+The server currently registers **122 MCP tools**. This page is generated from the actual `@mcp.tool()` definitions in `src/freecad_mcp/tools` and is the exact inventory.
 
 Geometry-changing operations are transaction-backed where applicable. Use `history(action="undo")` for explicit recovery, `get_console_output` for console diagnostics, and `recompute_document` for document recomputation.
 
@@ -12,15 +12,16 @@ Geometry-changing operations are transaction-backed where applicable. Use `histo
 | [Documents](#documents) | `src/freecad_mcp/tools/documents.py` | 7 |
 | [Objects / Part](#objects-part) | `src/freecad_mcp/tools/objects.py` | 33 |
 | [PartDesign / Sketcher](#partdesign-sketcher) | `src/freecad_mcp/tools/partdesign.py` | 28 |
+| [Sheet Metal](#sheet-metal) | `src/freecad_mcp/tools/sheetmetal.py` | 5 |
 | [Spreadsheet](#spreadsheet) | `src/freecad_mcp/tools/spreadsheet.py` | 11 |
 | [Draft](#draft) | `src/freecad_mcp/tools/draft.py` | 6 |
 | [Images](#images) | `src/freecad_mcp/tools/images.py` | 3 |
 | [Checkpoints](#checkpoints) | `src/freecad_mcp/tools/checkpoints.py` | 1 |
-| [View / GUI / History](#view-gui-history) | `src/freecad_mcp/tools/view.py` | 9 |
+| [View / GUI / History](#view-gui-history) | `src/freecad_mcp/tools/view.py` | 10 |
 | [Validation](#validation) | `src/freecad_mcp/tools/validation.py` | 5 |
 | [Export / Import](#export-import) | `src/freecad_mcp/tools/export.py` | 2 |
 | [Macros](#macros) | `src/freecad_mcp/tools/macros.py` | 6 |
-| **Total** |  | **116** |
+| **Total** |  | **122** |
 
 ## Execution
 
@@ -116,6 +117,80 @@ Geometry-changing operations are transaction-backed where applicable. Use `histo
 | `subtractive_loft` | Create a subtractive loft (cut) through multiple sketches. |
 | `subtractive_pipe` | Create a subtractive pipe (sweep cut) along a spine path. |
 | `get_sketch_info` | Get compact sketch status; page geometry, constraints, and expressions on request. |
+
+## Sheet Metal
+
+These tools require the external FreeCAD SheetMetal Workbench. They create its
+native parametric `FeaturePython` objects, not final copied shapes. Keep one
+linear PartDesign Body history for the formed part; the unfolded manufacturing
+representation is created outside that Body.
+
+| Tool | Description |
+|---|---|
+| `sheet_metal_capabilities` | Report installed SheetMetal version and availability of every wrapped native operation. |
+| `create_sheet_metal_base` | Create a native flat blank or open base-wall profile from a Sketcher sketch with explicit thickness and bend radius. |
+| `create_sheet_metal_feature` | Create a typed native flange, sketch-line fold, junction, relief, corner relief, extend, hem, solid bend, or solid-to-sheet conversion. |
+| `unfold_sheet_metal` | Create a parametric flat pattern from a planar stationary face and an explicit K-factor/standard or material Spreadsheet. |
+| `inspect_sheet_metal` | Report proxy history, thickness evidence, planar stationary-face candidates, bend-face count, Body Tip, and unfold readiness. |
+
+Recommended sequence:
+
+1. Call `sheet_metal_capabilities` once and create/constrain the base sketch.
+2. Call `create_sheet_metal_base`. A closed sketch represents a flat blank; an
+   open wire represents a wall profile.
+3. Use `select_subshapes` to resolve the intended topology. Pass those exact
+   references to `create_sheet_metal_feature`; never guess `EdgeN`, `FaceN`, or
+   `VertexN`.
+4. After each major flange or fold, inspect the formed feature and verify the
+   expected panel normal and silhouette. The next operation must use the current
+   Body Tip as `base_feature`.
+5. Call `inspect_sheet_metal`, choose a planar stationary face from evidence,
+   and create the manufacturing representation with `unfold_sheet_metal`.
+6. Compare the unfold outline, bend lines, holes, and cutouts against the flat
+   drawing. A successful unfold does not by itself prove shop-floor bend
+   sequence, tooling access, or deep-draw manufacturability.
+
+Example operation payloads:
+
+```json
+{
+  "op": "flange",
+  "base_feature": "BaseBend",
+  "edges": ["Edge4"],
+  "length": 25,
+  "radius": 2,
+  "angle": 90,
+  "length_spec": "leg",
+  "bend_type": "material_outside"
+}
+```
+
+```json
+{
+  "op": "fold",
+  "base_feature": "BaseBend",
+  "face": "Face1",
+  "bend_line_sketch": "BendLine_B1",
+  "radius": 2,
+  "angle": 90,
+  "k_factor": 0.38,
+  "position": "intersection_of_planes"
+}
+```
+
+For unfolding, `material` is strict and mutually exclusive:
+
+```json
+{"k_factor": 0.38, "standard": "ansi"}
+```
+
+or:
+
+```json
+{"material_sheet": "material_DC01"}
+```
+
+Do not apply bend compensation twice to a fully dimensioned flat pattern.
 
 ## Spreadsheet
 

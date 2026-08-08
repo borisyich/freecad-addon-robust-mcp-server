@@ -347,7 +347,7 @@ FREECAD_MODE=embedded freecad-mcp
 
 ### Available Tools
 
-The server currently registers **117 MCP tools**. The tables below list common tools rather than duplicating the exact inventory. See the generated [Tools Overview](docs/guide/tools.md) or the MCP client's discovered tool list for the authoritative inventory; [MCP Tools Reference](docs/MCP_TOOLS_REFERENCE.md) provides detailed examples for core tools, while `freecad://capabilities` is a curated runtime overview. Tools marked with **GUI** require FreeCAD to be running in GUI mode; they return a structured error in headless mode.
+The server currently registers **122 MCP tools**. The tables below list common tools rather than duplicating the exact inventory. See the generated [Tools Overview](docs/guide/tools.md) or the MCP client's discovered tool list for the authoritative inventory; [MCP Tools Reference](docs/MCP_TOOLS_REFERENCE.md) provides detailed examples for core tools, while `freecad://capabilities` is a curated runtime overview. Tools marked with **GUI** require FreeCAD to be running in GUI mode; they return a structured error in headless mode.
 
 #### Execution & Debugging (5 tools)
 
@@ -424,6 +424,20 @@ The server currently registers **117 MCP tools**. The tables below list common t
 | `mirrored_feature` | Mirror a feature across a plane            | All  |
 | `fillet_edges`     | Add fillets (rounded edges)                | All  |
 | `chamfer_edges`    | Add chamfers (beveled edges)               | All  |
+
+#### Sheet Metal (5 tools)
+
+Requires the external FreeCAD SheetMetal Workbench. These tools create native,
+editable SheetMetal `FeaturePython` history and a separate flat-pattern
+manufacturing representation.
+
+| Tool | Description | Mode |
+| ---- | ----------- | ---- |
+| `sheet_metal_capabilities` | Report workbench version and native operation availability | All |
+| `create_sheet_metal_base` | Create a flat blank or open base-wall profile from a sketch | All |
+| `create_sheet_metal_feature` | Add typed flanges, folds, hems, reliefs, junctions, extensions, bends, or solid conversion | All |
+| `unfold_sheet_metal` | Create a parametric unfold using explicit neutral-axis data | All |
+| `inspect_sheet_metal` | Inspect thickness, bend faces, feature history, and unfold readiness | All |
 
 #### View & Display (10 common tools)
 
