@@ -231,9 +231,12 @@ OBJECT_INSPECTION_RUNTIME = dedent(
         face_limit=20,
         edge_offset=0,
         edge_limit=20,
+        vertex_offset=0,
+        vertex_limit=20,
     ):
         faces = list(_safe_attr(shape, "Faces", []) or [])
         edges = list(_safe_attr(shape, "Edges", []) or [])
+        vertexes = list(_safe_attr(shape, "Vertexes", []) or [])
 
         edge_faces = {}
         for edge_index, edge in enumerate(edges):
@@ -318,12 +321,48 @@ OBJECT_INSPECTION_RUNTIME = dedent(
                 }
             )
 
+        vertex_values = []
+        for vertex_index, vertex in enumerate(vertexes):
+            point = _safe_attr(vertex, "Point")
+            adjacent_edges = []
+            adjacent_faces = []
+            for edge_index, edge in enumerate(edges):
+                if any(
+                    _shape_is_same(vertex, edge_vertex)
+                    for edge_vertex in list(_safe_attr(edge, "Vertexes", []) or [])
+                ):
+                    adjacent_edges.append(f"Edge{edge_index + 1}")
+            for face_index, face in enumerate(faces):
+                if any(
+                    _shape_is_same(vertex, face_vertex)
+                    for face_vertex in list(_safe_attr(face, "Vertexes", []) or [])
+                ):
+                    adjacent_faces.append(f"Face{face_index + 1}")
+            vertex_values.append(
+                {
+                    "name": f"Vertex{vertex_index + 1}",
+                    "index": vertex_index + 1,
+                    "point": _vector_value(point) if point is not None else None,
+                    "adjacent_edges": adjacent_edges,
+                    "adjacent_faces": adjacent_faces,
+                    "tolerance": _finite_number(_safe_attr(vertex, "Tolerance")),
+                }
+            )
+
         face_page, face_paging = _page_value(face_values, face_offset, face_limit)
         edge_page, edge_paging = _page_value(edge_values, edge_offset, edge_limit)
+        vertex_page, vertex_paging = _page_value(
+            vertex_values, vertex_offset, vertex_limit
+        )
         return {
             "faces": face_page,
             "edges": edge_page,
-            "topology_pages": {"faces": face_paging, "edges": edge_paging},
+            "vertices": vertex_page,
+            "topology_pages": {
+                "faces": face_paging,
+                "edges": edge_paging,
+                "vertices": vertex_paging,
+            },
         }
 
 
@@ -334,6 +373,8 @@ OBJECT_INSPECTION_RUNTIME = dedent(
         face_limit=20,
         edge_offset=0,
         edge_limit=20,
+        vertex_offset=0,
+        vertex_limit=20,
     ):
         try:
             is_null = bool(shape.isNull())
@@ -382,6 +423,8 @@ OBJECT_INSPECTION_RUNTIME = dedent(
                     face_limit=face_limit,
                     edge_offset=edge_offset,
                     edge_limit=edge_limit,
+                    vertex_offset=vertex_offset,
+                    vertex_limit=vertex_limit,
                 )
             )
         return summary
@@ -596,6 +639,8 @@ OBJECT_INSPECTION_RUNTIME = dedent(
         face_limit=20,
         edge_offset=0,
         edge_limit=20,
+        vertex_offset=0,
+        vertex_limit=20,
     ):
         properties = {}
         if include_properties:
@@ -613,6 +658,8 @@ OBJECT_INSPECTION_RUNTIME = dedent(
                     face_limit=face_limit,
                     edge_offset=edge_offset,
                     edge_limit=edge_limit,
+                    vertex_offset=vertex_offset,
+                    vertex_limit=vertex_limit,
                 )
             except Exception as exc:
                 shape_info = {"error": str(exc)}
@@ -646,6 +693,8 @@ def build_object_inspection_code(
     face_limit: int | None = 20,
     edge_offset: int = 0,
     edge_limit: int | None = 20,
+    vertex_offset: int = 0,
+    vertex_limit: int | None = 20,
 ) -> str:
     """Build the FreeCAD-side script used by all bridge implementations."""
     document_expression = (
@@ -673,5 +722,7 @@ _result_ = _inspect_object_value(
     face_limit={face_limit!r},
     edge_offset={edge_offset!r},
     edge_limit={edge_limit!r},
+    vertex_offset={vertex_offset!r},
+    vertex_limit={vertex_limit!r},
 )
 """

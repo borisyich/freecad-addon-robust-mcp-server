@@ -72,7 +72,9 @@ Prefer standard MCP tools. Use execute_python or safe_execute only when
 a required operation is unavailable or broken.
 Use compact/default detail levels first. Request full topology, properties,
 sketch records, or validation structure only for a specific diagnosis, and page
-large face/edge/constraint collections instead of loading them all at once.
+large face/edge/vertex/constraint collections instead of loading them all at once.
+Use dedicated measure_* tools for numerical geometric evidence; obtain their
+FaceN/EdgeN/VertexN inputs from select_subshapes instead of guessing indices.
 For Spreadsheet-driven sketch dimensions, bind the alias to the dimensional
 constraint expression path and verify it with get_sketch_info.
 After every major feature:
@@ -795,6 +797,7 @@ def main() -> None:
         import uvicorn
 
         from freecad_mcp.http_auth import (
+            ASGIApp,
             McpMethodAuditMiddleware,
             StaticBearerAuthMiddleware,
         )
@@ -837,7 +840,7 @@ def main() -> None:
                 "complete images, model data, local paths, and tool output."
             )
         mcp_app = McpMethodAuditMiddleware(
-            mcp.streamable_http_app(),
+            cast("ASGIApp", mcp.streamable_http_app()),
             wire_audit_enabled=config.wire_audit_enabled,
             wire_audit_dir=config.wire_audit_dir,
             wire_save_raw=config.wire_save_raw,

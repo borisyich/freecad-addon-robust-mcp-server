@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from mcp.types import CallToolResult, ImageContent, TextContent
+from mcp.types import CallToolResult, ContentBlock, ImageContent, TextContent
 from PIL import Image as PILImage
 from PIL import ImageDraw, ImageFont, ImageOps, UnidentifiedImageError
 
@@ -36,7 +36,7 @@ def image_tool_result(
     is_error: bool = False,
 ) -> CallToolResult:
     """Build a tool result with metadata and optional MCP ImageContent."""
-    content: list[TextContent | ImageContent] = [_json_text(metadata)]
+    content: list[ContentBlock] = [_json_text(metadata)]
     if image_base64 is not None:
         content.append(
             ImageContent(
@@ -63,7 +63,7 @@ def multi_image_tool_result(
     Each text block tells the model exactly which source region the following
     image represents. This is more reliable than returning anonymous crops.
     """
-    content: list[TextContent | ImageContent] = [_json_text(metadata)]
+    content: list[ContentBlock] = [_json_text(metadata)]
     for label, image_base64 in labelled_images:
         content.append(TextContent(type="text", text=label))
         content.append(

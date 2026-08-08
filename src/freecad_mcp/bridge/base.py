@@ -416,6 +416,8 @@ class FreecadBridge(ABC):
         face_limit: int | None = 20,
         edge_offset: int = 0,
         edge_limit: int | None = 20,
+        vertex_offset: int = 0,
+        vertex_limit: int | None = 20,
     ) -> ObjectInfo:
         """Get detailed object information.
 
@@ -424,11 +426,13 @@ class FreecadBridge(ABC):
             doc_name: Document name (uses active if None).
             include_properties: Serialize the complete property map.
             include_shape: Include compact shape metrics.
-            include_topology: Include paged face and edge records.
+            include_topology: Include paged face, edge, and vertex records.
             face_offset: Zero-based face-page offset.
             face_limit: Face-page size, or all remaining faces when None.
             edge_offset: Zero-based edge-page offset.
             edge_limit: Edge-page size, or all remaining edges when None.
+            vertex_offset: Zero-based vertex-page offset.
+            vertex_limit: Vertex-page size, or all remaining vertices when None.
 
         Returns:
             ObjectInfo with the requested detail level. Topology pages are

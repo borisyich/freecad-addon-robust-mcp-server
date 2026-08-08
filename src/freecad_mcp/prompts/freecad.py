@@ -889,9 +889,15 @@ Use compact `inspect_object()` for metrics and paged
 - Volume, surface area, bounding box, and validity
 - Faces: surface type, oriented normal, area, adjacency, and local convexity
 - Edges: curve type, endpoints, length, direction/radius, and adjacent faces
+- Vertices: world point, tolerance, and adjacent edges/faces
 
-Use `select_subshapes` to turn those properties into candidate `FaceN`/`EdgeN`
+Use `select_subshapes` to turn those properties into candidate `FaceN`/`EdgeN`/`VertexN`
 references; do not write manual topology loops for ordinary selection tasks.
+
+For numerical evidence, use `measure_geometry` and select its strict `kind`:
+`bbox`, `distance`, `angle`, `radius`, `wall_thickness`, `clearance`,
+`minimum_gap`, or `point_to_face`. Do not derive dimensions from screenshots
+or cached bounds.
 
 ## Detailed Analysis with Typed Tools
 
@@ -899,7 +905,8 @@ references; do not write manual topology loops for ordinary selection tasks.
    only if the compact metrics do not answer the question.
 2. Read the returned bounding box, volume, area, semantic topology, placement,
    dependencies, and readable properties.
-3. Use `select_subshapes` when an operation needs a face or edge reference.
+3. Use `select_subshapes` when an operation or measurement needs a face, edge,
+   or vertex reference.
 4. Call `validate_object(object_name="ObjectName")` for geometric validity.
 5. Call `validate_document()` when downstream features or Body Tip state may be
    affected.

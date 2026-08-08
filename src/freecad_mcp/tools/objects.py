@@ -109,7 +109,7 @@ PrimitiveSpec = Annotated[
     | HelixPrimitive,
     Field(discriminator="kind"),
 ]
-_PRIMITIVE_ADAPTER = TypeAdapter(PrimitiveSpec)
+_PRIMITIVE_ADAPTER: TypeAdapter[PrimitiveSpec] = TypeAdapter(PrimitiveSpec)
 
 
 class CoordinateRange(_PrimitiveBase):
@@ -232,11 +232,41 @@ class EdgeSelectionCriteria(_PrimitiveBase):
         return self
 
 
+class VertexSelectionCriteria(_PrimitiveBase):
+    """Semantic criteria for selecting vertices from an object's Shape."""
+
+    kind: Literal["vertex"]
+    point_bounds: CoordinateRange | None = Field(
+        default=None,
+        validation_alias=AliasChoices("point_bounds", "point", "center"),
+        description="Global-coordinate bounds for the vertex point.",
+    )
+    adjacent_edge_count_min: int | None = Field(default=None, ge=0)
+    adjacent_edge_count_max: int | None = Field(default=None, ge=0)
+    adjacent_face_count_min: int | None = Field(default=None, ge=0)
+    adjacent_face_count_max: int | None = Field(default=None, ge=0)
+    sort_by: Literal["index", "point_x", "point_y", "point_z"] = "index"
+    sort_order: Literal["asc", "desc"] = "asc"
+    limit: int | None = Field(default=None, ge=1, le=200)
+
+    @model_validator(mode="after")
+    def validate_ranges(self) -> "VertexSelectionCriteria":
+        """Reject inverted vertex-adjacency ranges."""
+        for name in ("adjacent_edge_count", "adjacent_face_count"):
+            minimum = getattr(self, f"{name}_min")
+            maximum = getattr(self, f"{name}_max")
+            if minimum is not None and maximum is not None and minimum > maximum:
+                raise ValueError(f"{name}_min must not exceed {name}_max")
+        return self
+
+
 SubshapeSelectionCriteria = Annotated[
-    FaceSelectionCriteria | EdgeSelectionCriteria,
+    FaceSelectionCriteria | EdgeSelectionCriteria | VertexSelectionCriteria,
     Field(discriminator="kind"),
 ]
-_SUBSHAPE_CRITERIA_ADAPTER = TypeAdapter(SubshapeSelectionCriteria)
+_SUBSHAPE_CRITERIA_ADAPTER: TypeAdapter[SubshapeSelectionCriteria] = TypeAdapter(
+    SubshapeSelectionCriteria
+)
 
 
 def _validate_direction(value: list[float] | None, field_name: str) -> None:
@@ -329,21 +359,40 @@ def _centroid_matches(
     return True
 
 
-def _semantic_matches(
+def _semantic_matches(  # noqa: PLR0912
     shape_info: dict[str, Any], criteria: SubshapeSelectionCriteria
 ) -> list[dict[str, Any]]:
     """Filter enriched ``shape_info`` using typed semantic criteria."""
     faces = list(shape_info.get("faces") or [])
     face_by_name = {face.get("name"): face for face in faces}
-    source = (
-        faces
-        if isinstance(criteria, FaceSelectionCriteria)
-        else list(shape_info.get("edges") or [])
-    )
+    if isinstance(criteria, FaceSelectionCriteria):
+        source = faces
+    elif isinstance(criteria, EdgeSelectionCriteria):
+        source = list(shape_info.get("edges") or [])
+    else:
+        source = list(shape_info.get("vertices") or [])
     matches: list[dict[str, Any]] = []
 
     for item in source:
         adjacent_count = len(item.get("adjacent_faces") or [])
+        if isinstance(criteria, VertexSelectionCriteria):
+            adjacent_edge_count = len(item.get("adjacent_edges") or [])
+            if not _inside_range(
+                adjacent_edge_count,
+                criteria.adjacent_edge_count_min,
+                criteria.adjacent_edge_count_max,
+            ):
+                continue
+            if not _inside_range(
+                adjacent_count,
+                criteria.adjacent_face_count_min,
+                criteria.adjacent_face_count_max,
+            ):
+                continue
+            if not _centroid_matches(item.get("point"), criteria.point_bounds):
+                continue
+            matches.append(item)
+            continue
         if isinstance(criteria, FaceSelectionCriteria):
             if not _matches_requested_type(
                 item.get("surface_type"), criteria.surface_types
@@ -411,18 +460,25 @@ def _semantic_matches(
     def sort_value(item: dict[str, Any]) -> tuple[bool, float]:
         if criteria.sort_by == "index":
             value = item.get("index")
-        elif criteria.sort_by.startswith(("center_", "centroid_")):
+        elif criteria.sort_by.startswith(("center_", "centroid_", "point_")):
             axis = criteria.sort_by[-1]
-            value = (item.get("centroid") or item.get("center") or {}).get(axis)
+            value = (
+                item.get("point")
+                or item.get("centroid")
+                or item.get("center")
+                or {}
+            ).get(axis)
         else:
             value = item.get(criteria.sort_by)
+        if value is None:
+            return True, 0.0
         try:
             return False, float(value)
         except Exception:
             return True, 0.0
 
-    present = []
-    missing = []
+    present: list[tuple[float, dict[str, Any]]] = []
+    missing: list[tuple[float, dict[str, Any]]] = []
     for item in matches:
         is_missing, value = sort_value(item)
         (missing if is_missing else present).append((value, item))
@@ -464,6 +520,9 @@ def _compact_subshape(item: dict[str, Any]) -> dict[str, Any]:
         "centroid_kind",
         "convexity",
         "adjacent_faces",
+        "point",
+        "adjacent_edges",
+        "tolerance",
     )
     result = {key: item[key] for key in keys if key in item}
     if "centroid" not in result and item.get("center") is not None:
@@ -569,6 +628,8 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
         face_limit: int = 20,
         edge_offset: int = 0,
         edge_limit: int = 20,
+        vertex_offset: int = 0,
+        vertex_limit: int = 20,
         include_properties: bool | None = None,
         include_shape: bool | None = None,
     ) -> dict[str, Any]:
@@ -586,18 +647,21 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
             face_limit: Face-page size, from 1 to 100.
             edge_offset: Zero-based edge-page offset for topology/full.
             edge_limit: Edge-page size, from 1 to 100.
+            vertex_offset: Zero-based vertex-page offset for topology/full.
+            vertex_limit: Vertex-page size, from 1 to 100.
             include_properties: Deprecated switch that selects full detail.
             include_shape: Deprecated switch that can omit shape metrics.
 
         Returns:
-            A compact report by default. Topology/full include page metadata with
+            A compact report by default. Topology/full include independent face,
+            edge, and vertex page metadata with
             ``has_more`` and ``next_offset``. Large objects can still produce a
             large response in ``full`` mode; keep page limits small.
         """
-        if min(face_offset, edge_offset) < 0:
-            raise ValueError("face_offset and edge_offset must be non-negative")
-        if not 1 <= face_limit <= 100 or not 1 <= edge_limit <= 100:
-            raise ValueError("face_limit and edge_limit must be between 1 and 100")
+        if min(face_offset, edge_offset, vertex_offset) < 0:
+            raise ValueError("topology offsets must be non-negative")
+        if not all(1 <= value <= 100 for value in (face_limit, edge_limit, vertex_limit)):
+            raise ValueError("topology page limits must be between 1 and 100")
 
         effective_detail = detail_level
         if include_properties is True:
@@ -616,6 +680,8 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
                 face_limit=face_limit,
                 edge_offset=edge_offset,
                 edge_limit=edge_limit,
+                vertex_offset=vertex_offset,
+                vertex_limit=vertex_limit,
             )
         except Exception as e:
             return {
@@ -676,18 +742,20 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
         offset: int = 0,
         page_size: int = 20,
     ) -> dict[str, Any]:
-        """Select faces or edges by semantic geometric criteria.
+        """Select faces, edges, or vertices by semantic geometric criteria.
 
         Use this tool before creating a face-supported sketch or choosing edges
         for Fillet/Chamfer. It avoids brittle manual loops over ``Shape.Faces``
-        and ``Shape.Edges`` and returns the same ``FaceN``/``EdgeN`` references
-        consumed by PartDesign tools.
+        ``Shape.Edges``, and ``Shape.Vertexes`` and returns the same
+        ``FaceN``/``EdgeN``/``VertexN`` references consumed by modeling and
+        measurement tools.
 
         Face criteria can filter by surface type, representative oriented
         normal, area, local convexity, adjacency count, and centroid position.
         Edge criteria can filter by curve type, undirected line direction,
         length, radius, required adjacent surface types, adjacency count, and
-        centroid position. Face centroids are surface-area centroids; edge
+        centroid position. Vertex criteria filter the world point and adjacent
+        edge/face counts. Face centroids are surface-area centroids; edge
         centroids are curve-length centroids. Every listed adjacent surface type
         must occur. Results can be sorted by size or location.
 
@@ -710,7 +778,10 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
             raise ValueError("page_size must be between 1 and 100")
         normalized = (
             criteria
-            if isinstance(criteria, (FaceSelectionCriteria, EdgeSelectionCriteria))
+            if isinstance(
+                criteria,
+                (FaceSelectionCriteria, EdgeSelectionCriteria, VertexSelectionCriteria),
+            )
             else _SUBSHAPE_CRITERIA_ADAPTER.validate_python(criteria)
         )
         bridge = await get_bridge()
@@ -722,6 +793,7 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
             include_topology=True,
             face_limit=None,
             edge_limit=None,
+            vertex_limit=None,
         )
         if not obj:
             raise ValueError(f"Object not found: {object_name!r}")

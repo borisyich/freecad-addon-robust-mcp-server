@@ -1,6 +1,6 @@
 # FreeCAD Robust MCP Server Tools Reference
 
-This document provides detailed signatures and examples for core MCP tools. It is not the exact inventory of all registered tools. Use [Tools Overview](guide/tools.md) or the MCP client's discovered tool list for the authoritative 122-tool inventory.
+This document provides detailed signatures and examples for core MCP tools. It is not the exact inventory of all registered tools. Use [Tools Overview](guide/tools.md) or the MCP client's discovered tool list for the authoritative 123-tool inventory.
 
 ---
 
@@ -15,6 +15,7 @@ The exact generated inventory is grouped as follows:
 | Execution | 5 |
 | Documents | 7 |
 | Objects / Part | 33 |
+| Measurements | 1 |
 | PartDesign / Sketcher | 28 |
 | Sheet Metal | 5 |
 | Spreadsheet | 11 |
@@ -25,7 +26,7 @@ The exact generated inventory is grouped as follows:
 | Validation | 5 |
 | Export / Import | 2 |
 | Macros | 6 |
-| **Total** | **122** |
+| **Total** | **123** |
 
 The sections below retain deeper examples for commonly used tools; they do not repeat every generated entry.
 
@@ -242,12 +243,14 @@ inspect_object(
     face_limit: int = 20,
     edge_offset: int = 0,
     edge_limit: int = 20,
+    vertex_offset: int = 0,
+    vertex_limit: int = 20,
 ) -> dict
 ```
 
 Use `summary` for identity, relationships, and compact shape metrics. Use `shape`
 when only bounds, volume, area, validity, and topology counts are needed. The
-`topology` and `full` modes return independently paged face and edge records;
+`topology` and `full` modes return independently paged face, edge, and vertex records;
 `full` additionally serializes every property and can still be very large. Use
 it only after a compact response identifies a specific property-level question.
 The legacy `include_properties`/`include_shape` arguments remain accepted.
@@ -261,11 +264,14 @@ the local surface curvature at a representative point (`flat`, `convex`,
 `concave`, `saddle`, or `unknown`); it is not an assertion about manufacturability.
 The location field is named `centroid`: for faces it is the surface-area
 centroid and for edges it is the curve-length centroid, in global coordinates.
+`shape_info.vertices` contains the exact point, adjacent edges/faces, and vertex
+tolerance. Each topology kind has its own page metadata under `topology_pages`.
 
 #### select_subshapes
 
-Select topology without writing manual loops over `Shape.Faces` or `Shape.Edges`.
-The result contains semantic records plus ready-to-use `FaceN`/`EdgeN` references.
+Select topology without writing manual loops over `Shape.Faces`, `Shape.Edges`,
+or `Shape.Vertexes`. The result contains semantic records plus ready-to-use
+`FaceN`/`EdgeN`/`VertexN` references.
 Use it before face-supported sketches, Fillet, Chamfer, Draft, or Thickness.
 
 ```python
@@ -298,9 +304,22 @@ select_subshapes(
         "limit": 4,
     },
 )
+
+select_subshapes(
+    object_name="Pad",
+    criteria={
+        "kind": "vertex",
+        "point_bounds": {"x_min": 19.99, "x_max": 20.01},
+        "adjacent_edge_count_min": 3,
+        "sort_by": "point_z",
+        "sort_order": "desc",
+        "limit": 1,
+    },
+    detail_level="summary",
+)
 ```
 
-The default `detail_level="references"` returns only `FaceN`/`EdgeN` references
+The default `detail_level="references"` returns only `FaceN`/`EdgeN`/`VertexN` references
 plus pagination metadata. Use `summary` for compact selection evidence and
 `full` only to resolve a specific ambiguity. Location filters use
 `centroid_bounds`; the old input key `center` and `center_x/y/z` sort names are
@@ -311,6 +330,11 @@ stored from right to left. Type names are case-insensitive and accept common
 forms such as `planar`/`Plane`, `circular`/`Circle`, and
 `LineSegment`/`Line`. When `adjacent_surface_types` contains several entries,
 every listed type must occur among the edge's adjacent faces.
+
+Vertex location uses `point_bounds` in world coordinates. Vertex filters also
+accept minimum/maximum adjacent edge and face counts. Use the returned
+`VertexN` directly with `measure_geometry(measurement={"kind": ...})`; do not
+infer the vertex index from an edge endpoint.
 
 #### create_object
 
@@ -469,6 +493,192 @@ selection(
 
 For `action="set"`, provide at least one object name. The result reports selected
 and missing object names rather than silently ignoring unresolved references.
+
+---
+
+## Measurement Tools
+
+Measurements are read-only geometric evidence. They operate in FreeCAD native
+units (millimetres, square/cubic millimetres, and degrees), touch and recompute
+referenced objects by default, and never create document geometry. A topology
+reference has this common shape:
+
+```python
+{"object_name": "Body", "subshape": "Face3"}
+```
+
+Omit `subshape` to measure the complete object Shape. When a tool needs a
+specific topology kind it rejects the wrong kind early. Resolve references with
+`select_subshapes`; `FaceN`, `EdgeN`, and `VertexN` remain transient topology
+names and must be selected again after geometry-changing recomputes.
+
+### measure_geometry
+
+```python
+measure_geometry(
+    measurement: MeasurementRequest,  # strict variant selected by measurement.kind
+    doc_name: str | None = None,
+    force_recompute: bool = True,
+) -> dict
+```
+
+Supported kinds are `bbox`, `distance`, `angle`, `radius`, `wall_thickness`,
+`clearance`, `minimum_gap`, and `point_to_face`. Put operation-specific fields
+inside `measurement`; unknown or cross-kind fields are rejected. `doc_name` and
+`force_recompute` are common outer arguments. The public API intentionally has
+no per-operation aliases: always call this tool and choose a kind.
+
+#### `kind="bbox"`
+
+`fast` uses cached `TopoShape.BoundBox`/OCCT `BRepBndLib::Add`; `optimal` uses
+`TopoShape.optimalBoundingBox`/OCCT `BRepBndLib::AddOptimal`. The response names
+the actual algorithm. `coordinate_system="world"` includes object placement;
+`local` removes the global placement before measuring.
+
+With `report_gap=True`, both algorithms are evaluated and `gap_report` gives
+the lower/upper expansion and size excess of the fast box on every axis. Set it
+to `False` with `mode="fast"` when latency matters more than comparison
+evidence. `tolerance_report` always contains maximum vertex, edge, and face
+tolerances. `use_shape_tolerance=True` asks the optimal algorithm to enlarge
+bounds by topology tolerances; triangulation use is explicit and reported.
+
+```python
+bounds = await measure_geometry(
+    measurement={"kind": "bbox", "object_name": "ImportedHousing",
+                 "mode": "optimal", "coordinate_system": "world",
+                 "use_triangulation": False, "use_shape_tolerance": False},
+    force_recompute=True,
+)
+assert bounds["mode"] == "optimal"
+```
+
+#### `kind="distance"`
+
+Measure the OCCT minimum distance between complete Shapes or any supported
+subshape pair. The response includes all closest-point solutions up to a safe
+limit, OCCT support tuples, the method, tolerance, and contact classification.
+
+```python
+distance = await measure_geometry(
+    measurement={"kind": "distance",
+                 "first": {"object_name": "Shaft", "subshape": "Face2"},
+                 "second": {"object_name": "Housing", "subshape": "Face7"},
+                 "tolerance_mm": 1e-6},
+    doc_name="Assembly",
+)
+```
+
+#### `kind="angle"`
+
+Measure between explicit `EdgeN` or `FaceN` references. Stable directions come
+from line/circle axes, planar normals, or axial surfaces. Undirected mode treats
+an axis and its reverse as equivalent (0–90 degrees); directed mode retains
+orientation (0–180 degrees).
+
+```python
+angle = await measure_geometry(
+    measurement={"kind": "angle",
+                 "first": {"object_name": "Bracket", "subshape": "Face1"},
+                 "second": {"object_name": "Bracket", "subshape": "Face4"},
+                 "orientation": "undirected"},
+)
+```
+
+#### `kind="radius"`
+
+Returns both `radius_mm` and `diameter_mm` for circular edges, cylinders, and
+spheres. A toroid requires `radius_kind="major"` or `"minor"`. A conical face is
+rejected because it has no constant radius; select its circular boundary edge.
+
+```python
+diameter = await measure_geometry(
+    measurement={"kind": "radius",
+                 "reference": {"object_name": "Bore", "subshape": "Face1"},
+                 "radius_kind": "auto"},
+)
+```
+
+#### `kind="wall_thickness"`
+
+Requires two explicit `FaceN` references. Strict mode (the default) validates
+parallel planar faces or coaxial cylindrical faces before accepting their
+minimum distance as thickness. This avoids the common failure where adjacent
+faces share an edge and produce a misleading zero distance.
+
+```python
+outer = await select_subshapes(
+    object_name="Tube",
+    criteria={"kind": "face", "surface_types": ["Cylinder"],
+              "sort_by": "area", "sort_order": "desc", "limit": 2},
+)
+thickness = await measure_geometry(
+    measurement={"kind": "wall_thickness",
+                 "first_face": {"object_name": "Tube", "subshape": outer["references"][0]},
+                 "second_face": {"object_name": "Tube", "subshape": outer["references"][1]},
+                 "strict": True},
+)
+```
+
+#### `kind="clearance"`
+
+Compares actual minimum distance with `required_clearance_mm`. For complete
+object Shapes at contact distance, it also computes OCCT boolean-common volume
+so interfering solids cannot pass merely because their minimum distance is
+zero. Subshape clearance reports contact/distance evidence but not interference
+volume.
+
+```python
+clearance = await measure_geometry(
+    measurement={"kind": "clearance",
+                 "first": {"object_name": "MovingJaw"},
+                 "second": {"object_name": "Guard"},
+                 "required_clearance_mm": 0.5, "tolerance_mm": 1e-6},
+)
+if not clearance["passes"]:
+    raise ValueError(clearance)
+```
+
+#### `kind="minimum_gap"`
+
+Evaluates every pair among 2–30 complete Shapes or subshape references and
+returns `minimum_gap_mm`, `closest_pair`, and `pair_count`. Use it for a bounded
+set of semantically selected candidates, not an unfiltered assembly with
+thousands of components.
+
+```python
+gap = await measure_geometry(
+    measurement={"kind": "minimum_gap", "references": [
+        {"object_name": "Gear"}, {"object_name": "Cover"},
+        {"object_name": "Shaft", "subshape": "Face3"}],
+        "tolerance_mm": 1e-6},
+)
+```
+
+#### `kind="point_to_face"`
+
+Supply exactly one point source: a world-coordinate `[x, y, z]`, or a selected
+`VertexN`. The target must be an explicit `FaceN`. The response includes the
+nearest point on the face and OCCT support evidence.
+
+```python
+vertex = await select_subshapes(
+    object_name="Probe",
+    criteria={"kind": "vertex", "point_bounds": {"z_min": 99.9},
+              "sort_by": "point_z", "sort_order": "desc", "limit": 1},
+)
+result = await measure_geometry(
+    measurement={"kind": "point_to_face",
+                 "face": {"object_name": "DatumPlate", "subshape": "Face1"},
+                 "vertex": {"object_name": "Probe", "subshape": vertex["references"][0]}},
+)
+
+# Or use an explicit world point:
+result = await measure_geometry(
+    measurement={"kind": "point_to_face",
+                 "face": {"object_name": "DatumPlate", "subshape": "Face1"},
+                 "point": [25.0, 10.0, 100.0]},
+)
+```
 
 ---
 

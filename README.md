@@ -83,7 +83,7 @@ An [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server that 
 
 ## Features
 
-- **116 MCP Tools**: Comprehensive CAD operations including primitives, PartDesign, booleans, export
+- **123 MCP Tools**: Compact CAD operations including primitives, PartDesign, measurements, booleans, and export
 - **Multiple Connection Modes**: XML-RPC (recommended), JSON-RPC socket, or embedded
 - **GUI & Headless Support**: Full modeling in headless mode, plus screenshots/colors in GUI mode
 - **Macro Development**: Create, edit, run, and template FreeCAD macros via MCP
@@ -347,7 +347,7 @@ FREECAD_MODE=embedded freecad-mcp
 
 ### Available Tools
 
-The server currently registers **122 MCP tools**. The tables below list common tools rather than duplicating the exact inventory. See the generated [Tools Overview](docs/guide/tools.md) or the MCP client's discovered tool list for the authoritative inventory; [MCP Tools Reference](docs/MCP_TOOLS_REFERENCE.md) provides detailed examples for core tools, while `freecad://capabilities` is a curated runtime overview. Tools marked with **GUI** require FreeCAD to be running in GUI mode; they return a structured error in headless mode.
+The server currently registers **123 MCP tools**. The tables below list common tools rather than duplicating the exact inventory. See the generated [Tools Overview](docs/guide/tools.md) or the MCP client's discovered tool list for the authoritative inventory; [MCP Tools Reference](docs/MCP_TOOLS_REFERENCE.md) provides detailed examples for core tools, while `freecad://capabilities` is a curated runtime overview. Tools marked with **GUI** require FreeCAD to be running in GUI mode; they return a structured error in headless mode.
 
 #### Execution & Debugging (5 tools)
 
@@ -384,7 +384,7 @@ The server currently registers **122 MCP tools**. The tables below list common t
 | ------------------- | -------------------------------------------------- | ---- |
 | `list_objects`      | List all objects in a document                     | All  |
 | `inspect_object`    | Compact object metrics; paged topology/properties on request | All  |
-| `select_subshapes`  | Select paged `FaceN`/`EdgeN` references by geometric criteria | All  |
+| `select_subshapes`  | Select paged `FaceN`/`EdgeN`/`VertexN` references by geometric criteria | All  |
 | `edit_object`       | Modify properties; resolve names for link properties | All  |
 | `delete_object`     | Delete an object from a document                   | All  |
 | `set_placement`     | Set object position and rotation                   | All  |

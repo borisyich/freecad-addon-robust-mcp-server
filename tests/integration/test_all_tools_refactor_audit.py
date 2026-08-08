@@ -74,6 +74,8 @@ TOOL_SCENARIOS: dict[str, str] = {
     "revolve_shape": "objects",
     "part_loft": "objects",
     "part_sweep": "objects",
+    # Tolerance-aware geometric evidence.
+    "measure_geometry": "measurements",
     # PartDesign and Sketcher.
     "create_partdesign_body": "partdesign",
     "set_body_tip": "partdesign",
@@ -355,12 +357,12 @@ _result_ = True
     )
 
 
-def test_runtime_registry_has_explicit_122_tool_coverage() -> None:
+def test_runtime_registry_has_explicit_123_tool_coverage() -> None:
     async def registered() -> set[str]:
         return {tool.name for tool in await production_mcp.list_tools()}
 
     actual = asyncio.run(registered())
-    assert len(actual) == 122
+    assert len(actual) == 123
     assert set(TOOL_SCENARIOS) == actual
 
 

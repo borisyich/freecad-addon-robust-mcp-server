@@ -2,6 +2,10 @@
 
 This is the prioritized TODO list for making FreeCAD MCP reliable for autonomous mechanical modeling.
 
+Status was re-audited against the 123-tool registry and live FreeCAD 1.0 tests
+on 2026-08-08. A partially implemented umbrella item remains unchecked until
+every capability named by that item has a public, tested contract.
+
 ## Sketch authoring
 
 - [ ] Add atomic `edit_sketch` to replace most `add_sketch_*` and one-by-one constraint tools.
@@ -15,6 +19,8 @@ This is the prioritized TODO list for making FreeCAD MCP reliable for autonomous
 
 - [x] Add semantic face selectors using surface type, normal, centroid, area, bounds, local convexity, and adjacency.
 - [x] Add semantic edge selectors using curve type, endpoints/direction, length/radius, adjacent faces/surface types, and location.
+- [x] Add semantic vertex selectors using world point bounds, adjacency counts,
+  deterministic sorting, pagination, and ready-to-use `VertexN` references.
 - [ ] Return selector confidence and ambiguity instead of silently choosing the first match.
 - [ ] Add persistent selection recipes that are re-evaluated after recompute to reduce dependence on transient `FaceN`/`EdgeN` names.
 - [ ] Add robust `attach_sketch` for origin planes, datum planes, planar faces, offsets, rotations, and support verification.
@@ -56,8 +62,17 @@ FreeCAD documents the topological naming problem and recommends modeling practic
 
 ## Measurement and geometric evidence
 
-- [ ] Add `measure_bbox` with fast and optimal OCCT modes, forced recompute, gap/tolerance reporting, and local/world coordinates.
-- [ ] Add distance, angle, radius/diameter, wall-thickness, clearance, minimum-gap, and point-to-face measurements.
+- [x] Add `measure_geometry(measurement={"kind": "bbox", ...})` with fast and
+  optimal OCCT modes, forced recompute, gap/tolerance reporting, and local/world
+  coordinates. Fast mode can skip the optimal comparison with
+  `report_gap=False`; every response
+  identifies the actual OCCT path and recompute/tolerance evidence.
+- [x] Add distance, angle, radius/diameter, wall-thickness, clearance,
+  minimum-gap, and point-to-face measurements. These share strict
+  `FaceN`/`EdgeN`/`VertexN` references with `select_subshapes`, return closest
+  points/support evidence, and distinguish separation from solid interference.
+  All eight operations use one discriminated public tool so the registry stays
+  compact without weakening per-kind validation.
 - [ ] Add mass properties: volume, area, center of mass, inertia tensor, principal axes, and material-based mass.
 - [ ] Add section and probe tools: plane section, ray intersections, cylinder/box probe volume, and void continuity checks.
 - [ ] Add shape-diff metrics before/after an operation: added/removed volume, changed bounds, face/edge count, and affected regions.

@@ -61,7 +61,7 @@ class _TimeoutTransport(xmlrpc.client.Transport):
         super().__init__()
         self._timeout = timeout
 
-    def make_connection(self, host: str) -> Any:
+    def make_connection(self, host: str | tuple[str, dict[str, str]]) -> Any:
         """Create an HTTP connection with the configured socket timeout."""
         connection = super().make_connection(host)
         connection.timeout = self._timeout
@@ -660,6 +660,8 @@ _result_ = objects
         face_limit: int | None = 20,
         edge_offset: int = 0,
         edge_limit: int | None = 20,
+        vertex_offset: int = 0,
+        vertex_limit: int | None = 20,
     ) -> ObjectInfo:
         """Get detailed object information with structured FreeCAD values."""
         result = await self.execute_python(
@@ -673,6 +675,8 @@ _result_ = objects
                 face_limit=face_limit,
                 edge_offset=edge_offset,
                 edge_limit=edge_limit,
+                vertex_offset=vertex_offset,
+                vertex_limit=vertex_limit,
             )
         )
 

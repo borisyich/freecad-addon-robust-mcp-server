@@ -126,6 +126,8 @@ class TestObjectTools:
             face_limit=20,
             edge_offset=0,
             edge_limit=20,
+            vertex_offset=0,
+            vertex_limit=20,
         )
 
     @pytest.mark.asyncio
@@ -204,6 +206,8 @@ class TestObjectTools:
             face_limit=20,
             edge_offset=0,
             edge_limit=20,
+            vertex_offset=0,
+            vertex_limit=20,
         )
 
     @pytest.mark.asyncio
@@ -261,6 +265,62 @@ class TestObjectTools:
 
         assert result["references"] == ["Face2"]
         assert result["matches"][0]["centroid"]["z"] == 10.0
+
+    @pytest.mark.asyncio
+    async def test_select_subshapes_filters_vertices_by_point_and_adjacency(
+        self, register_tools, mock_bridge
+    ):
+        """Vertex selection should return VertexN references for measurements."""
+        mock_bridge.get_object = AsyncMock(
+            return_value=ObjectInfo(
+                name="Pad",
+                label="Pad",
+                type_id="PartDesign::Feature",
+                shape_info={
+                    "shape_type": "Solid",
+                    "is_null": False,
+                    "faces": [],
+                    "edges": [],
+                    "vertices": [
+                        {
+                            "name": "Vertex1",
+                            "index": 1,
+                            "point": {"x": 0.0, "y": 0.0, "z": 0.0},
+                            "adjacent_edges": ["Edge1", "Edge2"],
+                            "adjacent_faces": ["Face1"],
+                            "tolerance": 1e-7,
+                        },
+                        {
+                            "name": "Vertex2",
+                            "index": 2,
+                            "point": {"x": 10.0, "y": 0.0, "z": 0.0},
+                            "adjacent_edges": ["Edge1", "Edge3", "Edge4"],
+                            "adjacent_faces": ["Face1", "Face2"],
+                            "tolerance": 1e-7,
+                        },
+                    ],
+                },
+            )
+        )
+
+        result = await register_tools["select_subshapes"](
+            object_name="Pad",
+            criteria={
+                "kind": "vertex",
+                "point_bounds": {"x_min": 9.9, "x_max": 10.1},
+                "adjacent_edge_count_min": 3,
+                "sort_by": "point_x",
+            },
+            detail_level="summary",
+        )
+
+        assert result["references"] == ["Vertex2"]
+        assert result["matches"][0]["point"]["x"] == 10.0
+        assert result["matches"][0]["adjacent_edges"] == [
+            "Edge1",
+            "Edge3",
+            "Edge4",
+        ]
 
     @pytest.mark.asyncio
     async def test_select_subshapes_filters_edges_by_direction_and_adjacency(

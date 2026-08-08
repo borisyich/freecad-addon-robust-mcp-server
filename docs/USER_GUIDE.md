@@ -476,20 +476,21 @@ For complex parts, build step by step:
    views with `compare_images` after every major feature.
 1. Rework invalid or clearly incorrect geometry before adding dependent features.
 1. Use compact `inspect_object()` or `detail_level="shape"` for routine checks.
-   Request paged `topology` only for face/edge evidence and `full` only for a
+   Request paged `topology` only for face/edge/vertex evidence and `full` only for a
    specific property diagnosis. Use `select_subshapes` instead of iterating every
    face or edge when choosing sketch support, Fillet, Chamfer, Draft, or Thickness.
 1. Immediately before the final response, call `validate_parametric_model`. For
    drawing/sketch input include all saved dimension identifiers, then resolve any
    missing/unlinked dimensions or unused Spreadsheet aliases before completion.
 
-### Semantic face and edge selection
+### Semantic face, edge, and vertex selection
 
 `inspect_object(detail_level="topology")` returns a paged topology catalogue. Faces include
 surface type, a representative oriented normal, area, adjacent faces, and local
-convexity. Edges
-include curve type, endpoints, length, direction/radius, and adjacent faces.
-Use `select_subshapes` to convert engineering intent into `FaceN` or `EdgeN`:
+convexity. Edges include curve type, endpoints, length, direction/radius, and
+adjacent faces. Vertices include a world point, tolerance, and adjacent
+edges/faces. Use `select_subshapes` to convert engineering intent into `FaceN`,
+`EdgeN`, or `VertexN`:
 
 ```python
 # Highest upward planar face for sketch support.
@@ -512,11 +513,53 @@ select_subshapes(
         "sort_order": "desc", "limit": 4,
     },
 )
+
+# Highest vertex in a narrow world-X band for point-to-face measurement.
+select_subshapes(
+    object_name="Pad",
+    criteria={
+        "kind": "vertex", "point_bounds": {"x_min": 19.9, "x_max": 20.1},
+        "sort_by": "point_z", "sort_order": "desc", "limit": 1,
+    },
+)
 ```
 
 The selector narrows candidates but does not replace geometric verification.
 Inspect the returned records and confirm the selected references on the current
 Body Tip before creating topology-sensitive downstream features.
+
+### Measurement evidence
+
+Use `measure_geometry` instead of deriving dimensions from a screenshot or
+cached `inspect_object` bounds. It forces recompute by default and accepts
+references returned by `select_subshapes`. Choose one strict operation through
+`measurement.kind`; all operation-specific fields belong inside `measurement`.
+
+```python
+bounds = await measure_geometry(
+    measurement={"kind": "bbox", "object_name": "Body", "mode": "optimal",
+                 "coordinate_system": "world", "use_triangulation": False,
+                 "use_shape_tolerance": False},
+)
+
+clearance = await measure_geometry(
+    measurement={"kind": "clearance", "first": {"object_name": "PartA"},
+                 "second": {"object_name": "PartB"},
+                 "required_clearance_mm": 0.25},
+)
+
+point_gap = await measure_geometry(
+    measurement={"kind": "point_to_face",
+                 "face": {"object_name": "PartA", "subshape": "Face3"},
+                 "vertex": {"object_name": "PartB", "subshape": "Vertex7"}},
+)
+```
+
+Use `kind="distance"` for a scalar minimum with closest-point evidence;
+`kind="clearance"` when a pass/fail requirement and solid interference matter;
+and `kind="minimum_gap"` to find the closest pair within a bounded reference
+set. `kind="wall_thickness"` validates opposing planar/cylindrical faces before
+accepting their distance as thickness.
 
 ### Spreadsheet expressions for sketch constraints
 

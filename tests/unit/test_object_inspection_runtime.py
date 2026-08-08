@@ -181,6 +181,7 @@ def test_structured_serializer_replaces_pointer_reprs() -> None:
     assert "edges" not in shape["value"]
     assert "faces" in result["shape_info"]
     assert "edges" in result["shape_info"]
+    assert "vertices" in result["shape_info"]
 
     placement = result["properties"]["Placement"]["value"]
     assert placement["position"] == {"x": 1.0, "y": 2.0, "z": 3.0}
@@ -226,6 +227,7 @@ def test_shape_topology_contains_semantic_faces_and_edges() -> None:
     assert result["edges"][0]["length"] == 10.0
     assert result["edges"][0]["centroid_kind"] == "curve_length_centroid"
     assert result["edges"][0]["adjacent_faces"] == ["Face1", "Face2"]
+    assert result["topology_pages"]["vertices"]["total"] == 8
 
 
 def test_shape_topology_is_paged_and_omitted_by_default() -> None:
@@ -242,6 +244,8 @@ def test_shape_topology_is_paged_and_omitted_by_default() -> None:
         face_offset=1,
         face_limit=1,
         edge_limit=1,
+        vertex_offset=2,
+        vertex_limit=2,
     )
     assert [item["name"] for item in paged["faces"]] == ["Face2"]
     assert paged["topology_pages"]["faces"] == {
@@ -252,3 +256,5 @@ def test_shape_topology_is_paged_and_omitted_by_default() -> None:
         "has_more": False,
         "next_offset": None,
     }
+    assert paged["topology_pages"]["vertices"]["returned"] == 2
+    assert paged["topology_pages"]["vertices"]["next_offset"] == 4

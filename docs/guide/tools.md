@@ -1,6 +1,6 @@
 # Tools Reference
 
-The server currently registers **122 MCP tools**. This page is generated from the actual `@mcp.tool()` definitions in `src/freecad_mcp/tools` and is the exact inventory.
+The server currently registers **123 MCP tools**. This page is generated from the actual `@mcp.tool()` definitions in `src/freecad_mcp/tools` and is the exact inventory.
 
 Geometry-changing operations are transaction-backed where applicable. Use `history(action="undo")` for explicit recovery, `get_console_output` for console diagnostics, and `recompute_document` for document recomputation.
 
@@ -11,6 +11,7 @@ Geometry-changing operations are transaction-backed where applicable. Use `histo
 | [Execution](#execution) | `src/freecad_mcp/tools/execution.py` | 5 |
 | [Documents](#documents) | `src/freecad_mcp/tools/documents.py` | 7 |
 | [Objects / Part](#objects-part) | `src/freecad_mcp/tools/objects.py` | 33 |
+| [Measurements](#measurements) | `src/freecad_mcp/tools/measurements.py` | 1 |
 | [PartDesign / Sketcher](#partdesign-sketcher) | `src/freecad_mcp/tools/partdesign.py` | 28 |
 | [Sheet Metal](#sheet-metal) | `src/freecad_mcp/tools/sheetmetal.py` | 5 |
 | [Spreadsheet](#spreadsheet) | `src/freecad_mcp/tools/spreadsheet.py` | 11 |
@@ -21,7 +22,7 @@ Geometry-changing operations are transaction-backed where applicable. Use `histo
 | [Validation](#validation) | `src/freecad_mcp/tools/validation.py` | 5 |
 | [Export / Import](#export-import) | `src/freecad_mcp/tools/export.py` | 2 |
 | [Macros](#macros) | `src/freecad_mcp/tools/macros.py` | 6 |
-| **Total** |  | **122** |
+| **Total** |  | **123** |
 
 ## Execution
 
@@ -51,7 +52,7 @@ Geometry-changing operations are transaction-backed where applicable. Use `histo
 |---|---|
 | `list_objects` | List all objects in a FreeCAD document. |
 | `inspect_object` | Compact metrics by default; paged topology and full properties on request. |
-| `select_subshapes` | Select paged face/edge references by semantic criteria and centroid location. |
+| `select_subshapes` | Select paged face/edge/vertex references by semantic criteria and global location. |
 | `create_object` | Create a new FreeCAD object. |
 | `create_primitive` | Create a Box, Cylinder, Sphere, Cone, Torus, Wedge, or Helix. |
 | `edit_object` | Edit object properties; string names are resolved for FreeCAD link properties. |
@@ -84,6 +85,17 @@ Geometry-changing operations are transaction-backed where applicable. Use `histo
 | `part_sweep` | Sweep a profile along a spine path. |
 
 `create_regular_polygon` and `make_wire` create standalone Part objects. For geometry inside an existing Sketcher sketch, use `edit_sketch_geometry` with `add_regular_polygon` or `add_polyline`; these are sketch operations, not duplicate MCP tools.
+
+## Measurements
+
+`measure_geometry` is headless-safe, forces target-object recompute by default,
+uses millimetres/degrees, and accepts `FaceN`, `EdgeN`, or `VertexN` references
+returned by `select_subshapes`. Its required discriminator `measurement.kind`
+selects one strict parameter variant, so unrelated fields cannot be mixed.
+
+| Tool | Description |
+|---|---|
+| `measure_geometry` | Select `bbox`, `distance`, `angle`, `radius`, `wall_thickness`, `clearance`, `minimum_gap`, or `point_to_face` through `measurement.kind`; returns OCCT and recompute evidence. |
 
 ## PartDesign / Sketcher
 

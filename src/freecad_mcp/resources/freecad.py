@@ -28,14 +28,11 @@ from pathlib import Path
 from typing import Any
 
 from freecad_mcp.guidance import (
-    BLOCKING_DISCREPANCY_CATEGORIES,
-    DISCREPANCY_LEDGER_FIELDS,
     DRAWING_RECONSTRUCTION_WORKFLOW,
     ENGINEERING_SKILL_RELATIVE_PATH,
     ENGINEERING_SKILL_RESOURCE_URI,
     FINAL_PARAMETRIC_VALIDATION_TOOL,
     MODEL_MODIFICATION_WORKFLOW,
-    UNCERTAINTY_CATEGORIES,
 )
 
 
@@ -482,11 +479,13 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                                 "face_limit",
                                 "edge_offset",
                                 "edge_limit",
+                                "vertex_offset",
+                                "vertex_limit",
                             ],
                         },
                         {
                             "name": "select_subshapes",
-                            "description": "Select paged FaceN/EdgeN references; centroid means face-area or edge-length centroid",
+                            "description": "Select paged FaceN/EdgeN/VertexN references by semantic geometry and world location",
                             "key_params": [
                                 "object_name",
                                 "criteria",
@@ -639,6 +638,17 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                             "name": "mirror_object",
                             "description": "Mirror object across a plane",
                             "key_params": ["object_name", "plane"],
+                        },
+                    ],
+                },
+                "measurements": {
+                    "description": "Tolerance-aware geometric evidence using FreeCAD/OCCT",
+                    "note": "Measurements force recompute by default and consume semantic topology references from select_subshapes",
+                    "tools": [
+                        {
+                            "name": "measure_geometry",
+                            "description": "One strict kind-based tool for bounds, dimensions, clearance, gap, thickness, and point-to-face evidence",
+                            "key_params": ["measurement.kind", "measurement", "force_recompute"],
                         },
                     ],
                 },

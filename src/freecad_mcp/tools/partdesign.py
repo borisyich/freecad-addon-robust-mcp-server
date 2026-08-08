@@ -233,7 +233,9 @@ SketchGeometryOperation = Annotated[
     | GeometryIndexOperation,
     Field(discriminator="op"),
 ]
-_SKETCH_GEOMETRY_OPERATION_ADAPTER = TypeAdapter(SketchGeometryOperation)
+_SKETCH_GEOMETRY_OPERATION_ADAPTER: TypeAdapter[SketchGeometryOperation] = (
+    TypeAdapter(SketchGeometryOperation)
+)
 
 
 class LinearMultiTransform(BaseModel):
@@ -260,7 +262,9 @@ MultiTransformStage = Annotated[
     LinearMultiTransform | PolarMultiTransform,
     Field(discriminator="kind"),
 ]
-_MULTI_TRANSFORM_STAGE_ADAPTER = TypeAdapter(MultiTransformStage)
+_MULTI_TRANSFORM_STAGE_ADAPTER: TypeAdapter[MultiTransformStage] = TypeAdapter(
+    MultiTransformStage
+)
 
 
 class OriginPlaneSketchSupport(BaseModel):
@@ -303,7 +307,7 @@ SketchSupport = Annotated[
     | DatumPlaneSketchSupport,
     Field(discriminator="kind"),
 ]
-_SKETCH_SUPPORT_ADAPTER = TypeAdapter(SketchSupport)
+_SKETCH_SUPPORT_ADAPTER: TypeAdapter[SketchSupport] = TypeAdapter(SketchSupport)
 
 
 class AddConstraintOperation(_SketchOperation):
@@ -415,7 +419,9 @@ SketchConstraintOperation = Annotated[
     | ConstraintIndexOperation,
     Field(discriminator="op"),
 ]
-_SKETCH_CONSTRAINT_OPERATION_ADAPTER = TypeAdapter(SketchConstraintOperation)
+_SKETCH_CONSTRAINT_OPERATION_ADAPTER: TypeAdapter[SketchConstraintOperation] = (
+    TypeAdapter(SketchConstraintOperation)
+)
 
 
 def _page_records(

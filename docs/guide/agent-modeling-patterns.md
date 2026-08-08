@@ -32,7 +32,7 @@ Use stable datums, constrained sketches, semantic PartDesign features, and a
 feature order that preserves design intent. Holes, patterns, small details, and
 edge treatments should normally be delayed until the supporting form is stable.
 
-Use `select_subshapes` before face-supported sketches and Fillet/Chamfer/Draft/Thickness operations; inspect the returned semantic records before consuming the `FaceN`/`EdgeN` references.
+Use `select_subshapes` before face-supported sketches, Fillet/Chamfer/Draft/Thickness operations, and topology measurements; inspect the returned semantic records before consuming the `FaceN`/`EdgeN`/`VertexN` references.
 
 For drawing/sketch input, extract and save every explicit non-starred dimension
 before modeling. Give each value a stable identifier and realize it as a named

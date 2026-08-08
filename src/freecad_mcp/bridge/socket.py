@@ -529,6 +529,8 @@ _result_ = objects
         face_limit: int | None = 20,
         edge_offset: int = 0,
         edge_limit: int | None = 20,
+        vertex_offset: int = 0,
+        vertex_limit: int | None = 20,
     ) -> ObjectInfo:
         """Get detailed object information with structured FreeCAD values."""
         result = await self.execute_python(
@@ -542,6 +544,8 @@ _result_ = objects
                 face_limit=face_limit,
                 edge_offset=edge_offset,
                 edge_limit=edge_limit,
+                vertex_offset=vertex_offset,
+                vertex_limit=vertex_limit,
             )
         )
 

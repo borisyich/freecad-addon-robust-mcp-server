@@ -685,6 +685,7 @@ class TestMcpInstructions:
             separators=(",", ":"),
         )
         description_bytes = len(descriptions.encode("utf-8"))
+        payload_bytes = len(payload.encode("utf-8"))
         largest_tool_bytes = max(
             len(
                 json.dumps(
@@ -703,4 +704,7 @@ class TestMcpInstructions:
         assert '"title":' not in payload
         assert description_bytes < 10_000
         assert largest_tool_bytes < 8_000
-        assert len(payload.encode("utf-8")) < 90_000
+        # The eight measurement contracts share one discriminated schema. Keep
+        # both the total payload and average bounded for the 123-tool surface.
+        assert payload_bytes < 94_000
+        assert payload_bytes / len(listed) < 770
