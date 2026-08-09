@@ -398,7 +398,10 @@ async def test_unfold_keeps_formed_body_and_uses_explicit_manual_rule(
     assert '"Plane" not in surface_name' in code
     assert "_sm_require_current_tip(base)" in code
     assert "_sm_unfold_history_evidence(base)" in code
-    assert "unsupported_post_sheet_features" in code
+    assert "unsupported_shape_features" in code
+    assert "items[max(native_indexes) + 1:]" not in code
+    assert "first_native = min(native_indexes)" in code
+    assert 'classification = "mixed_interleaved_history"' in code
     assert '"SheetMetalUnfoldCmd", "SMUnfoldViewProvider"' in code
 
 
@@ -441,14 +444,24 @@ async def test_inspector_reports_manufacturing_evidence(registered_tools, mock_b
     for evidence in (
         "smGetThickness",
         "stationary_face_candidates",
+        "cylindrical_face_count",
+        "classified_bend_face_count",
         "cylindrical_bend_face_count",
+        "bend_zone_count",
+        "full_cylinder_non_bend",
         "sheet_metal_history",
+        "has_native_sheet_metal_features",
+        "sheet_metal_history_classification",
         "history_evidence",
         "display_mode",
         "unfold_ready",
         "warnings",
     ):
         assert evidence in code
+
+    assert 'native_sheet_metal_history": history_evidence["native_linear_history"]' in code
+    assert 'abs(radius_delta - value)' in code
+    assert 'u_span >= 2.0 * math.pi' in code
 
 
 @pytest.mark.asyncio

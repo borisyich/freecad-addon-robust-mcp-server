@@ -129,6 +129,15 @@ SPREADSHEET_RUNTIME_HELPERS = dedent(
         return dependencies
 
 
+    def _spreadsheet_expression_for_path(target, property_path):
+        """Return an expression for a FreeCAD property or nested path."""
+        normalized = str(property_path).lstrip(".")
+        for engine_path, expression in getattr(target, "ExpressionEngine", []):
+            if str(engine_path).lstrip(".") == normalized:
+                return str(expression)
+        return None
+
+
     def _spreadsheet_binding_expression(sheet, alias, target, property_name):
         cell = sheet.getCellFromAlias(alias)
         if not cell:
@@ -147,10 +156,20 @@ SPREADSHEET_RUNTIME_HELPERS = dedent(
         except Exception:
             pass
 
+        target_type = ""
+        root_target_type = ""
         try:
             target_type = target.getTypeIdOfProperty(property_name)
         except Exception:
-            target_type = ""
+            # FreeCAD accepts nested expression paths such as
+            # Placement.Base.x, but getTypeIdOfProperty only accepts a root
+            # property name. Preserve root-type evidence without pretending it
+            # is the exact leaf type.
+            root_name = str(property_name).lstrip(".").split(".", 1)[0]
+            try:
+                root_target_type = target.getTypeIdOfProperty(root_name)
+            except Exception:
+                pass
 
         unit_coercion = None
         if target_type == "App::PropertyAngle" and not source_unit:
@@ -161,6 +180,8 @@ SPREADSHEET_RUNTIME_HELPERS = dedent(
             "source_cell": cell,
             "source_unit": source_unit or None,
             "target_property_type": target_type or None,
+            "target_root_property_type": root_target_type or target_type or None,
+            "target_is_expression_path": "." in str(property_name).lstrip("."),
             "unit_coercion": unit_coercion,
         }
     '''
@@ -782,7 +803,9 @@ except Exception:
             spreadsheet_name: Name of the spreadsheet object.
             alias: Cell alias to bind (the cell must have an alias set).
             target_object: Name of the object to modify.
-            target_property: Property name to bind (e.g., "Length", "Width").
+            target_property: FreeCAD expression path to bind, such as
+                ``Length``, ``Placement.Base.x``, or
+                ``AttachmentOffset.Base.z``.
             doc_name: Document containing the objects. Uses active if None.
 
         Returns:
@@ -797,7 +820,7 @@ except Exception:
             ValueError: If the spreadsheet object is not found.
             ValueError: If the target object is not found.
             ValueError: If the alias does not exist on the spreadsheet.
-            ValueError: If the target property does not exist.
+            ValueError: If FreeCAD rejects the target expression path.
             ValueError: If binding the expression fails.
 
         Example:
@@ -836,10 +859,6 @@ try:
 except Exception as e:
     raise ValueError(f"Alias not found: {{alias!r}}") from e
 
-# Verify the property exists on target
-if not hasattr(target, prop):
-    raise ValueError(f"Property not found on target: {{prop!r}}")
-
 # Wrap in transaction for undo support
 doc.openTransaction("Bind Property to Spreadsheet")
 try:
@@ -847,6 +866,11 @@ try:
         sheet, alias, target, prop
     )
     target.setExpression(prop, expression)
+    bound_expression = _spreadsheet_expression_for_path(target, prop)
+    if bound_expression is None:
+        raise ValueError(
+            f"FreeCAD did not retain expression path {{target.Name}}.{{prop}}"
+        )
     doc.recompute()
     doc.commitTransaction()
 
@@ -978,11 +1002,6 @@ for item in bindings:
     target = doc.getObject(item["target_object"])
     if target is None:
         raise ValueError(f"Target object not found: {{item['target_object']!r}}")
-    if not hasattr(target, item["target_property"]):
-        raise ValueError(
-            f"Property not found on target {{target.Name!r}}: "
-            f"{{item['target_property']!r}}"
-        )
     if item["alias"] not in final_aliases:
         raise ValueError(f"Alias not found: {{item['alias']!r}}")
     resolved_bindings.append((item, target))
@@ -999,8 +1018,8 @@ cell_snapshot = {{
 }}
 expression_snapshot = []
 for item, target in resolved_bindings:
-    old_expression = dict(getattr(target, "ExpressionEngine", [])).get(
-        item["target_property"]
+    old_expression = _spreadsheet_expression_for_path(
+        target, item["target_property"]
     )
     expression_snapshot.append((target, item["target_property"], old_expression))
 
@@ -1034,6 +1053,14 @@ try:
             sheet, item["alias"], target, item["target_property"]
         )
         target.setExpression(item["target_property"], expression)
+        bound_expression = _spreadsheet_expression_for_path(
+            target, item["target_property"]
+        )
+        if bound_expression is None:
+            raise ValueError(
+                "FreeCAD did not retain expression path "
+                f"{{target.Name}}.{{item['target_property']}}"
+            )
         expression_results.append({{
             "target_object": target.Name,
             "target_property": item["target_property"],

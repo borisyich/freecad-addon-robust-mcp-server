@@ -336,24 +336,48 @@ def _sm_view_evidence(feature, body=None):
 
 
 def _sm_unfold_history_evidence(base):
-    # Reject formed states that left native sheet-metal construction semantics.
+    # Audit the complete active history from the first native SheetMetal feature
+    # through ``base``. A later SM proxy must never erase evidence that the
+    # history left native sheet-metal semantics and then re-entered them.
     body = _sm_body_for(base)
     if body is None:
         proxy_type = type(getattr(base, "Proxy", None)).__name__
         native = proxy_type.startswith("SM")
         return {
             "native_history": native,
+            "native_linear_history": native,
+            "classification": "native_standalone" if native else "no_native",
+            "native_feature_names": [base.Name] if native else [],
+            "active_history": [{
+                "name": base.Name,
+                "type_id": str(getattr(base, "TypeId", "")),
+                "proxy_type": proxy_type,
+            }],
+            "supported_subtractive_features": [],
+            "unsupported_shape_features": [],
             "unsupported_post_sheet_features": [],
+            "reentered_after_unsupported": False,
             "supported": native,
         }
     items = list(getattr(body, "Group", []))
+    try:
+        endpoint_index = next(
+            index for index, item in enumerate(items) if item is base
+        )
+    except StopIteration:
+        endpoint_index = len(items) - 1
+    active_items = items[:endpoint_index + 1]
     native_indexes = [
         index for index, item in enumerate(items)
-        if type(getattr(item, "Proxy", None)).__name__.startswith("SM")
+        if index <= endpoint_index
+        and type(getattr(item, "Proxy", None)).__name__.startswith("SM")
     ]
     unsupported = []
+    supported_subtractive = []
     if native_indexes:
-        for item in items[max(native_indexes) + 1:]:
+        first_native = min(native_indexes)
+        last_native = max(native_indexes)
+        for index, item in enumerate(items[first_native:endpoint_index + 1], first_native):
             type_id = str(getattr(item, "TypeId", ""))
             if type(getattr(item, "Proxy", None)).__name__.startswith("SM"):
                 continue
@@ -362,16 +386,59 @@ def _sm_unfold_history_evidence(base):
                 "PartDesign::CoordinateSystem",
             }:
                 continue
-            if type_id.startswith("PartDesign::") and any(
+            subtractive = type_id.startswith("PartDesign::") and any(
                 token in type_id for token in ("Pocket", "Hole", "Subtractive", "Groove")
-            ):
-                continue
+            )
             shape = getattr(item, "Shape", None)
             if shape is not None and not shape.isNull():
-                unsupported.append({"name": item.Name, "type_id": type_id})
+                evidence = {
+                    "name": item.Name,
+                    "type_id": type_id,
+                    "index": index,
+                    "position": (
+                        "interleaved_before_later_native"
+                        if index < last_native
+                        else "after_last_native"
+                    ),
+                }
+                if subtractive and index > last_native:
+                    supported_subtractive.append(evidence)
+                else:
+                    unsupported.append(evidence)
+    if not native_indexes:
+        classification = "no_native"
+    elif any(item["position"] == "interleaved_before_later_native" for item in unsupported):
+        classification = "mixed_interleaved_history"
+    elif unsupported:
+        classification = "unsupported_post_native_history"
+    elif supported_subtractive:
+        classification = "native_with_supported_subtractive_tail"
+    else:
+        classification = "native_linear_history"
+    active_history = []
+    for item in active_items:
+        proxy = getattr(item, "Proxy", None)
+        active_history.append({
+            "name": item.Name,
+            "type_id": str(getattr(item, "TypeId", "")),
+            "proxy_type": type(proxy).__name__ if proxy is not None else None,
+        })
+    reentered = any(
+        item["position"] == "interleaved_before_later_native"
+        for item in unsupported
+    )
     return {
         "native_history": bool(native_indexes),
+        "native_linear_history": bool(native_indexes) and not unsupported,
+        "classification": classification,
+        "native_feature_names": [items[index].Name for index in native_indexes],
+        "active_history": active_history,
+        "supported_subtractive_features": supported_subtractive,
+        "unsupported_shape_features": unsupported,
+        # Backwards-compatible alias. Unlike the old implementation this now
+        # includes unsupported interleaved features, not only the final tail.
         "unsupported_post_sheet_features": unsupported,
+        "reentered_after_unsupported": reentered,
         "supported": bool(native_indexes) and not unsupported,
     }
 
@@ -832,9 +899,9 @@ try:
                 "create_sheet_metal_base or the from_solid operation first"
             )
         raise ValueError(
-            "Unfold rejected unsupported shape-producing features after the last "
-            "native SheetMetal feature: "
-            + str(history_evidence["unsupported_post_sheet_features"])
+            "Unfold rejected unsupported shape-producing features in the active "
+            "history from the first native SheetMetal feature: "
+            + str(history_evidence["unsupported_shape_features"])
         )
     refs = _sm_validate_refs(base, [{stationary_face!r}], {{"Face"}})
     selected_face = base.getSubObject(refs[0])
@@ -899,6 +966,7 @@ except Exception:
         bridge = await get_bridge()
         code = f"""
 import FreeCAD
+import math
 {_SHEET_METAL_RUNTIME_HELPERS}
 tools_module = _sm_require_workbench()
 doc = _sm_document({doc_name!r})
@@ -907,10 +975,21 @@ shape = getattr(obj, "Shape", None)
 if shape is None or shape.isNull():
     raise ValueError(f"{{obj.Name!r}} has no inspectable shape")
 body = _sm_body_for(obj)
-history_objects = list(getattr(body, "Group", [])) if body is not None else [obj]
+if body is not None:
+    body_items = list(getattr(body, "Group", []))
+    try:
+        object_index = next(
+            index for index, item in enumerate(body_items) if item is obj
+        )
+    except StopIteration:
+        object_index = len(body_items) - 1
+    history_objects = body_items[:object_index + 1]
+else:
+    history_objects = [obj]
 history_evidence = _sm_unfold_history_evidence(obj)
 history = []
 declared_thicknesses = []
+declared_bend_radii = []
 for item in history_objects:
     proxy = getattr(item, "Proxy", None)
     proxy_type = type(proxy).__name__ if proxy is not None else None
@@ -923,6 +1002,16 @@ for item in history_objects:
                 getattr(getattr(item, "ViewObject", None), "DisplayMode", "")
             ),
         }})
+        for prop_name in ("radius", "Radius"):
+            if hasattr(item, prop_name):
+                prop = getattr(item, prop_name)
+                value = float(getattr(prop, "Value", prop))
+                if value > 0:
+                    declared_bend_radii.append({{
+                        "object": item.Name,
+                        "property": prop_name,
+                        "value": value,
+                    }})
     for prop_name in ("Thickness", "thickness"):
         if hasattr(item, prop_name):
             prop = getattr(item, prop_name)
@@ -930,7 +1019,7 @@ for item in history_objects:
             if value > 0:
                 declared_thicknesses.append({{"object": item.Name, "value": value}})
 planar = []
-cylindrical_count = 0
+cylindrical_faces = []
 for index, face in enumerate(shape.Faces, start=1):
     surface_name = type(face.Surface).__name__
     if "Plane" in surface_name:
@@ -945,7 +1034,78 @@ for index, face in enumerate(shape.Faces, start=1):
             ],
         }})
     elif "Cylinder" in surface_name:
-        cylindrical_count += 1
+        surface = face.Surface
+        parameter_range = list(face.ParameterRange)
+        u_span = abs(float(parameter_range[1]) - float(parameter_range[0]))
+        axis = surface.Axis
+        center = surface.Center
+        cylindrical_faces.append({{
+            "face": f"Face{{index}}",
+            "radius": float(surface.Radius),
+            "axis": [float(axis.x), float(axis.y), float(axis.z)],
+            "center": [float(center.x), float(center.y), float(center.z)],
+            "u_span_radians": u_span,
+            "full_sweep": bool(u_span >= 2.0 * math.pi - 1e-5),
+            "area": float(face.Area),
+            "classification": "unclassified",
+        }})
+
+# A real constant-thickness bend contributes coaxial inner/outer cylindrical
+# faces whose radii differ by nominal thickness. Full 360-degree cylinders are
+# hole/tube walls, while an unpaired partial cylinder is more likely a fillet or
+# unrelated curved surface. Matching the declared native bend radius prevents
+# arbitrary cylindrical geometry from being promoted to bend evidence.
+thickness_values = [item["value"] for item in declared_thicknesses]
+radius_values = [item["value"] for item in declared_bend_radii]
+bend_face_names = set()
+bend_pairs = []
+for left_index, left in enumerate(cylindrical_faces):
+    if left["full_sweep"] or left["face"] in bend_face_names:
+        continue
+    left_axis = FreeCAD.Vector(*left["axis"])
+    left_center = FreeCAD.Vector(*left["center"])
+    for right in cylindrical_faces[left_index + 1:]:
+        if right["full_sweep"] or right["face"] in bend_face_names:
+            continue
+        right_axis = FreeCAD.Vector(*right["axis"])
+        right_center = FreeCAD.Vector(*right["center"])
+        axis_parallel = abs(left_axis.dot(right_axis)) >= 1.0 - 1e-6
+        coaxial_offset = (right_center - left_center).cross(left_axis).Length
+        radii = sorted([left["radius"], right["radius"]])
+        radius_delta = radii[1] - radii[0]
+        thickness_match = next((
+            value for value in thickness_values
+            if abs(radius_delta - value) <= max(1e-5, abs(value) * 1e-4)
+        ), None)
+        declared_radius_match = next((
+            value for value in radius_values
+            if any(
+                abs(radius - value) <= max(1e-5, abs(value) * 1e-4)
+                for radius in radii
+            )
+        ), None)
+        same_sweep = abs(left["u_span_radians"] - right["u_span_radians"]) <= 1e-5
+        if (
+            axis_parallel and coaxial_offset <= 1e-5 and same_sweep
+            and thickness_match is not None and declared_radius_match is not None
+        ):
+            bend_face_names.update((left["face"], right["face"]))
+            bend_pairs.append({{
+                "inner_face": left["face"] if left["radius"] <= right["radius"] else right["face"],
+                "outer_face": right["face"] if left["radius"] <= right["radius"] else left["face"],
+                "inside_radius": radii[0],
+                "outside_radius": radii[1],
+                "thickness": thickness_match,
+                "sweep_degrees": math.degrees(left["u_span_radians"]),
+            }})
+            break
+for item in cylindrical_faces:
+    if item["face"] in bend_face_names:
+        item["classification"] = "sheet_bend_pair"
+    elif item["full_sweep"]:
+        item["classification"] = "full_cylinder_non_bend"
+    else:
+        item["classification"] = "partial_unpaired_or_unmatched"
 planar.sort(key=lambda item: item["area"], reverse=True)
 estimated_thickness = None
 thickness_warning = None
@@ -968,14 +1128,21 @@ if not declared_thicknesses and estimated_thickness is None:
     warnings.append("Nominal thickness could not be established")
 if thickness_warning:
     warnings.append("Thickness estimate failed: " + thickness_warning)
+if len(cylindrical_faces) > len(bend_face_names):
+    warnings.append(
+        f"{{len(cylindrical_faces) - len(bend_face_names)}} cylindrical face(s) "
+        "were not classified as constant-thickness bends; they may be holes, "
+        "fillets, tubes, or other curved surfaces"
+    )
 if body is not None and getattr(body, "Tip", None) is not obj:
     warnings.append("Object is not the current Body Tip; continue from the Tip before unfold")
 if not history_evidence["native_history"]:
     warnings.append("No native SheetMetal feature exists in the active history")
-if history_evidence["unsupported_post_sheet_features"]:
+if history_evidence["unsupported_shape_features"]:
     warnings.append(
-        "Unsupported shape-producing features follow the last native SheetMetal "
-        "feature: " + str(history_evidence["unsupported_post_sheet_features"])
+        "Unsupported shape-producing features occur in the active history from "
+        "the first native SheetMetal feature: "
+        + str(history_evidence["unsupported_shape_features"])
     )
 view = getattr(obj, "ViewObject", None)
 display_mode = str(getattr(view, "DisplayMode", ""))
@@ -995,10 +1162,19 @@ _result_ = {{
     "declared_thicknesses": declared_thicknesses,
     "estimated_thickness": estimated_thickness,
     "planar_face_count": len(planar),
-    "cylindrical_bend_face_count": cylindrical_count,
+    "cylindrical_face_count": len(cylindrical_faces),
+    "classified_bend_face_count": len(bend_face_names),
+    # Backwards-compatible alias with strengthened semantics.
+    "cylindrical_bend_face_count": len(bend_face_names),
+    "bend_zone_count": len(bend_pairs),
+    "declared_bend_radii": declared_bend_radii,
+    "cylindrical_faces": cylindrical_faces,
+    "bend_pairs": bend_pairs,
     "stationary_face_candidates": planar[:8],
     "sheet_metal_history": history,
-    "native_sheet_metal_history": bool(history),
+    "has_native_sheet_metal_features": bool(history),
+    "native_sheet_metal_history": history_evidence["native_linear_history"],
+    "sheet_metal_history_classification": history_evidence["classification"],
     "history_evidence": history_evidence,
     "display_mode": display_mode,
     "visible": visible,

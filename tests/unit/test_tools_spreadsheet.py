@@ -1116,6 +1116,9 @@ async def test_spreadsheet_apply_batch_uses_one_transaction_and_recompute() -> N
     assert '_spreadsheet_restore_content(sheet, cell, previous["content"])' in failure_path
     assert 'elif _spreadsheet_cell_content(sheet, cell):' in failure_path
     assert "Bad dynamic_cast!" in failure_path
+    assert "hasattr(target, item[\"target_property\"])" not in generated_code
+    assert "_spreadsheet_expression_for_path(" in generated_code
+    assert "FreeCAD did not retain expression path" in generated_code
 
 
 def test_spreadsheet_runtime_detects_encoded_formula_errors() -> None:
@@ -1247,7 +1250,7 @@ def test_spreadsheet_runtime_enumerates_real_cells_not_properties() -> None:
             )
 
     namespace = {}
-    exec(SPREADSHEET_RUNTIME_HELPERS, namespace)
+    exec(SPREADSHEET_RUNTIME_HELPERS, namespace)  # noqa: S102
 
     assert namespace["_spreadsheet_nonempty_cells"](Sheet()) == [
         "A1",
@@ -1300,6 +1303,69 @@ async def test_spreadsheet_bind_property_coerces_unitless_angle_to_degrees() -> 
     assert 'target_type == "App::PropertyAngle" and not source_unit' in code
     assert 'expression = f"({expression}) * 1 deg"' in code
     assert "source_value = _spreadsheet_cell_content(sheet, cell)" in code
+
+
+@pytest.mark.asyncio
+async def test_spreadsheet_bind_property_accepts_nested_expression_paths() -> None:
+    """Nested Placement paths must be delegated to FreeCAD's expression engine."""
+    from freecad_mcp.bridge.base import ExecutionResult
+    from freecad_mcp.tools.spreadsheet import register_spreadsheet_tools
+
+    mcp = MagicMock()
+    registered = {}
+    mcp.tool = lambda: lambda fn: registered.setdefault(fn.__name__, fn) or fn
+    bridge = AsyncMock()
+    bridge.execute_python = AsyncMock(
+        return_value=ExecutionResult(
+            success=True,
+            result={
+                "success": True,
+                "expression": "Params.OffsetX",
+                "target_object": "Box",
+                "target_property": "Placement.Base.x",
+                "target_is_expression_path": True,
+            },
+            stdout="",
+            stderr="",
+            execution_time_ms=1.0,
+        )
+    )
+
+    async def get_bridge():
+        return bridge
+
+    register_spreadsheet_tools(mcp, get_bridge)
+    result = await registered["spreadsheet_bind_property"](
+        "Params", "OffsetX", "Box", "Placement.Base.x"
+    )
+
+    assert result["target_is_expression_path"] is True
+    code = bridge.execute_python.await_args.args[0]
+    assert "hasattr(target, prop)" not in code
+    assert "target.setExpression(prop, expression)" in code
+    assert "_spreadsheet_expression_for_path(target, prop)" in code
+    assert '.lstrip(".")' in code
+    assert 'split(".", 1)[0]' in code
+
+
+def test_spreadsheet_expression_lookup_normalizes_freecad_leading_dot() -> None:
+    """ExpressionEngine reports nested paths with a leading dot in FreeCAD."""
+    from freecad_mcp.tools.spreadsheet import SPREADSHEET_RUNTIME_HELPERS
+
+    class Target:
+        def __init__(self) -> None:
+            self.ExpressionEngine = [
+                (".Placement.Base.x", "Params.OffsetX"),
+                (".AttachmentOffset.Base.z", "Params.AttachZ"),
+            ]
+
+    namespace = {}
+    exec(SPREADSHEET_RUNTIME_HELPERS, namespace)  # noqa: S102
+    lookup = namespace["_spreadsheet_expression_for_path"]
+
+    assert lookup(Target(), "Placement.Base.x") == "Params.OffsetX"
+    assert lookup(Target(), ".AttachmentOffset.Base.z") == "Params.AttachZ"
+    assert lookup(Target(), "Placement.Base.y") is None
 
 
 @pytest.mark.asyncio

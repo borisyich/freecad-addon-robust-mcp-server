@@ -577,6 +577,16 @@ async def test_sketch_line_fold_preserves_tip_holes_and_recomputes(
         name="FoldBase",
         doc_name=doc,
     )
+    base_inspection = await _call(
+        tools, "inspect_sheet_metal", object_name="FoldBase", doc_name=doc
+    )
+    assert base_inspection["cylindrical_face_count"] == 1
+    assert base_inspection["classified_bend_face_count"] == 0
+    assert base_inspection["cylindrical_bend_face_count"] == 0
+    assert base_inspection["bend_zone_count"] == 0
+    assert base_inspection["cylindrical_faces"][0]["classification"] == (
+        "full_cylinder_non_bend"
+    )
     bend_sketch = await _call(
         tools,
         "create_sketch",
@@ -625,7 +635,18 @@ _result_ = {{"tip": body.Tip.Name, "is_base": body.Tip is doc.getObject("FoldBas
         tools, "inspect_sheet_metal", object_name="SketchFold", doc_name=doc
     )
     assert inspection["tip"] == "SketchFold"
-    assert inspection["cylindrical_bend_face_count"] >= 1
+    assert inspection["classified_bend_face_count"] >= 2
+    assert inspection["cylindrical_bend_face_count"] == inspection[
+        "classified_bend_face_count"
+    ]
+    assert inspection["bend_zone_count"] >= 1
+    assert inspection["cylindrical_face_count"] > inspection[
+        "classified_bend_face_count"
+    ]
+    assert any(
+        item["classification"] == "full_cylinder_non_bend"
+        for item in inspection["cylindrical_faces"]
+    )
     cylindrical = await _call(
         tools,
         "select_subshapes",
@@ -1323,11 +1344,16 @@ _result_ = {{"tip": body.Tip.Name, "valid": bool(bypass.Shape.isValid())}}
         doc_name=doc,
     )
     assert inspection["shape_valid"] is True
-    assert inspection["native_sheet_metal_history"] is True
+    assert inspection["has_native_sheet_metal_features"] is True
+    assert inspection["native_sheet_metal_history"] is False
+    assert inspection["sheet_metal_history_classification"] == (
+        "unsupported_post_native_history"
+    )
     assert inspection["unfold_ready"] is False
-    assert inspection["history_evidence"]["unsupported_post_sheet_features"] == [
-        {"name": "AdHocPadReconstruction", "type_id": "PartDesign::Feature"}
-    ]
+    unsupported = inspection["history_evidence"]["unsupported_shape_features"]
+    assert [item["name"] for item in unsupported] == ["AdHocPadReconstruction"]
+    assert unsupported[0]["type_id"] == "PartDesign::Feature"
+    assert unsupported[0]["position"] == "after_last_native"
     assert any(
         "Unsupported shape-producing features" in item
         for item in inspection["warnings"]
@@ -1342,3 +1368,92 @@ _result_ = {{"tip": body.Tip.Name, "valid": bool(bypass.Shape.isValid())}}
             material={"k_factor": 0.38, "standard": "ansi"},
             doc_name=doc,
         )
+    await _assert_tip_and_absence(tools, doc, "AdHocPadReconstruction", "Unfold")
+
+
+@pytest.mark.asyncio
+async def test_interleaved_partdesign_history_cannot_be_hidden_by_later_sm_proxy(
+    live_tools: dict[str, Any],
+) -> None:
+    """SMBase -> PartDesign shape -> SM proxy remains mixed and non-unfoldable."""
+    tools = live_tools
+    doc = "McpAuditSheetMetalInterleavedBypass"
+    await _require_sheetmetal(tools, "base", "unfold")
+    await _fresh(tools, doc)
+    await _create_body_sketch(tools, doc, "BlankSketch")
+    await _call(
+        tools,
+        "edit_sketch_geometry",
+        sketch_name="BlankSketch",
+        operations=[
+            {
+                "op": "add_rectangle",
+                "x": 0.0,
+                "y": 0.0,
+                "width": 40.0,
+                "height": 25.0,
+            }
+        ],
+        doc_name=doc,
+    )
+    await _call(
+        tools,
+        "create_sheet_metal_base",
+        sketch_name="BlankSketch",
+        thickness=2.0,
+        radius=2.0,
+        name="NativeBase",
+        doc_name=doc,
+    )
+    await _call(
+        tools,
+        "execute_python",
+        code=f"""
+doc = FreeCAD.getDocument({doc!r})
+body = doc.getObject("Body")
+base = doc.getObject("NativeBase")
+interleaved = body.newObject("PartDesign::Feature", "InterleavedPad")
+interleaved.Shape = base.Shape.copy()
+
+class SMRecoveredProxy:
+    pass
+
+recovered = body.newObject("PartDesign::FeaturePython", "RecoveredSM")
+recovered.Proxy = SMRecoveredProxy()
+recovered.Shape = interleaved.Shape.copy()
+body.Tip = recovered
+base.ViewObject.Visibility = False
+interleaved.ViewObject.Visibility = False
+recovered.ViewObject.Visibility = True
+doc.recompute()
+_result_ = {{"tip": body.Tip.Name, "valid": bool(recovered.Shape.isValid())}}
+""",
+    )
+
+    inspection = await _call(
+        tools, "inspect_sheet_metal", object_name="RecoveredSM", doc_name=doc
+    )
+    assert inspection["has_native_sheet_metal_features"] is True
+    assert inspection["native_sheet_metal_history"] is False
+    assert inspection["sheet_metal_history_classification"] == (
+        "mixed_interleaved_history"
+    )
+    assert inspection["history_evidence"]["reentered_after_unsupported"] is True
+    unsupported = inspection["history_evidence"]["unsupported_shape_features"]
+    assert [item["name"] for item in unsupported] == ["InterleavedPad"]
+    assert unsupported[0]["position"] == "interleaved_before_later_native"
+    assert inspection["unfold_ready"] is False
+
+    with pytest.raises(ValueError, match="unsupported shape-producing features"):
+        await _call(
+            tools,
+            "unfold_sheet_metal",
+            feature_name="RecoveredSM",
+            stationary_face=inspection["stationary_face_candidates"][0]["face"],
+            material={"k_factor": 0.38, "standard": "ansi"},
+            name="RejectedRecoveredUnfold",
+            doc_name=doc,
+        )
+    await _assert_tip_and_absence(
+        tools, doc, "RecoveredSM", "RejectedRecoveredUnfold"
+    )

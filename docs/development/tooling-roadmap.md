@@ -216,6 +216,13 @@ native disconnected-flange producer is still needed; excessive end gaps are
 accepted by upstream as a smaller connected flange rather than a disconnected
 result.
 
+History regressions also cover a native/non-native/native sequence: inspection
+audits from the first native proxy through the active Tip, reports the
+interleaved PartDesign feature, and rejects unfold without creating a flat
+feature or moving the Tip. Live fold coverage distinguishes a flat-domain hole
+wall from paired constant-thickness bend cylinders, so raw cylindrical geometry
+is no longer treated as a bend count.
+
 The engineering workflow and panel/bend graph are documented in
 `.agents/skills/freecad-engineering/references/sheet-metal-flat-patterns.md`.
 Upstream command semantics are tracked against the

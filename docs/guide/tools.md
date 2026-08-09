@@ -155,7 +155,7 @@ and display-mode evidence.
 | `create_sheet_metal_base` | Create a native flat blank or open base-wall profile from a Sketcher sketch with explicit thickness and bend radius. |
 | `create_sheet_metal_feature` | Create a typed native flange, sketch-line fold, junction, relief, corner relief, extend, hem, solid bend, or solid-to-sheet conversion. |
 | `unfold_sheet_metal` | Create a parametric flat pattern from a planar stationary face and an explicit K-factor/standard or material Spreadsheet. |
-| `inspect_sheet_metal` | Report proxy history, thickness evidence, planar stationary-face candidates, bend-face count, Body Tip, and unfold readiness. |
+| `inspect_sheet_metal` | Report full active-history classification, thickness evidence, planar stationary-face candidates, classified bend zones, Body Tip, and unfold readiness. |
 
 Recommended sequence:
 
@@ -186,6 +186,22 @@ is therefore `SMBaseBend -> BendLineSketch (helper) -> SMFoldWall`, while
 Stale bases and wrong topology references are rejected before a new native
 proxy is created; recompute failures abort the transaction and restore the prior
 Tip.
+
+Inspection audits every shape-producing feature from the first native
+SheetMetal feature through the inspected object. A later native proxy cannot
+hide an interleaved Pad or copied PartDesign feature:
+`has_native_sheet_metal_features` only records presence, while the stronger
+`native_sheet_metal_history` is true only for a supported linear history.
+`sheet_metal_history_classification` explains mixed histories and
+`history_evidence.unsupported_shape_features` identifies their position.
+
+`cylindrical_face_count` is the raw geometric count. Bend evidence is stricter:
+`classified_bend_face_count` (and the compatibility field
+`cylindrical_bend_face_count`) includes only paired, coaxial, partial cylinders
+whose radius delta matches sheet thickness and whose radius matches a declared
+native bend radius. `bend_zone_count` counts those pairs. Full cylinders such
+as hole walls and unmatched partial cylinders such as typical fillets remain in
+`cylindrical_faces` with an explicit non-bend classification.
 
 Example operation payloads:
 
@@ -245,10 +261,16 @@ root. The MCP wrapper reports the failure and removes the attempted unfold.
 | `spreadsheet_set_alias` | Set an alias for a cell in a spreadsheet. |
 | `spreadsheet_get_aliases` | Get aliases by enumerating actual spreadsheet cells. |
 | `spreadsheet_clear_cell` | Safely clear a cell; preserve dependent expressions by default or detach them explicitly with `clear_bindings=True`. |
-| `spreadsheet_bind_property` | Bind a property; unitless angle values are interpreted as degrees. |
+| `spreadsheet_bind_property` | Bind any FreeCAD expression path, including `Placement.Base.x` and `AttachmentOffset.Base.z`; unitless angle values are interpreted as degrees. |
 | `spreadsheet_get_cell_range` | Get values from a range of cells in a spreadsheet. |
 | `spreadsheet_import_csv` | Import data from a CSV file into a spreadsheet. |
 | `spreadsheet_export_csv` | Export spreadsheet data to a CSV file. |
+
+Binding targets use FreeCAD expression-path syntax, not Python `hasattr`
+syntax. Both `spreadsheet_bind_property` and `spreadsheet_apply_batch` delegate
+leaf-path validation to `setExpression`, verify the retained ExpressionEngine
+entry (including FreeCAD's leading-dot representation), and roll back an invalid
+path without removing earlier valid bindings.
 
 ## Draft
 

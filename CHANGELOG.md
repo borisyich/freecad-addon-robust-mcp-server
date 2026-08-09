@@ -186,6 +186,16 @@
   with flat-domain holes, relief-configured hemmed corners, and solid-to-sheet
   conversion, plus atomic negative regressions. Documented the upstream
   SheetMetal 0.8.21 open-box `SMFromSolid` unfold limitation.
+- Made SheetMetal history evidence audit the complete active interval from the
+  first native feature, so a later native proxy cannot hide an interleaved Pad
+  or copied PartDesign feature. Inspection now separates native-feature presence
+  from a supported linear native history.
+- Split raw cylindrical-face evidence from classified constant-thickness bend
+  pairs. Hole walls, tubes, and unmatched fillet-like cylinders no longer
+  inflate `cylindrical_bend_face_count`.
+- Extended Spreadsheet bindings to native FreeCAD expression paths such as
+  `Placement.Base.x` and `AttachmentOffset.Base.z`, including atomic batch
+  snapshot/verification and live recomputation regressions.
 
 This project uses **component-specific versioning**. Each component has its own
 release notes and version history.

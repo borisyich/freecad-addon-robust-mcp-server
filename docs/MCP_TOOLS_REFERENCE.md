@@ -1380,14 +1380,28 @@ inspect_sheet_metal(
 ```
 
 The report includes validity and solid count, declared and estimated
-thickness, native SheetMetal history, Body/Tip evidence, cylindrical bend-face
-count, visibility/display evidence, warnings, and up to eight planar
-`stationary_face_candidates`. `unfold_ready` is false when the object is not the
-current Body Tip, has no native SheetMetal history, has a missing ViewProvider,
-or has unsupported shape-producing PartDesign features after the final native
-SheetMetal feature. Use a
+thickness, native SheetMetal history, Body/Tip evidence, classified bend zones,
+visibility/display evidence, warnings, and up to eight planar
+`stationary_face_candidates`. `has_native_sheet_metal_features` means that at
+least one native proxy exists. The stronger `native_sheet_metal_history` means
+the complete active history from the first native proxy through the inspected
+object is supported; `sheet_metal_history_classification` distinguishes a
+linear history, a supported subtractive tail, unsupported post-native geometry,
+and an unsupported interleaved history that later re-enters a native proxy.
+`unfold_ready` is false when the object is not the current Body Tip, lacks a
+supported native history, has a missing ViewProvider, or contains unsupported
+shape-producing features anywhere in that active interval. Use a
 candidate as evidence for unfold; use `select_subshapes` when the design intent
 requires a particular normal, location, or area.
+
+`cylindrical_face_count` remains the raw count of all cylindrical surfaces.
+`classified_bend_face_count` and the compatibility field
+`cylindrical_bend_face_count` include only coaxial partial-cylinder pairs whose
+radius difference matches nominal thickness and whose radius matches declared
+native bend data; `bend_zone_count` counts those pairs. Hole walls (full
+cylinders), fillets, tubes, and unmatched curved surfaces are retained in
+`cylindrical_faces` with a non-bend classification rather than inflating the
+bend count.
 Candidate status does not guarantee that the installed upstream workbench can
 unfold the complete history. Native unfold errors, including the SheetMetal
 0.8.21 `SMFromSolid` open-box `Wire is not closed` case, remain transactional:
@@ -1531,7 +1545,7 @@ the public schema.
 
 ### spreadsheet_apply_batch
 
-Apply cell values, aliases, and object-property bindings to an existing Spreadsheet in one transaction and one final recompute. Use this instead of dozens of independent setter calls when creating a parameter table. Binding targets, properties, aliases, duplicate entries, and alias collisions are validated before mutation. Because FreeCAD 1.0 does not roll Spreadsheet mutations back on `abortTransaction()`, the tool snapshots and explicitly restores affected cells, aliases, and expressions if any operation fails.
+Apply cell values, aliases, and object-property bindings to an existing Spreadsheet in one transaction and one final recompute. Use this instead of dozens of independent setter calls when creating a parameter table. Binding targets accept FreeCAD expression paths such as `Length`, `Placement.Base.x`, and `AttachmentOffset.Base.z`; FreeCAD validates the leaf path through `setExpression`. Aliases, duplicate entries, and alias collisions are validated before mutation. Because FreeCAD 1.0 does not roll Spreadsheet mutations back on `abortTransaction()`, the tool snapshots and explicitly restores affected cells, aliases, and expressions if any operation fails.
 
 ```python
 spreadsheet_apply_batch(
@@ -1556,6 +1570,11 @@ cause rollback rather than a successful response. The result reports
 events before reading the per-request Report View delta; high-confidence Spreadsheet errors
 are returned as `FreeCADReportError` even when FreeCAD's Python API did not
 raise an exception.
+
+`spreadsheet_bind_property` uses the same expression-path contract for a single
+binding. Both tools normalize the leading dot that FreeCAD uses when reporting
+nested `ExpressionEngine` paths, verify that the requested binding was retained,
+and preserve existing expressions when an invalid path causes rollback.
 
 `spreadsheet_get_aliases` enumerates actual Spreadsheet cells (not ordinary
 FreeCAD object properties). `spreadsheet_clear_cell` is idempotent and reports

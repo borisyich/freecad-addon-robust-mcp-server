@@ -212,6 +212,132 @@ _result_ = dict(pattern.ExpressionEngine).get("Angle")
 
 
 @pytest.mark.asyncio
+async def test_nested_freecad_expression_paths_bind_and_recompute(
+    live_bridge: XmlRpcBridge,
+    spreadsheet_tools: dict[str, Any],
+) -> None:
+    """Placement and AttachmentOffset leaf paths are valid binding targets."""
+    doc_name = "MCPSpreadsheetNestedPathRegression"
+    setup = await live_bridge.execute_python(
+        f"""
+if {doc_name!r} in FreeCAD.listDocuments():
+    FreeCAD.closeDocument({doc_name!r})
+doc = FreeCAD.newDocument({doc_name!r})
+sheet = doc.addObject("Spreadsheet::Sheet", "Params")
+box = doc.addObject("Part::Box", "Box")
+attached = doc.addObject("PartDesign::Feature", "AttachedFeature")
+attached.addProperty("App::PropertyPlacement", "AttachmentOffset")
+doc.recompute()
+_result_ = True
+"""
+    )
+    assert setup.success, setup.error_traceback
+
+    try:
+        await spreadsheet_tools["spreadsheet_apply_batch"](
+            "Params",
+            cells=[
+                {"cell": "A1", "value": 12.0},
+                {"cell": "A2", "value": 7.0},
+            ],
+            aliases=[
+                {"cell": "A1", "alias": "OffsetX"},
+                {"cell": "A2", "alias": "AttachZ"},
+            ],
+            doc_name=doc_name,
+        )
+        placement = await spreadsheet_tools["spreadsheet_bind_property"](
+            "Params",
+            "OffsetX",
+            "Box",
+            "Placement.Base.x",
+            doc_name=doc_name,
+        )
+        attachment = await spreadsheet_tools["spreadsheet_apply_batch"](
+            "Params",
+            bindings=[
+                {
+                    "alias": "AttachZ",
+                    "target_object": "AttachedFeature",
+                    "target_property": "AttachmentOffset.Base.z",
+                }
+            ],
+            doc_name=doc_name,
+        )
+        assert placement["target_is_expression_path"] is True
+        assert attachment["bindings"][0]["target_is_expression_path"] is True
+
+        state = await live_bridge.execute_python(
+            f"""
+doc = FreeCAD.getDocument({doc_name!r})
+box = doc.getObject("Box")
+attached = doc.getObject("AttachedFeature")
+_result_ = {{
+    "x": float(box.Placement.Base.x),
+    "z": float(attached.AttachmentOffset.Base.z),
+    "box_expressions": list(box.ExpressionEngine),
+    "attached_expressions": list(attached.ExpressionEngine),
+}}
+"""
+        )
+        assert state.success, state.error_traceback
+        assert state.result["x"] == pytest.approx(12.0)
+        assert state.result["z"] == pytest.approx(7.0)
+        assert [".Placement.Base.x", "Params.OffsetX"] in state.result["box_expressions"]
+        assert [".AttachmentOffset.Base.z", "Params.AttachZ"] in state.result[
+            "attached_expressions"
+        ]
+
+        await spreadsheet_tools["spreadsheet_apply_batch"](
+            "Params",
+            cells=[
+                {"cell": "A1", "value": 18.5},
+                {"cell": "A2", "value": 9.25},
+            ],
+            doc_name=doc_name,
+        )
+        recomputed = await live_bridge.execute_python(
+            f"""
+doc = FreeCAD.getDocument({doc_name!r})
+_result_ = {{
+    "x": float(doc.getObject("Box").Placement.Base.x),
+    "z": float(doc.getObject("AttachedFeature").AttachmentOffset.Base.z),
+}}
+"""
+        )
+        assert recomputed.success, recomputed.error_traceback
+        assert recomputed.result == {"x": 18.5, "z": 9.25}
+
+        with pytest.raises(ValueError):
+            await spreadsheet_tools["spreadsheet_bind_property"](
+                "Params",
+                "OffsetX",
+                "Box",
+                "Placement.NoSuchLeaf.x",
+                doc_name=doc_name,
+            )
+        preserved = await live_bridge.execute_python(
+            f"""
+doc = FreeCAD.getDocument({doc_name!r})
+box = doc.getObject("Box")
+_result_ = {{
+    "x": float(box.Placement.Base.x),
+    "expressions": list(box.ExpressionEngine),
+}}
+"""
+        )
+        assert preserved.success, preserved.error_traceback
+        assert preserved.result["x"] == pytest.approx(18.5)
+        assert preserved.result["expressions"] == [
+            [".Placement.Base.x", "Params.OffsetX"]
+        ]
+    finally:
+        await live_bridge.execute_python(
+            f"FreeCAD.closeDocument({doc_name!r}) if {doc_name!r} in FreeCAD.listDocuments() else None"
+        )
+
+
+@pytest.mark.asyncio
 async def test_edit_object_switches_hole_profile_and_size_together(
     live_bridge: XmlRpcBridge,
     partdesign_tools: dict[str, Any],
