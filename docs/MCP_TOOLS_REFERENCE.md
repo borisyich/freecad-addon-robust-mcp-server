@@ -1091,7 +1091,7 @@ subtractive helices.
 
 #### create_hole
 
-Create parametric holes with optional threading and strict post-validation. Use a new sketch containing only non-construction circles. Prefer attachment to an actual planar solid face such as `Pad_Base.Face8`; origin planes are allowed but may be ambiguous in a complex Body. Datum-plane sketches are rejected because `PartDesign::Hole` can become a geometrically ineffective no-op in FreeCAD 1.0.x. Use `create_cylindrical_cut` for radial or off-face holes. A Body containing native SheetMetal proxies is rejected before feature creation: sheet-metal holes/cutouts must be drawn in the source flat blank sketch before `create_sheet_metal_base`, so they transform with their panel and remain visible in native unfold evidence.
+Create parametric holes with optional threading and strict post-validation. Use a new sketch containing only non-construction circles. Prefer attachment to an actual planar solid face such as `Pad_Base.Face8`; origin planes are allowed but may be ambiguous in a complex Body. Datum-plane sketches are rejected because `PartDesign::Hole` can become a geometrically ineffective no-op in FreeCAD 1.0.x. Use `create_cylindrical_cut` for radial or off-face holes. For native SheetMetal parts, prefer holes/cutouts in the source flat blank so panel ownership is explicit, but a validated Hole is also allowed as a linear subtractive tail after the last native SheetMetal feature.
 
 The call rolls back unless the result is one valid solid, body volume decreases,
 and geometric probes confirm that material was removed at every profile-circle
@@ -1386,11 +1386,12 @@ visibility/display evidence, warnings, and up to eight planar
 least one native proxy exists. The stronger `native_sheet_metal_history` means
 the complete active history from the first native proxy through the inspected
 object is supported; `sheet_metal_history_classification` distinguishes a
-linear history, unsupported post-native geometry, and an unsupported
-interleaved history that later re-enters a native proxy. Post-native Hole,
-Pocket, Groove, and other subtractive features are also unsupported: holes and
-cutouts belong in the source flat blank sketch before the first native
-SheetMetal feature.
+native linear history, a supported post-native subtractive tail, unsupported
+post-native geometry, and an unsupported interleaved history that later
+re-enters a native proxy. Hole, Pocket, Groove, and cylindrical-cut features
+after the final native proxy are reported in `supported_subtractive_features`.
+Holes and contour cutouts are still best placed in the source flat blank when
+that matches design intent, because their panel ownership is then explicit.
 `unfold_ready` is false when the object is not the current Body Tip, lacks a
 supported native history, has a missing ViewProvider, or contains unsupported
 shape-producing features anywhere in that active interval. Use a
@@ -1979,11 +1980,14 @@ targeted structural guard, not a complete symbolic algebra proof.
 
 FreeCAD marks custom properties as `Dynamic`, which normally remains a reason
 to reject metadata-only expression endpoints. Native SheetMetal proxies are a
-narrow exception: on known `SMBaseBend`, `SMBendWall`, `SMFoldWall`, relief,
-hem, bend, extend, and from-solid proxies, the known geometry properties
-`Thickness`, `Radius`, `radius`, `angle`, and `kfactor` count as solid-driving
-when the feature is in the active Tip dependency graph. Arbitrary Dynamic
-properties—even on the same object—remain untrusted.
+narrow exception: each known `SMBaseBend`, `SMBendWall`, `SMFoldWall`, relief,
+hem, bend, extend, and from-solid proxy has its own geometry-property contract
+matching the fields assigned by `create_sheet_metal_base` and
+`create_sheet_metal_feature`. This includes flange `length`, gaps, relief and
+miter settings; fold angle/radius/K-factor; hem dimensions; corner-relief size
+and offsets; and base/from-solid thickness and radius. Those endpoints count as
+solid-driving only when the feature is in the active Tip dependency graph.
+Arbitrary Dynamic properties—even on the same object—remain untrusted.
 
 Before final completion, investigate every unused Spreadsheet alias: connect it
 to the tree if it was intended to drive geometry, or remove it if it is

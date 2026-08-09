@@ -373,6 +373,7 @@ def _sm_unfold_history_evidence(base):
         and type(getattr(item, "Proxy", None)).__name__.startswith("SM")
     ]
     unsupported = []
+    supported_subtractive = []
     if native_indexes:
         first_native = min(native_indexes)
         last_native = max(native_indexes)
@@ -399,19 +400,21 @@ def _sm_unfold_history_evidence(base):
                         if index < last_native
                         else "after_last_native"
                     ),
-                    "reason": (
-                        "sheet_metal_flat_domain_cut_required"
-                        if subtractive
-                        else "unsupported_shape_producing_feature"
-                    ),
+                    "reason": "unsupported_shape_producing_feature",
                 }
-                unsupported.append(evidence)
+                if subtractive and index > last_native:
+                    evidence["reason"] = "supported_post_native_subtractive_tail"
+                    supported_subtractive.append(evidence)
+                else:
+                    unsupported.append(evidence)
     if not native_indexes:
         classification = "no_native"
     elif any(item["position"] == "interleaved_before_later_native" for item in unsupported):
         classification = "mixed_interleaved_history"
     elif unsupported:
         classification = "unsupported_post_native_history"
+    elif supported_subtractive:
+        classification = "native_with_supported_subtractive_tail"
     else:
         classification = "native_linear_history"
     active_history = []
@@ -432,9 +435,7 @@ def _sm_unfold_history_evidence(base):
         "classification": classification,
         "native_feature_names": [items[index].Name for index in native_indexes],
         "active_history": active_history,
-        # Kept as an empty compatibility field. Sheet-metal holes/cutouts must
-        # be defined in the flat blank sketch, not appended after native bends.
-        "supported_subtractive_features": [],
+        "supported_subtractive_features": supported_subtractive,
         "unsupported_shape_features": unsupported,
         # Backwards-compatible alias. Unlike the old implementation this now
         # includes unsupported interleaved features, not only the final tail.

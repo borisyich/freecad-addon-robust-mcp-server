@@ -1,8 +1,96 @@
 """Tests for generated FreeCAD parametric-validation code."""
 
 from freecad_mcp.bridge._parametric_validation_runtime import (
+    SHEET_METAL_PROXY_GEOMETRY_PROPERTIES,
     build_parametric_validation_code,
 )
+
+
+def test_sheet_metal_proxy_property_contract_matches_wrapped_operations() -> None:
+    """Every property assigned by the public SM dispatch has a proxy endpoint."""
+    expected = {
+        "SMBaseBend": {
+            "Thickness",
+            "Radius",
+            "Length",
+            "BendSide",
+            "MidPlane",
+            "Reverse",
+        },
+        "SMBendWall": {
+            "length",
+            "radius",
+            "angle",
+            "invert",
+            "BendType",
+            "LengthSpec",
+            "gap1",
+            "gap2",
+            "reliefType",
+            "reliefw",
+            "reliefd",
+            "AutoMiter",
+        },
+        "SMFoldWall": {
+            "radius",
+            "angle",
+            "kfactor",
+            "invert",
+            "invertbend",
+            "Position",
+        },
+        "SMJunction": {"gap"},
+        "SMRelief": {"relief"},
+        "SMCornerRelief": {
+            "ReliefSketch",
+            "Size",
+            "SizeRatio",
+            "kfactor",
+            "XOffset",
+            "YOffset",
+        },
+        "SMExtrudeWall": {
+            "length",
+            "gap1",
+            "gap2",
+            "reversed",
+            "UseSubtraction",
+            "Offset",
+            "Refine",
+        },
+        "SMExtendWall": {
+            "length",
+            "gap1",
+            "gap2",
+            "reversed",
+            "UseSubtraction",
+            "Offset",
+            "Refine",
+        },
+        "SMHem": {
+            "HemType",
+            "width",
+            "radius",
+            "opening",
+            "RollAngle",
+            "IncludeBend",
+            "opened",
+            "invert",
+            "gap1",
+            "gap2",
+            "BendType",
+            "reliefType",
+            "reliefw",
+            "reliefd",
+        },
+        "SMSolidBend": {"radius"},
+        "SMFromSolid": {"Thickness", "Radius", "Invert"},
+    }
+
+    assert {
+        proxy: set(properties)
+        for proxy, properties in SHEET_METAL_PROXY_GEOMETRY_PROPERTIES.items()
+    } == expected
 
 
 def test_generated_parametric_validation_code_compiles() -> None:
@@ -342,6 +430,17 @@ def test_generated_report_describes_body_tip_history_and_sketch(monkeypatch) -> 
     pad.angle = 75.0
     drives_solid, reason = namespace["_expression_binding_solid_influence"](
         pad, "angle", {"Pad"}
+    )
+    assert drives_solid is True
+    assert reason == "recognized native SheetMetal geometry-driving property"
+
+    class SMBendWall:
+        pass
+
+    pad.Proxy = SMBendWall()
+    pad.length = 20.0
+    drives_solid, reason = namespace["_expression_binding_solid_influence"](
+        pad, ".length.Value", {"Pad"}
     )
     assert drives_solid is True
     assert reason == "recognized native SheetMetal geometry-driving property"

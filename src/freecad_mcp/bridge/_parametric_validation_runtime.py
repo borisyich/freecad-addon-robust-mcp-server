@@ -4,7 +4,66 @@ from __future__ import annotations
 
 from textwrap import dedent
 
-from freecad_mcp.tools._freecad_runtime_helpers import SKETCH_ANALYSIS_RUNTIME_HELPERS
+from freecad_mcp.tools._freecad_runtime_helpers import (
+    SKETCH_ANALYSIS_RUNTIME_HELPERS,
+)
+
+SHEET_METAL_PROXY_GEOMETRY_PROPERTIES: dict[str, frozenset[str]] = {
+    "SMBaseBend": frozenset(
+        {"Thickness", "Radius", "Length", "BendSide", "MidPlane", "Reverse"}
+    ),
+    "SMBendWall": frozenset(
+        {
+            "length",
+            "radius",
+            "angle",
+            "invert",
+            "BendType",
+            "LengthSpec",
+            "gap1",
+            "gap2",
+            "reliefType",
+            "reliefw",
+            "reliefd",
+            "AutoMiter",
+        }
+    ),
+    "SMFoldWall": frozenset(
+        {"radius", "angle", "kfactor", "invert", "invertbend", "Position"}
+    ),
+    "SMJunction": frozenset({"gap"}),
+    "SMRelief": frozenset({"relief"}),
+    "SMCornerRelief": frozenset(
+        {"ReliefSketch", "Size", "SizeRatio", "kfactor", "XOffset", "YOffset"}
+    ),
+    "SMExtrudeWall": frozenset(
+        {"length", "gap1", "gap2", "reversed", "UseSubtraction", "Offset", "Refine"}
+    ),
+    # Older/newer SheetMetal releases use either class name for Extend.
+    "SMExtendWall": frozenset(
+        {"length", "gap1", "gap2", "reversed", "UseSubtraction", "Offset", "Refine"}
+    ),
+    "SMHem": frozenset(
+        {
+            "HemType",
+            "width",
+            "radius",
+            "opening",
+            "RollAngle",
+            "IncludeBend",
+            "opened",
+            "invert",
+            "gap1",
+            "gap2",
+            "BendType",
+            "reliefType",
+            "reliefw",
+            "reliefd",
+        }
+    ),
+    "SMSolidBend": frozenset({"radius"}),
+    "SMFromSolid": frozenset({"Thickness", "Radius", "Invert"}),
+}
 
 
 def build_parametric_validation_code(
@@ -28,6 +87,7 @@ import FreeCAD
 __SKETCH_HELPERS__
 
 required_dimension_names = __REQUIRED_DIMENSION_NAMES__
+sheet_metal_proxy_geometry_properties = __SHEET_METAL_PROXY_PROPERTIES__
 
 
 def _finite_number(value):
@@ -352,24 +412,9 @@ def _native_sheet_metal_geometry_property(obj, property_name):
     if getattr(obj, "TypeId", "") != "PartDesign::FeaturePython":
         return False
     proxy_type = type(getattr(obj, "Proxy", None)).__name__
-    native_proxy_types = {
-        "SMBaseBend",
-        "SMBendWall",
-        "SMFoldWall",
-        "SMJunction",
-        "SMRelief",
-        "SMCornerRelief",
-        "SMExtendWall",
-        "SMExtrudeWall",
-        "SMHem",
-        "SMSolidBend",
-        "SMFromSolid",
-    }
-    geometry_properties = {"Thickness", "Radius", "radius", "angle", "kfactor"}
     root_property = str(property_name).lstrip(".").split(".", 1)[0]
     return (
-        proxy_type in native_proxy_types
-        and root_property in geometry_properties
+        root_property in sheet_metal_proxy_geometry_properties.get(proxy_type, ())
         and hasattr(obj, root_property)
     )
 
@@ -1448,4 +1493,15 @@ else:
         .replace("__RECOMPUTE__", repr(recompute))
         .replace("__INCLUDE_CONSTRAINTS__", repr(include_sketch_constraints))
         .replace("__REQUIRED_DIMENSION_NAMES__", repr(required_dimension_names or []))
+        .replace(
+            "__SHEET_METAL_PROXY_PROPERTIES__",
+            repr(
+                {
+                    proxy: sorted(properties)
+                    for proxy, properties in (
+                        SHEET_METAL_PROXY_GEOMETRY_PROPERTIES.items()
+                    )
+                }
+            ),
+        )
     )

@@ -402,8 +402,8 @@ async def test_unfold_keeps_formed_body_and_uses_explicit_manual_rule(
     assert "items[max(native_indexes) + 1:]" not in code
     assert "first_native = min(native_indexes)" in code
     assert 'classification = "mixed_interleaved_history"' in code
-    assert '"sheet_metal_flat_domain_cut_required"' in code
-    assert "supported_subtractive.append" not in code
+    assert '"supported_post_native_subtractive_tail"' in code
+    assert "supported_subtractive.append" in code
     assert '"SheetMetalUnfoldCmd", "SMUnfoldViewProvider"' in code
 
 

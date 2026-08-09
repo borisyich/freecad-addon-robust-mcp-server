@@ -223,13 +223,16 @@ feature or moving the Tip. Live fold coverage distinguishes a flat-domain hole
 wall from paired constant-thickness bend cylinders, so raw cylindrical geometry
 is no longer treated as a bend count.
 
-Native SheetMetal Dynamic parameters (`Thickness`, `Radius`, `radius`, `angle`,
-and `kfactor`) are now recognized as geometry-driving validator endpoints only
-on known SM proxies. The live fold proves Spreadsheet mutations change the
-solid while arbitrary Dynamic metadata remains rejected. Sheet-metal Hole
-creation is rejected after the first native SM feature, and verification-only
-Unfold captures flat/sketch invariants before removing every generated object;
-the final structural scan therefore no longer requires deleting verification
+Native SheetMetal Dynamic parameters are recognized through a proxy-specific
+geometry contract covering every property assigned by the public SheetMetal
+dispatcher: for example `SMBendWall.length/gap1/reliefw`, fold angle/K-factor,
+hem parameters, relief offsets, and base/from-solid thickness and radius. Live
+flange and fold tests prove Spreadsheet mutations change the solid while
+arbitrary Dynamic metadata remains rejected. Holes and contour cuts are
+recommended in the flat blank, while a post-native PartDesign subtractive tail
+remains supported and is classified explicitly. Verification-only Unfold
+captures flat/sketch invariants before removing every generated object; the
+final structural scan therefore no longer requires deleting verification
 artifacts by hand.
 
 The engineering workflow and panel/bend graph are documented in

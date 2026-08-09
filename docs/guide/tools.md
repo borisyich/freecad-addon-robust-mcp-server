@@ -165,9 +165,10 @@ Recommended sequence:
    Do not reduce the source to only the largest panel.
 3. Create and fully constrain the base sketch, then call
    `create_sheet_metal_base`. A closed sketch represents a flat blank; an
-   open wire represents a wall profile. Put every sheet-metal hole and cutout in
-   this source flat blank sketch; do not append PartDesign Hole/Pocket features
-   after native bends.
+   open wire represents a wall profile. Prefer sheet-metal holes and contour
+   cutouts in this source flat blank sketch so their panel ownership is explicit.
+   A required later Hole/Pocket/Groove/cylindrical cut may remain as a linear
+   subtractive tail after the last native bend.
 4. Use `select_subshapes` to resolve the intended topology. Pass those exact
    references to `create_sheet_metal_feature`; never guess `EdgeN`, `FaceN`, or
    `VertexN`.
@@ -331,8 +332,10 @@ path without removing earlier valid bindings.
 | `safe_execute` | Execute Python code with automatic validation and rollback on failure. |
 
 The final validator is diagnostic, not a target for destructive model rewrites.
-It recognizes the known Dynamic geometry properties of native SheetMetal
-FeaturePython proxies while continuing to reject arbitrary custom metadata.
+It uses a proxy-specific contract for the Dynamic geometry properties of native
+SheetMetal FeaturePython objects, including flange length/gaps/relief and the
+other fields exposed by the typed feature dispatcher, while continuing to
+reject arbitrary custom metadata.
 Never bulk-delete/recreate an accepted sketch constraint graph merely to obtain
 a greener status; inspect the existing dependency path, bind the semantic
 feature owner, or report a tracing limitation.

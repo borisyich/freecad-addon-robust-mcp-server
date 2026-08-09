@@ -206,6 +206,14 @@
   and all newly generated helpers while preserving the formed Body Tip.
 - Added non-destructive validator guidance so an accepted sketch constraint
   graph is not bulk-rebuilt merely to optimize a final diagnostic.
+- Documented the flat blank as the preferred place for sheet-metal holes and
+  contour cutouts, while keeping validated post-native Hole/Pocket/Groove and
+  cylindrical-cut features as explicitly supported subtractive tails.
+- Replaced the incomplete shared Dynamic-property allowlist with a
+  proxy-specific SheetMetal geometry contract covering every property assigned
+  by the public feature dispatcher, including flange length/gaps/relief, hem,
+  corner-relief offsets, and conversion parameters, without trusting arbitrary
+  custom metadata.
 
 This project uses **component-specific versioning**. Each component has its own
 release notes and version history.

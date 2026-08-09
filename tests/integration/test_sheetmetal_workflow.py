@@ -550,12 +550,69 @@ async def test_semantic_edge_flange_and_unfold_workflow(
     assert trace[-1]["formed"]["hash"] != initial["formed"]["hash"]
     assert trace[-1]["flat"]["hash"] != initial["flat"]["hash"]
 
-    validation = await _assert_valid_model(tools, doc, ["BlankWidth", "BlankDepth"])
+    # SMBendWall.length is a Dynamic FeaturePython property, but it is a real
+    # geometry endpoint. Bind and mutate it without rebuilding sketch constraints.
+    await _call(tools, "spreadsheet_create", name="FlangeParameters", doc_name=doc)
+    await _call(
+        tools,
+        "spreadsheet_apply_batch",
+        spreadsheet_name="FlangeParameters",
+        cells=[{"cell": "A1", "value": 20.0}],
+        aliases=[{"cell": "A1", "alias": "FlangeLength"}],
+        bindings=[
+            {
+                "alias": "FlangeLength",
+                "target_object": "EdgeFlange",
+                "target_property": "length",
+            }
+        ],
+        doc_name=doc,
+    )
+    dynamic_before = await _call(
+        tools,
+        "execute_python",
+        code=f'''
+flange = FreeCAD.getDocument({doc!r}).getObject("EdgeFlange")
+_result_ = {{
+    "hash": int(flange.Shape.hashCode()),
+    "status": [str(value) for value in flange.getPropertyStatus("length")],
+}}
+''',
+    )
+    assert {"Dynamic", "21"}.intersection(dynamic_before["result"]["status"])
+    await _call(
+        tools,
+        "spreadsheet_apply_batch",
+        spreadsheet_name="FlangeParameters",
+        cells=[{"cell": "A1", "value": 18.0}],
+        doc_name=doc,
+    )
+    dynamic_after = await _call(
+        tools,
+        "execute_python",
+        code=f'''
+flange = FreeCAD.getDocument({doc!r}).getObject("EdgeFlange")
+_result_ = {{
+    "hash": int(flange.Shape.hashCode()),
+    "length": float(flange.length.Value),
+}}
+''',
+    )
+    assert dynamic_after["result"]["hash"] != dynamic_before["result"]["hash"]
+    assert dynamic_after["result"]["length"] == pytest.approx(18.0)
+
+    validation = await _assert_valid_model(
+        tools, doc, ["BlankWidth", "BlankDepth", "FlangeLength"]
+    )
     usage = {
         item["name"]: item["status"]
         for item in validation["dimension_inventory"]["usage"]
     }
-    assert usage == {"BlankWidth": "solid_driving", "BlankDepth": "solid_driving"}
+    assert usage == {
+        "BlankWidth": "solid_driving",
+        "BlankDepth": "solid_driving",
+        "FlangeLength": "solid_driving",
+    }
 
 
 @pytest.mark.asyncio
@@ -747,40 +804,9 @@ _result_ = {{"tip": body.Tip.Name, "is_base": body.Tip is doc.getObject("FoldBas
         )
     await _assert_tip_and_absence(tools, doc, "SketchFold", "RejectedFoldReference")
 
-    # Sheet-metal holes are flat-domain features. A late PartDesign::Hole is
-    # rejected before feature creation and cannot move the formed Tip.
-    await _call(
-        tools,
-        "create_sketch",
-        body_name="Body",
-        support={"kind": "origin_plane", "plane": "XY_Plane"},
-        name="LateSheetHoleSketch",
-        doc_name=doc,
-    )
-    await _call(
-        tools,
-        "edit_sketch_geometry",
-        sketch_name="LateSheetHoleSketch",
-        operations=[
-            {"op": "add_circle", "center_x": 10.0, "center_y": 10.0, "radius": 2.0}
-        ],
-        doc_name=doc,
-    )
-    with pytest.raises(ValueError, match="flat blank sketch before"):
-        await _call(
-            tools,
-            "create_hole",
-            sketch_name="LateSheetHoleSketch",
-            diameter=4.0,
-            hole_type="ThroughAll",
-            name="RejectedLateSheetHole",
-            doc_name=doc,
-        )
-    await _assert_tip_and_absence(tools, doc, "SketchFold", "RejectedLateSheetHole")
-
     # Native SheetMetal proxy parameters are Dynamic FreeCAD properties, but
     # they are genuine shape-driving endpoints. The validator must accept the
-    # narrow known-property set without weakening arbitrary metadata checks.
+    # proxy-specific known-property set without weakening arbitrary metadata.
     await _call(tools, "spreadsheet_create", name="FoldParameters", doc_name=doc)
     await _call(
         tools,
@@ -879,6 +905,58 @@ _result_ = {{
         item["influence_reason"]
         == "recognized native SheetMetal geometry-driving property"
         for item in fold_bindings
+    )
+
+    # A post-bend subtractive feature is permitted and is classified explicitly.
+    # Flat-domain holes remain the preferred design order, but the API must not
+    # locally accept one subtractive tool and reject an equivalent one later.
+    cut = await _call(
+        tools,
+        "create_cylindrical_cut",
+        body_name="Body",
+        axis_origin=[25.0, 20.0, 2.0],
+        axis_direction=[0.0, 0.0, -1.0],
+        diameter=4.0,
+        depth=4.0,
+        direction="forward",
+        name="LateCylindricalCut",
+        doc_name=doc,
+    )
+    assert cut["validated"] is True
+    cut_inspection = await _call(
+        tools, "inspect_sheet_metal", object_name="LateCylindricalCut", doc_name=doc
+    )
+    assert cut_inspection["native_sheet_metal_history"] is True
+    assert cut_inspection["sheet_metal_history_classification"] == (
+        "native_with_supported_subtractive_tail"
+    )
+    assert [
+        item["name"]
+        for item in cut_inspection["history_evidence"][
+            "supported_subtractive_features"
+        ]
+    ] == ["LateCylindricalCut"]
+    assert cut_inspection["unfold_ready"] is True
+
+    verification = await _call(
+        tools,
+        "unfold_sheet_metal",
+        feature_name="LateCylindricalCut",
+        stationary_face=cut_inspection["stationary_face_candidates"][0]["face"],
+        material={"k_factor": 0.40, "standard": "ansi"},
+        verification_only=True,
+        name="LateCutVerification",
+        doc_name=doc,
+    )
+    assert verification["validated"] is True
+    assert verification["rolled_back"] is True
+    assert verification["remaining_generated_objects"] == []
+    assert any(
+        item["circle_count"] >= 2
+        for item in verification["verification_evidence"]["generated_sketches"]
+    )
+    await _assert_tip_and_absence(
+        tools, doc, "LateCylindricalCut", "LateCutVerification"
     )
 
 
