@@ -329,38 +329,46 @@ async def test_upstream_reference_l_profile_unfolds_to_100_mm_blank(
         generate_sketch=True,
         separate_layers=True,
         show_bend_angles=True,
+        verification_only=True,
         name="ReferenceFlatPattern",
         doc_name=doc,
     )
     assert unfolded["validated"] is True
     assert unfolded["material_source"] == "manual_k_factor"
     assert unfolded["generated_sketches"]
-    assert unfolded["view"]["visible"] is True
-    assert unfolded["view"]["display_mode"] != "None"
+    assert unfolded["verification_only"] is True
+    assert unfolded["persisted"] is False
+    assert unfolded["rolled_back"] is True
+    assert unfolded["remaining_generated_objects"] == []
     assert unfolded["view_provider"] == "SMUnfoldViewProvider"
 
-    bounds = await _call(
+    flat_evidence = unfolded["verification_evidence"]["flat_shape"]
+    assert flat_evidence["valid"] is True
+    assert flat_evidence["solid_count"] == 1
+    dimensions = sorted(flat_evidence["bounds"]["size"])
+    # Two 50 mm mold-line legs develop into one 100 mm blank (upstream invariant).
+    assert dimensions[-1] == pytest.approx(100.0, abs=0.05)
+
+    rolled_back = await _call(
         tools,
         "execute_python",
         code=f"""
 doc = FreeCAD.getDocument({doc!r})
-shape = doc.getObject("ReferenceFlatPattern").Shape
 _result_ = {{
-    "valid": bool(shape.isValid()),
-    "solids": len(shape.Solids),
-    "dimensions": sorted([
-        float(shape.BoundBox.XLength),
-        float(shape.BoundBox.YLength),
-        float(shape.BoundBox.ZLength),
-    ]),
+    "tip": doc.getObject("Body").Tip.Name,
+    "unfold_exists": doc.getObject("ReferenceFlatPattern") is not None,
+    "remaining": [
+        name for name in {unfolded['rolled_back_objects']!r}
+        if doc.getObject(name) is not None
+    ],
 }}
 """,
     )
-    bounds = bounds["result"]
-    assert bounds["valid"] is True
-    assert bounds["solids"] == 1
-    # Two 50 mm mold-line legs develop into one 100 mm blank (upstream invariant).
-    assert bounds["dimensions"][-1] == pytest.approx(100.0, abs=0.05)
+    assert rolled_back["result"] == {
+        "tip": "ReferenceLProfile",
+        "unfold_exists": False,
+        "remaining": [],
+    }
 
     validation = await _assert_valid_model(
         tools, doc, ["VerticalFlangeLength", "HorizontalFlangeLength"]
@@ -373,6 +381,8 @@ _result_ = {{
         "VerticalFlangeLength": "solid_driving",
         "HorizontalFlangeLength": "solid_driving",
     }
+    assert validation["counts"]["uncontained_shape_objects"] == 0
+    assert validation["counts"]["standalone_sketches"] == 0
 
 
 @pytest.mark.asyncio
@@ -736,6 +746,140 @@ _result_ = {{"tip": body.Tip.Name, "is_base": body.Tip is doc.getObject("FoldBas
             doc_name=doc,
         )
     await _assert_tip_and_absence(tools, doc, "SketchFold", "RejectedFoldReference")
+
+    # Sheet-metal holes are flat-domain features. A late PartDesign::Hole is
+    # rejected before feature creation and cannot move the formed Tip.
+    await _call(
+        tools,
+        "create_sketch",
+        body_name="Body",
+        support={"kind": "origin_plane", "plane": "XY_Plane"},
+        name="LateSheetHoleSketch",
+        doc_name=doc,
+    )
+    await _call(
+        tools,
+        "edit_sketch_geometry",
+        sketch_name="LateSheetHoleSketch",
+        operations=[
+            {"op": "add_circle", "center_x": 10.0, "center_y": 10.0, "radius": 2.0}
+        ],
+        doc_name=doc,
+    )
+    with pytest.raises(ValueError, match="flat blank sketch before"):
+        await _call(
+            tools,
+            "create_hole",
+            sketch_name="LateSheetHoleSketch",
+            diameter=4.0,
+            hole_type="ThroughAll",
+            name="RejectedLateSheetHole",
+            doc_name=doc,
+        )
+    await _assert_tip_and_absence(tools, doc, "SketchFold", "RejectedLateSheetHole")
+
+    # Native SheetMetal proxy parameters are Dynamic FreeCAD properties, but
+    # they are genuine shape-driving endpoints. The validator must accept the
+    # narrow known-property set without weakening arbitrary metadata checks.
+    await _call(tools, "spreadsheet_create", name="FoldParameters", doc_name=doc)
+    await _call(
+        tools,
+        "spreadsheet_apply_batch",
+        spreadsheet_name="FoldParameters",
+        cells=[
+            {"cell": "A1", "value": 75.0},
+            {"cell": "A2", "value": 0.42},
+        ],
+        aliases=[
+            {"cell": "A1", "alias": "DIM_BEND_ANGLE"},
+            {"cell": "A2", "alias": "DIM_K_FACTOR"},
+        ],
+        bindings=[
+            {
+                "alias": "DIM_BEND_ANGLE",
+                "target_object": "SketchFold",
+                "target_property": "angle",
+            },
+            {
+                "alias": "DIM_K_FACTOR",
+                "target_object": "SketchFold",
+                "target_property": "kfactor",
+            },
+        ],
+        doc_name=doc,
+    )
+    dynamic_before = await _call(
+        tools,
+        "execute_python",
+        code=f"""
+doc = FreeCAD.getDocument({doc!r})
+fold = doc.getObject("SketchFold")
+_result_ = {{
+    "hash": int(fold.Shape.hashCode()),
+    "angle_status": [str(value) for value in fold.getPropertyStatus("angle")],
+    "kfactor_status": [str(value) for value in fold.getPropertyStatus("kfactor")],
+}}
+""",
+    )
+    assert {"Dynamic", "21"}.intersection(dynamic_before["result"]["angle_status"])
+    assert {"Dynamic", "21"}.intersection(
+        dynamic_before["result"]["kfactor_status"]
+    )
+
+    await _call(
+        tools,
+        "spreadsheet_apply_batch",
+        spreadsheet_name="FoldParameters",
+        cells=[
+            {"cell": "A1", "value": 70.0},
+            {"cell": "A2", "value": 0.40},
+        ],
+        doc_name=doc,
+    )
+    dynamic_after = await _call(
+        tools,
+        "execute_python",
+        code=f"""
+fold = FreeCAD.getDocument({doc!r}).getObject("SketchFold")
+_result_ = {{
+    "hash": int(fold.Shape.hashCode()),
+    "angle": float(fold.angle.Value),
+    "kfactor": float(fold.kfactor),
+}}
+""",
+    )
+    assert dynamic_after["result"]["hash"] != dynamic_before["result"]["hash"]
+    assert dynamic_after["result"]["angle"] == pytest.approx(70.0)
+    assert dynamic_after["result"]["kfactor"] == pytest.approx(0.40)
+
+    validation = await _call(
+        tools,
+        "validate_parametric_model",
+        doc_name=doc,
+        required_dimension_names=["DIM_BEND_ANGLE", "DIM_K_FACTOR"],
+        detail_level="full",
+    )
+    usage = {
+        item["name"]: item["status"]
+        for item in validation["dimension_inventory"]["usage"]
+    }
+    assert usage == {
+        "DIM_BEND_ANGLE": "solid_driving",
+        "DIM_K_FACTOR": "solid_driving",
+    }
+    fold_bindings = [
+        item
+        for item in validation["expression_bindings"]
+        if item["object"] == "SketchFold"
+        and item["property"] in {"angle", "kfactor"}
+    ]
+    assert len(fold_bindings) == 2
+    assert all(item["solid_driving"] for item in fold_bindings)
+    assert all(
+        item["influence_reason"]
+        == "recognized native SheetMetal geometry-driving property"
+        for item in fold_bindings
+    )
 
 
 @pytest.mark.asyncio

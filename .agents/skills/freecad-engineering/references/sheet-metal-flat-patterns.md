@@ -73,6 +73,10 @@ Do not mix these domains. In particular:
   fully dimensioned flat pattern;
 - do not place a hole at the same world coordinates after folding. A hole belongs
   to a panel and its center and axis transform with that panel.
+- encode every hole/cutout in the source flat blank sketch before creating the
+  first native SheetMetal feature. Do not add a PartDesign Hole/Pocket after
+  bending. Generated Unfold sketches are inspection/export output, not inputs to
+  the formed Body history.
 
 ## 5. Build a panel-and-bend graph
 

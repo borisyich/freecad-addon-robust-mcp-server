@@ -2702,6 +2702,11 @@ _result_ = {{
         Hole in that configuration. Use ``create_cylindrical_cut`` for radial,
         tangent-plane, or otherwise off-face cylindrical cuts.
 
+        This tool deliberately rejects a Body that already contains native
+        SheetMetal proxies. For a sheet-metal design, put hole/cutout geometry
+        in the source flat blank sketch before ``create_sheet_metal_base`` so it
+        remains a flat-domain feature and transforms with its panel.
+
         Args:
             sketch_name: Name of an unused sketch with hole-location circles.
                 Prefer attachment to ``Object.FaceN`` of the solid being cut.
@@ -2815,6 +2820,36 @@ if sketch.TypeId != "Sketcher::SketchObject":
 body = _find_body_containing_object(doc, sketch)
 if body is None:
     raise ValueError("Sketch must belong to a PartDesign Body")
+
+# A SheetMetal part must receive holes/cutouts in its flat-domain blank sketch
+# before create_sheet_metal_base. Appending PartDesign::Hole after native bends
+# breaks the manufacturing history contract and can make unfold evidence depend
+# on an ad-hoc post-formed reconstruction.
+native_sheet_metal_features = []
+for item in list(getattr(body, "Group", []) or []):
+    proxy_type = type(getattr(item, "Proxy", None)).__name__
+    if proxy_type in {{
+        "SMBaseBend",
+        "SMBendWall",
+        "SMFoldWall",
+        "SMJunction",
+        "SMRelief",
+        "SMCornerRelief",
+        "SMExtendWall",
+        "SMExtrudeWall",
+        "SMHem",
+        "SMSolidBend",
+        "SMFromSolid",
+    }}:
+        native_sheet_metal_features.append(item.Name)
+if native_sheet_metal_features:
+    raise ValueError(
+        "create_hole cannot append a PartDesign Hole to a native SheetMetal "
+        "Body. Define hole circles/cutouts in the flat blank sketch before "
+        "create_sheet_metal_base so they remain flat-domain features and move "
+        "with their panels. Native SheetMetal history: "
+        + ", ".join(native_sheet_metal_features)
+    )
 
 # A profile sketch is single-use in a PartDesign history. Reusing it creates
 # ambiguous dependencies and frequently leaves invalid/no-op Hole features.

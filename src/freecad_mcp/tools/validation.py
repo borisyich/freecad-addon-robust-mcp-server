@@ -94,6 +94,7 @@ def _parametric_response(
         },
         "findings": finding_page,
         "finding_pagination": pagination,
+        "completion_guidance": report.get("completion_guidance", {}),
         "limitations": report.get("limitations", []),
     }
     if detail_level == "structure":
@@ -430,7 +431,13 @@ else:
 
         The tool does not verify that the model matches a drawing or that the
         chosen manufacturing process is correct. Those remain separate visual,
-        dimensional, and engineering checks.
+        dimensional, and engineering checks. Do not bulk-delete or recreate an
+        accepted sketch constraint graph solely to improve this diagnostic;
+        inspect the existing dependency path or report a tracing limitation.
+
+        Dynamic/custom properties remain non-driving metadata by default. The
+        narrow exception is the known geometry-property set on recognized native
+        SheetMetal FeaturePython proxies.
 
         Args:
             doc_name: Document to inspect. Uses the active document when omitted.

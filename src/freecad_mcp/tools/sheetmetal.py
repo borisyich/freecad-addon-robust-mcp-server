@@ -373,7 +373,6 @@ def _sm_unfold_history_evidence(base):
         and type(getattr(item, "Proxy", None)).__name__.startswith("SM")
     ]
     unsupported = []
-    supported_subtractive = []
     if native_indexes:
         first_native = min(native_indexes)
         last_native = max(native_indexes)
@@ -400,19 +399,19 @@ def _sm_unfold_history_evidence(base):
                         if index < last_native
                         else "after_last_native"
                     ),
+                    "reason": (
+                        "sheet_metal_flat_domain_cut_required"
+                        if subtractive
+                        else "unsupported_shape_producing_feature"
+                    ),
                 }
-                if subtractive and index > last_native:
-                    supported_subtractive.append(evidence)
-                else:
-                    unsupported.append(evidence)
+                unsupported.append(evidence)
     if not native_indexes:
         classification = "no_native"
     elif any(item["position"] == "interleaved_before_later_native" for item in unsupported):
         classification = "mixed_interleaved_history"
     elif unsupported:
         classification = "unsupported_post_native_history"
-    elif supported_subtractive:
-        classification = "native_with_supported_subtractive_tail"
     else:
         classification = "native_linear_history"
     active_history = []
@@ -433,7 +432,9 @@ def _sm_unfold_history_evidence(base):
         "classification": classification,
         "native_feature_names": [items[index].Name for index in native_indexes],
         "active_history": active_history,
-        "supported_subtractive_features": supported_subtractive,
+        # Kept as an empty compatibility field. Sheet-metal holes/cutouts must
+        # be defined in the flat blank sketch, not appended after native bends.
+        "supported_subtractive_features": [],
         "unsupported_shape_features": unsupported,
         # Backwards-compatible alias. Unlike the old implementation this now
         # includes unsupported interleaved features, not only the final tail.
@@ -863,6 +864,7 @@ except Exception:
         generate_sketch: bool = True,
         separate_layers: bool = True,
         show_bend_angles: bool = True,
+        verification_only: bool = False,
         name: str = "Unfold",
         doc_name: str | None = None,
     ) -> dict[str, Any]:
@@ -871,8 +873,10 @@ except Exception:
         ``stationary_face`` must be a planar face selected semantically on the
         formed feature. ``material`` requires exactly one explicit source:
         manual K-factor plus ANSI/DIN convention, or a workbench material
-        Spreadsheet. The unfold is intentionally outside the PartDesign Body,
-        preserving the formed Body Tip as the manufactured-part history.
+        Spreadsheet. A persistent unfold is intentionally outside the
+        PartDesign Body, preserving the formed Body Tip as the manufactured-part
+        history. With ``verification_only=True`` the tool captures flat-shape
+        and generated-sketch evidence, then rolls back every generated object.
         """
         normalized_material = (
             material
@@ -886,7 +890,10 @@ import FreeCAD
 {_SHEET_METAL_RUNTIME_HELPERS}
 doc = _sm_document({doc_name!r})
 material = {payload!r}
+verification_only = {bool(verification_only)!r}
+preexisting_names = {{obj.Name for obj in doc.Objects}}
 doc.openTransaction("Unfold Sheet Metal")
+transaction_open = True
 try:
     _sm_require_workbench()
     base = _sm_object(doc, {feature_name!r}, "Formed feature")
@@ -936,13 +943,94 @@ try:
         "spreadsheet" if material["material_sheet"] is not None else "manual_k_factor"
     )
     _result_["k_factor_standard"] = str(feature.KFactorStandard)
-    _result_["generated_sketches"] = list(feature.UnfoldSketches)
+    generated_sketch_names = [str(name) for name in list(feature.UnfoldSketches)]
+    generated_sketch_evidence = []
+    for sketch_name in generated_sketch_names:
+        sketch = doc.getObject(sketch_name)
+        if sketch is None:
+            continue
+        sketch_shape = getattr(sketch, "Shape", None)
+        geometry = list(getattr(sketch, "Geometry", []) or [])
+        generated_sketch_evidence.append({{
+            "name": sketch.Name,
+            "type_id": sketch.TypeId,
+            "geometry_count": len(geometry),
+            "geometry_types": [type(item).__name__ for item in geometry],
+            "circle_count": sum(
+                1 for item in geometry if "Circle" in type(item).__name__
+            ),
+            "wire_count": len(getattr(sketch_shape, "Wires", []) or []),
+            "visible": bool(getattr(getattr(sketch, "ViewObject", None), "Visibility", False)),
+        }})
+    flat_box = feature.Shape.BoundBox
+    _result_["verification_evidence"] = {{
+        "flat_shape": {{
+            "valid": bool(feature.Shape.isValid()),
+            "solid_count": len(feature.Shape.Solids),
+            "volume": float(feature.Shape.Volume),
+            "face_count": len(feature.Shape.Faces),
+            "bounds": {{
+                "min": [float(flat_box.XMin), float(flat_box.YMin), float(flat_box.ZMin)],
+                "max": [float(flat_box.XMax), float(flat_box.YMax), float(flat_box.ZMax)],
+                "size": [float(flat_box.XLength), float(flat_box.YLength), float(flat_box.ZLength)],
+            }},
+        }},
+        "generated_sketches": generated_sketch_evidence,
+    }}
+    _result_["generated_sketches"] = generated_sketch_names
     _result_["view_provider"] = _result_view_provider
     _result_["history_evidence"] = history_evidence
+    _result_["verification_only"] = verification_only
+    _result_["persisted"] = not verification_only
     _sm_set_visibility(base, True)
-    doc.commitTransaction()
+    if verification_only:
+        created_unfold_name = feature.Name
+        created_names = [
+            obj.Name for obj in doc.Objects if obj.Name not in preexisting_names
+        ]
+        doc.abortTransaction()
+        transaction_open = False
+        doc.recompute()
+        remaining = [name for name in created_names if doc.getObject(name) is not None]
+        if remaining:
+            # Some FreeCAD/Workbench combinations create recompute-side helper
+            # objects outside the original transaction. Remove only objects
+            # proven new relative to the pre-verification document snapshot.
+            doc.openTransaction("Clean verification-only Sheet Metal Unfold")
+            try:
+                ordered_cleanup = []
+                if created_unfold_name in remaining:
+                    ordered_cleanup.append(created_unfold_name)
+                ordered_cleanup.extend(
+                    name for name in reversed(remaining) if name != created_unfold_name
+                )
+                for object_name in ordered_cleanup:
+                    if doc.getObject(object_name) is not None:
+                        doc.removeObject(object_name)
+                doc.recompute()
+                remaining = [
+                    name for name in created_names if doc.getObject(name) is not None
+                ]
+                if remaining:
+                    raise RuntimeError(
+                        "Verification-only unfold cleanup left objects: "
+                        + ", ".join(remaining)
+                    )
+                doc.commitTransaction()
+            except Exception:
+                doc.abortTransaction()
+                raise
+        _sm_set_visibility(base, True)
+        _result_["rolled_back"] = True
+        _result_["rolled_back_objects"] = created_names
+        _result_["remaining_generated_objects"] = []
+    else:
+        doc.commitTransaction()
+        transaction_open = False
+        _result_["rolled_back"] = False
 except Exception:
-    doc.abortTransaction()
+    if transaction_open:
+        doc.abortTransaction()
     raise
 """
         result = await bridge.execute_python(code)

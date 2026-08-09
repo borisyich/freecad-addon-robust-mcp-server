@@ -1091,7 +1091,7 @@ subtractive helices.
 
 #### create_hole
 
-Create parametric holes with optional threading and strict post-validation. Use a new sketch containing only non-construction circles. Prefer attachment to an actual planar solid face such as `Pad_Base.Face8`; origin planes are allowed but may be ambiguous in a complex Body. Datum-plane sketches are rejected because `PartDesign::Hole` can become a geometrically ineffective no-op in FreeCAD 1.0.x. Use `create_cylindrical_cut` for radial or off-face holes.
+Create parametric holes with optional threading and strict post-validation. Use a new sketch containing only non-construction circles. Prefer attachment to an actual planar solid face such as `Pad_Base.Face8`; origin planes are allowed but may be ambiguous in a complex Body. Datum-plane sketches are rejected because `PartDesign::Hole` can become a geometrically ineffective no-op in FreeCAD 1.0.x. Use `create_cylindrical_cut` for radial or off-face holes. A Body containing native SheetMetal proxies is rejected before feature creation: sheet-metal holes/cutouts must be drawn in the source flat blank sketch before `create_sheet_metal_base`, so they transform with their panel and remain visible in native unfold evidence.
 
 The call rolls back unless the result is one valid solid, body volume decreases,
 and geometric probes confirm that material was removed at every profile-circle
@@ -1386,8 +1386,11 @@ visibility/display evidence, warnings, and up to eight planar
 least one native proxy exists. The stronger `native_sheet_metal_history` means
 the complete active history from the first native proxy through the inspected
 object is supported; `sheet_metal_history_classification` distinguishes a
-linear history, a supported subtractive tail, unsupported post-native geometry,
-and an unsupported interleaved history that later re-enters a native proxy.
+linear history, unsupported post-native geometry, and an unsupported
+interleaved history that later re-enters a native proxy. Post-native Hole,
+Pocket, Groove, and other subtractive features are also unsupported: holes and
+cutouts belong in the source flat blank sketch before the first native
+SheetMetal feature.
 `unfold_ready` is false when the object is not the current Body Tip, lacks a
 supported native history, has a missing ViewProvider, or contains unsupported
 shape-producing features anywhere in that active interval. Use a
@@ -1422,6 +1425,7 @@ unfold_sheet_metal(
     generate_sketch: bool = True,
     separate_layers: bool = True,
     show_bend_angles: bool = True,
+    verification_only: bool = False,
     name: str = "Unfold",
     doc_name: str | None = None,
 ) -> dict
@@ -1432,8 +1436,14 @@ explicit ANSI or DIN convention; production workflows may instead name a real
 `Spreadsheet::Sheet` material table. The stationary face must resolve to a
 planar face. The input must be the current Body Tip and retain a native
 sheet-metal history; ad-hoc additive PartDesign reconstruction is rejected.
-The result reports its material source, generated sketch objects,
-and geometric validation evidence.
+The result reports its material source, generated sketch objects, and geometric
+validation evidence. With `verification_only=True`, the native Unfold is fully
+computed first, then the response captures flat validity/solids/volume/bounds
+and generated-sketch geometry types, circle count, and wire count. The tool
+rolls back the Unfold plus every newly generated helper object and verifies that
+none remain. Use this mode before final `validate_parametric_model`; leave the
+default persistent mode only when the saved document must retain an editable or
+exportable flat pattern.
 
 ### Example: upstream 100 mm L-profile flat pattern
 
@@ -1463,6 +1473,7 @@ flat = await unfold_sheet_metal(
     feature_name="ReferenceLProfile",
     stationary_face=inspection["stationary_face_candidates"][0]["face"],
     material={"k_factor": 0.38, "standard": "ansi"},
+    verification_only=True,
     generate_sketch=True,
     separate_layers=True,
     show_bend_angles=True,
@@ -1966,10 +1977,23 @@ example `0 * (Parameters.Width + Parameters.Height)`) are also reported as
 non-driving; they cannot be used as an audit-only expression bridge. This is a
 targeted structural guard, not a complete symbolic algebra proof.
 
+FreeCAD marks custom properties as `Dynamic`, which normally remains a reason
+to reject metadata-only expression endpoints. Native SheetMetal proxies are a
+narrow exception: on known `SMBaseBend`, `SMBendWall`, `SMFoldWall`, relief,
+hem, bend, extend, and from-solid proxies, the known geometry properties
+`Thickness`, `Radius`, `radius`, `angle`, and `kfactor` count as solid-driving
+when the feature is in the active Tip dependency graph. Arbitrary Dynamic
+properties—even on the same object—remain untrusted.
+
 Before final completion, investigate every unused Spreadsheet alias: connect it
 to the tree if it was intended to drive geometry, or remove it if it is
 redundant. A clean final report must not contain missing/unlinked required
 dimensions or unused Spreadsheet parameters.
+Do not bulk-delete or recreate an accepted sketch constraint graph solely to
+change this diagnostic. Inspect the existing dependency path, bind the semantic
+feature property when appropriate, or preserve the accepted geometry and report
+a tracing limitation. The compact response repeats this non-destructive policy
+in `completion_guidance.non_destructive_remediation`.
 
 ### Other validation tools
 

@@ -1216,6 +1216,8 @@ class TestPartDesignTools:
         assert 'support_type == "PartDesign::Plane"' in generated_code
         assert "create_cylindrical_cut" in generated_code
         assert "circle_probe_volumes" in generated_code
+        assert "native_sheet_metal_features" in generated_code
+        assert "flat blank sketch before" in generated_code
         mock_bridge.execute_python.assert_awaited_once()
 
     @pytest.mark.asyncio

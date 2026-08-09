@@ -341,6 +341,39 @@ def _active_solid_dependency_names(doc):
     return names
 
 
+def _native_sheet_metal_geometry_property(obj, property_name):
+    """Recognize dynamic properties consumed by known native SM proxies.
+
+    SheetMetal features are ``PartDesign::FeaturePython`` objects, so their
+    genuine geometry parameters carry FreeCAD's Dynamic property status.  This
+    narrow proxy/property allowlist distinguishes those endpoints from arbitrary
+    custom metadata attached to an otherwise shape-producing feature.
+    """
+    if getattr(obj, "TypeId", "") != "PartDesign::FeaturePython":
+        return False
+    proxy_type = type(getattr(obj, "Proxy", None)).__name__
+    native_proxy_types = {
+        "SMBaseBend",
+        "SMBendWall",
+        "SMFoldWall",
+        "SMJunction",
+        "SMRelief",
+        "SMCornerRelief",
+        "SMExtendWall",
+        "SMExtrudeWall",
+        "SMHem",
+        "SMSolidBend",
+        "SMFromSolid",
+    }
+    geometry_properties = {"Thickness", "Radius", "radius", "angle", "kfactor"}
+    root_property = str(property_name).lstrip(".").split(".", 1)[0]
+    return (
+        proxy_type in native_proxy_types
+        and root_property in geometry_properties
+        and hasattr(obj, root_property)
+    )
+
+
 def _expression_binding_solid_influence(obj, property_name, active_object_names):
     type_id = getattr(obj, "TypeId", "")
     name = getattr(obj, "Name", None)
@@ -370,15 +403,21 @@ def _expression_binding_solid_influence(obj, property_name, active_object_names)
     if type_id.startswith("PartDesign::") and not any(
         token in type_id for token in ("Plane", "Line", "Point", "CoordinateSystem", "Body")
     ):
+        status_property = str(property_name).lstrip(".").split(".", 1)[0]
         status_getter = getattr(obj, "getPropertyStatus", None)
         if callable(status_getter):
             try:
-                raw_status = list(status_getter(property_name) or [])
+                raw_status = list(status_getter(status_property) or [])
             except Exception:
                 raw_status = []
             # FreeCAD Python may expose the Dynamic enum as its numeric index
             # (21) instead of the label, depending on the bridge serializer.
             if any(item == 21 or str(item) == "Dynamic" for item in raw_status):
+                if _native_sheet_metal_geometry_property(obj, property_name):
+                    return (
+                        True,
+                        "recognized native SheetMetal geometry-driving property",
+                    )
                 return False, "expression is attached to a dynamic/custom metadata property"
         return True, None
     return False, "expression endpoint is not a shape-producing active feature"
@@ -1172,7 +1211,10 @@ else:
                         f"Required drawing dimension {item['name']!r} exists but does "
                         "not have a verified influence on the active final solid. "
                         "Construction-only constraints, inactive sketches, datum "
-                        "objects, and metadata links do not satisfy this check."
+                        "objects, and metadata links do not satisfy this check. "
+                        "Do not delete or rebuild an accepted sketch constraint graph "
+                        "solely to change this diagnostic; inspect the existing "
+                        "dependency path and prefer a semantic feature-property binding."
                     ),
                 }
             )
@@ -1371,6 +1413,12 @@ else:
         "findings": findings,
         "completion_guidance": {
             "required_before_user_response": True,
+            "non_destructive_remediation": (
+                "Do not bulk-delete or recreate accepted sketch constraints solely "
+                "to optimize validation status. Diagnose the existing dependency "
+                "path, bind the owning semantic feature property when appropriate, "
+                "or report a remaining diagnostic limitation."
+            ),
             "report": [
                 "document and Body names",
                 "Body and Tip validity",

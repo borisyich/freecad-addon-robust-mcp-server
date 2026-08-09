@@ -438,7 +438,7 @@ SheetMetal GUI ViewProvider, so the result remains visible and inspectable.
 | `sheet_metal_capabilities` | Report workbench version and native operation availability | All |
 | `create_sheet_metal_base` | Create a flat blank or open base-wall profile from a sketch | All |
 | `create_sheet_metal_feature` | Add typed flanges, folds, hems, reliefs, junctions, extensions, bends, or solid conversion | All |
-| `unfold_sheet_metal` | Create a parametric unfold using explicit neutral-axis data | All |
+| `unfold_sheet_metal` | Create or transactionally verify an unfold using explicit neutral-axis data | All |
 | `inspect_sheet_metal` | Inspect thickness, classified bends, full active history, and unfold readiness | All |
 
 #### View & Display (10 common tools)

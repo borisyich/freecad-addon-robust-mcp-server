@@ -196,6 +196,16 @@
 - Extended Spreadsheet bindings to native FreeCAD expression paths such as
   `Placement.Base.x` and `AttachmentOffset.Base.z`, including atomic batch
   snapshot/verification and live recomputation regressions.
+- Sheet-metal holes/cutouts now belong in the source flat blank sketch; 
+  post-native PartDesign Hole/Pocket tails are rejected.
+- Recognized known Dynamic SheetMetal proxy properties (`Thickness`, `Radius`,
+  `radius`, `angle`, and `kfactor`) as geometry-driving validator endpoints
+  without trusting arbitrary custom metadata.
+- Added `unfold_sheet_metal(verification_only=True)`: it returns native flat
+  shape and generated-sketch evidence, then transactionally removes the Unfold
+  and all newly generated helpers while preserving the formed Body Tip.
+- Added non-destructive validator guidance so an accepted sketch constraint
+  graph is not bulk-rebuilt merely to optimize a final diagnostic.
 
 This project uses **component-specific versioning**. Each component has its own
 release notes and version history.

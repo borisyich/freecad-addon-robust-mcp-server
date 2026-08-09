@@ -402,7 +402,46 @@ async def test_unfold_keeps_formed_body_and_uses_explicit_manual_rule(
     assert "items[max(native_indexes) + 1:]" not in code
     assert "first_native = min(native_indexes)" in code
     assert 'classification = "mixed_interleaved_history"' in code
+    assert '"sheet_metal_flat_domain_cut_required"' in code
+    assert "supported_subtractive.append" not in code
     assert '"SheetMetalUnfoldCmd", "SMUnfoldViewProvider"' in code
+
+
+@pytest.mark.asyncio
+async def test_verification_only_unfold_returns_evidence_and_removes_new_objects(
+    registered_tools, mock_bridge
+):
+    """Verification mode captures flat evidence and leaves no document objects."""
+    expected = {
+        "validated": True,
+        "verification_only": True,
+        "persisted": False,
+        "rolled_back": True,
+        "remaining_generated_objects": [],
+        "verification_evidence": {
+            "flat_shape": {"valid": True, "solid_count": 1},
+            "generated_sketches": [{"name": "Check_Sketch", "circle_count": 2}],
+        },
+    }
+    mock_bridge.execute_python.return_value = _success(expected)
+
+    result = await registered_tools["unfold_sheet_metal"](
+        feature_name="Fold",
+        stationary_face="Face1",
+        material={"k_factor": 0.38, "standard": "ansi"},
+        verification_only=True,
+        name="CheckOnly",
+    )
+    code = mock_bridge.execute_python.await_args.args[0]
+
+    assert result == expected
+    assert "verification_only = True" in code
+    assert "doc.abortTransaction()" in code
+    assert "obj.Name not in preexisting_names" in code
+    assert "doc.removeObject(object_name)" in code
+    assert '"verification_evidence"' in code
+    assert '"rolled_back_objects"' in code
+    assert '"remaining_generated_objects"' in code
 
 
 @pytest.mark.asyncio

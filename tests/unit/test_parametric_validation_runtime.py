@@ -325,6 +325,36 @@ def test_generated_report_describes_body_tip_history_and_sketch(monkeypatch) -> 
     assert drives_solid is False
     assert reason == "expression is attached to a dynamic/custom metadata property"
 
+    status_queries = []
+    pad.getPropertyStatus = lambda name: status_queries.append(name) or [21]
+    drives_solid, reason = namespace["_expression_binding_solid_influence"](
+        pad, ".AuditOnlyLength.Value", {"Pad"}
+    )
+    assert status_queries[-1] == "AuditOnlyLength"
+    assert drives_solid is False
+    assert reason == "expression is attached to a dynamic/custom metadata property"
+
+    class SMFoldWall:
+        pass
+
+    pad.TypeId = "PartDesign::FeaturePython"
+    pad.Proxy = SMFoldWall()
+    pad.angle = 75.0
+    drives_solid, reason = namespace["_expression_binding_solid_influence"](
+        pad, "angle", {"Pad"}
+    )
+    assert drives_solid is True
+    assert reason == "recognized native SheetMetal geometry-driving property"
+
+    # The exception is deliberately narrow: arbitrary Dynamic metadata on the
+    # same proxy must still be rejected.
+    pad.AuditOnlyLength = 10.0
+    drives_solid, reason = namespace["_expression_binding_solid_influence"](
+        pad, "AuditOnlyLength", {"Pad"}
+    )
+    assert drives_solid is False
+    assert reason == "expression is attached to a dynamic/custom metadata property"
+
     # Regression for the exact neutral-expression bridge used in the supplied log.
     expression = (
         "Params.ProfileRadiusR25 + 0 * (Params.SheetThickness + Params.Width) "

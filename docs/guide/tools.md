@@ -154,7 +154,7 @@ and display-mode evidence.
 | `sheet_metal_capabilities` | Report installed SheetMetal version and availability of every wrapped native operation. |
 | `create_sheet_metal_base` | Create a native flat blank or open base-wall profile from a Sketcher sketch with explicit thickness and bend radius. |
 | `create_sheet_metal_feature` | Create a typed native flange, sketch-line fold, junction, relief, corner relief, extend, hem, solid bend, or solid-to-sheet conversion. |
-| `unfold_sheet_metal` | Create a parametric flat pattern from a planar stationary face and an explicit K-factor/standard or material Spreadsheet. |
+| `unfold_sheet_metal` | Create or verification-roll back a parametric flat pattern from a planar stationary face and explicit material data. |
 | `inspect_sheet_metal` | Report full active-history classification, thickness evidence, planar stationary-face candidates, classified bend zones, Body Tip, and unfold readiness. |
 
 Recommended sequence:
@@ -165,7 +165,9 @@ Recommended sequence:
    Do not reduce the source to only the largest panel.
 3. Create and fully constrain the base sketch, then call
    `create_sheet_metal_base`. A closed sketch represents a flat blank; an
-   open wire represents a wall profile.
+   open wire represents a wall profile. Put every sheet-metal hole and cutout in
+   this source flat blank sketch; do not append PartDesign Hole/Pocket features
+   after native bends.
 4. Use `select_subshapes` to resolve the intended topology. Pass those exact
    references to `create_sheet_metal_feature`; never guess `EdgeN`, `FaceN`, or
    `VertexN`.
@@ -173,7 +175,9 @@ Recommended sequence:
    expected panel normal and silhouette. The next operation must use the current
    Body Tip as `base_feature`.
 6. Call `inspect_sheet_metal`, choose a planar stationary face from evidence,
-   and create the manufacturing representation with `unfold_sheet_metal`.
+   and create the manufacturing representation with `unfold_sheet_metal`. For a
+   final check, prefer `verification_only=True`: it returns geometric/sketch
+   evidence and removes the temporary Unfold before structural validation.
 7. Compare the unfold outline, bend lines, holes, and cutouts against the flat
    drawing. A successful unfold does not by itself prove shop-floor bend
    sequence, tooling access, or deep-draw manufacturability.
@@ -249,6 +253,10 @@ not a promise that the installed SheetMetal version can unfold every native
 history. In particular, SheetMetal 0.8.21 can form an open-box `SMFromSolid`
 conversion yet return `Wire is not closed`/a null shape for every stationary
 root. The MCP wrapper reports the failure and removes the attempted unfold.
+Persistent Unfold objects intentionally stay outside the formed Body and may
+therefore produce structural warnings. `verification_only=True` avoids that
+conflict while preserving flat bounds, solid/volume evidence, outline wires,
+geometry types, circle counts, and bend-layer evidence in the response.
 
 ## Spreadsheet
 
@@ -321,6 +329,13 @@ path without removing earlier valid bindings.
 | `validate_parametric_model` | Compact final diagnostic with expanded structure/full modes on request. |
 | `undo_if_invalid` | Check document health and undo the last operation if invalid objects exist. |
 | `safe_execute` | Execute Python code with automatic validation and rollback on failure. |
+
+The final validator is diagnostic, not a target for destructive model rewrites.
+It recognizes the known Dynamic geometry properties of native SheetMetal
+FeaturePython proxies while continuing to reject arbitrary custom metadata.
+Never bulk-delete/recreate an accepted sketch constraint graph merely to obtain
+a greener status; inspect the existing dependency path, bind the semantic
+feature owner, or report a tracing limitation.
 
 ## Export / Import
 

@@ -415,6 +415,9 @@ class TestValidationTools:
                 {"severity": "warning", "category": f"finding_{index}"}
                 for index in range(25)
             ],
+            "completion_guidance": {
+                "non_destructive_remediation": "Do not rebuild accepted constraints."
+            },
             "limitations": [],
         }
         mock_bridge.execute_python = AsyncMock(
@@ -441,6 +444,9 @@ class TestValidationTools:
             "sketch_match_count": 1,
             "spreadsheet_match_count": 0,
         }
+        assert result["completion_guidance"]["non_destructive_remediation"] == (
+            "Do not rebuild accepted constraints."
+        )
         assert len(json.dumps(result).encode("utf-8")) < 8_000
 
     @pytest.mark.asyncio
