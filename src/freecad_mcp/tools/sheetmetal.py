@@ -254,11 +254,13 @@ def _sm_validate_refs(base, refs, allowed_types):
     for ref in refs:
         try:
             subshape = base.getSubObject(ref)
+            if subshape is None or bool(getattr(subshape, "isNull", lambda: False)()):
+                raise ValueError(f"Cannot resolve {base.Name}.{ref}")
+            shape_type = getattr(subshape, "ShapeType", "")
         except Exception as exc:
+            if isinstance(exc, ValueError) and str(exc).startswith("Cannot resolve "):
+                raise
             raise ValueError(f"Cannot resolve {base.Name}.{ref}: {exc}") from exc
-        if subshape is None:
-            raise ValueError(f"Cannot resolve {base.Name}.{ref}")
-        shape_type = getattr(subshape, "ShapeType", "")
         if shape_type not in allowed_types:
             raise ValueError(
                 f"{base.Name}.{ref} is {shape_type or 'unknown'}, expected "
@@ -624,10 +626,33 @@ doc.openTransaction("Create Sheet Metal Feature")
 try:
     _sm_require_workbench()
     base = _sm_object(doc, operation["base_feature"], "Base feature")
-    feature, body = _sm_new_feature(doc, base, {feature_name!r}, True)
     op = operation["op"]
-    if op == "flange":
+    _sm_require_current_tip(base)
+    bend_line = None
+    extend_sketch = None
+    if op in {{"flange", "junction", "hem", "solid_bend"}}:
         refs = _sm_validate_refs(base, operation["edges"], {{"Edge"}})
+    elif op == "fold":
+        refs = _sm_validate_refs(base, [operation["face"]], {{"Face"}})
+        bend_line = _sm_object(doc, operation["bend_line_sketch"], "Bend-line sketch")
+        if not getattr(bend_line, "TypeId", "").startswith("Sketcher::"):
+            raise ValueError(f"{{bend_line.Name!r}} is not a Sketcher object")
+    elif op == "relief":
+        refs = _sm_validate_refs(base, operation["vertices"], {{"Vertex"}})
+    elif op == "corner_relief":
+        refs = _sm_validate_refs(base, operation["edges"], {{"Edge"}})
+    elif op == "extend":
+        refs = _sm_validate_refs(base, operation["subelements"], {{"Face", "Edge"}})
+        if operation["sketch"] is not None:
+            extend_sketch = _sm_object(doc, operation["sketch"], "Extend sketch")
+    elif op == "from_solid":
+        refs = _sm_validate_refs(
+            base, operation["remove_faces_and_rip_edges"], {{"Face", "Edge"}}
+        )
+    else:
+        raise ValueError(f"Unsupported sheet-metal operation: {{op}}")
+    feature, body = _sm_new_feature(doc, base, {feature_name!r}, True)
+    if op == "flange":
         from SheetMetalCmd import SMBendWall
         SMBendWall(feature, base, refs)
         _result_view_provider = _sm_attach_view_provider(
@@ -654,10 +679,6 @@ try:
         feature.reliefd = operation["relief_depth"]
         feature.AutoMiter = operation["auto_miter"]
     elif op == "fold":
-        refs = _sm_validate_refs(base, [operation["face"]], {{"Face"}})
-        bend_line = _sm_object(doc, operation["bend_line_sketch"], "Bend-line sketch")
-        if not getattr(bend_line, "TypeId", "").startswith("Sketcher::"):
-            raise ValueError(f"{{bend_line.Name!r}} is not a Sketcher object")
         from SheetMetalFoldCmd import SMFoldWall
         SMFoldWall(feature, base, refs, bend_line)
         _result_view_provider = _sm_attach_view_provider(
@@ -670,7 +691,6 @@ try:
         feature.invertbend = operation["invert_solid"]
         feature.Position = operation["position"].replace("_", " ")
     elif op == "junction":
-        refs = _sm_validate_refs(base, operation["edges"], {{"Edge"}})
         from SheetMetalJunction import SMJunction
         SMJunction(feature, base, refs)
         _result_view_provider = _sm_attach_view_provider(
@@ -678,7 +698,6 @@ try:
         )
         feature.gap = operation["gap"]
     elif op == "relief":
-        refs = _sm_validate_refs(base, operation["vertices"], {{"Vertex"}})
         from SheetMetalRelief import SMRelief
         SMRelief(feature, base, refs)
         _result_view_provider = _sm_attach_view_provider(
@@ -686,7 +705,6 @@ try:
         )
         feature.relief = operation["size"]
     elif op == "corner_relief":
-        refs = _sm_validate_refs(base, operation["edges"], {{"Edge"}})
         from SheetMetalCornerReliefCmd import SMCornerRelief
         SMCornerRelief(feature, base, refs)
         _result_view_provider = _sm_attach_view_provider(
@@ -702,12 +720,8 @@ try:
         feature.XOffset = operation["offset_x"]
         feature.YOffset = operation["offset_y"]
     elif op == "extend":
-        refs = _sm_validate_refs(base, operation["subelements"], {{"Face", "Edge"}})
-        sketch = None
-        if operation["sketch"] is not None:
-            sketch = _sm_object(doc, operation["sketch"], "Extend sketch")
         from SheetMetalExtendCmd import SMExtrudeWall
-        SMExtrudeWall(feature, base, refs, sketch)
+        SMExtrudeWall(feature, base, refs, extend_sketch)
         _result_view_provider = _sm_attach_view_provider(
             feature, "SheetMetalExtendCmd", "SMViewProviderTree", body=body
         )
@@ -719,7 +733,6 @@ try:
         feature.Offset = operation["clearance"]
         feature.Refine = operation["refine"]
     elif op == "hem":
-        refs = _sm_validate_refs(base, operation["edges"], {{"Edge"}})
         from SheetMetalHem import SMHem
         SMHem(feature, base, refs)
         _result_view_provider = _sm_attach_view_provider(
@@ -744,7 +757,6 @@ try:
         feature.reliefw = operation["relief_width"]
         feature.reliefd = operation["relief_depth"]
     elif op == "solid_bend":
-        refs = _sm_validate_refs(base, operation["edges"], {{"Edge"}})
         from SheetMetalBend import SMSolidBend
         SMSolidBend(feature, base, refs)
         _result_view_provider = _sm_attach_view_provider(
@@ -752,9 +764,6 @@ try:
         )
         feature.radius = operation["radius"]
     elif op == "from_solid":
-        refs = _sm_validate_refs(
-            base, operation["remove_faces_and_rip_edges"], {{"Face", "Edge"}}
-        )
         from SheetMetalFromSolid import SMFromSolid
         SMFromSolid(feature, base, refs)
         _result_view_provider = _sm_attach_view_provider(
@@ -763,8 +772,6 @@ try:
         feature.Thickness = operation["thickness"]
         feature.Radius = operation["radius"]
         feature.Invert = operation["invert"]
-    else:
-        raise ValueError(f"Unsupported sheet-metal operation: {{op}}")
     _result_ = _sm_finish(doc, feature, base, body)
     _result_["operation"] = op
     _result_["references"] = refs

@@ -813,6 +813,7 @@ try:
         body = doc.getObject({body_name!r})
         if body is None:
             raise ValueError(f"Body not found: {body_name!r}")
+        previous_tip = body.Tip
 
         # Add sketch to body
         sketch = body.newObject("Sketcher::SketchObject", sketch_name)
@@ -901,6 +902,12 @@ try:
             else:
                 sketch.Support = (support_object, [""])
             sketch.MapMode = "FlatFace"
+
+        # A construction/helper sketch must not replace an existing solid Tip.
+        # Current FreeCAD versions already preserve it, but make the contract
+        # explicit for bend-line sketches and across supported FreeCAD releases.
+        if previous_tip is not None and body.Tip is sketch:
+            body.Tip = previous_tip
     else:
         # Standalone sketch
         sketch = doc.addObject("Sketcher::SketchObject", sketch_name)
@@ -930,12 +937,17 @@ elif hasattr(sketch, "Support") and sketch.Support:
     supp_obj, sub_elems = sketch.Support
     support_info = f"{{supp_obj.Name}}.{{sub_elems[0]}}" if sub_elems and sub_elems[0] else supp_obj.Name
 
+parent_getter = getattr(sketch, "getParentGeoFeatureGroup", None)
+sketch_body = parent_getter() if callable(parent_getter) else None
+body_tip = getattr(sketch_body, "Tip", None)
+
 _result_ = {{
     "name": sketch.Name,
     "label": sketch.Label,
     "type_id": sketch.TypeId,
     "support": support_info,
     "support_kind": {support_kind!r},
+    "body_tip": getattr(body_tip, "Name", None),
 }}
 """
         result = await bridge.execute_python(code)

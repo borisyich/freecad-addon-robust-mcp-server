@@ -1362,6 +1362,11 @@ create_sheet_metal_feature(
 All topology strings are validated before the native proxy is constructed.
 For a Body feature, `base_feature` must be the current Tip. The tool then
 requires one valid non-empty solid and advances the Tip transactionally.
+For `fold`, a Body-owned bend-line sketch is a helper: `create_sketch`
+explicitly preserves an existing solid Tip, so the sketch may reference the
+base face without becoming the next modeling base. Invalid or missing
+subshapes are normalized to an actionable `Cannot resolve Object.FaceN/EdgeN`
+error before proxy construction.
 
 ### inspect_sheet_metal
 
@@ -1383,6 +1388,10 @@ or has unsupported shape-producing PartDesign features after the final native
 SheetMetal feature. Use a
 candidate as evidence for unfold; use `select_subshapes` when the design intent
 requires a particular normal, location, or area.
+Candidate status does not guarantee that the installed upstream workbench can
+unfold the complete history. Native unfold errors, including the SheetMetal
+0.8.21 `SMFromSolid` open-box `Wire is not closed` case, remain transactional:
+no flat feature is retained and the formed Body Tip is unchanged.
 
 ### unfold_sheet_metal
 

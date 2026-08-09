@@ -178,6 +178,15 @@ Recommended sequence:
    drawing. A successful unfold does not by itself prove shop-floor bend
    sequence, tooling access, or deep-draw manufacturability.
 
+Creating a bend-line sketch in a Body does not intentionally advance the solid
+Tip. `create_sketch` records the prior Tip and restores it if a supported
+FreeCAD release temporarily promotes the helper sketch. The normal fold history
+is therefore `SMBaseBend -> BendLineSketch (helper) -> SMFoldWall`, while
+`SMBaseBend` remains the `base_feature` and current Tip until the fold commits.
+Stale bases and wrong topology references are rejected before a new native
+proxy is created; recompute failures abort the transaction and restore the prior
+Tip.
+
 Example operation payloads:
 
 ```json
@@ -219,6 +228,11 @@ or:
 ```
 
 Do not apply bend compensation twice to a fully dimensioned flat pattern.
+Planar candidates returned by `inspect_sheet_metal` are geometric candidates,
+not a promise that the installed SheetMetal version can unfold every native
+history. In particular, SheetMetal 0.8.21 can form an open-box `SMFromSolid`
+conversion yet return `Wire is not closed`/a null shape for every stationary
+root. The MCP wrapper reports the failure and removes the attempted unfold.
 
 ## Spreadsheet
 

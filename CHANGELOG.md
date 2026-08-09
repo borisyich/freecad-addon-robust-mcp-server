@@ -176,6 +176,16 @@
   regions, bend lines/directions, thickness, radius, and neutral-axis rule before
   modeling, use native SheetMetal bends, then unfold and compare against the
   source instead of substituting PartDesign construction.
+- Hardened SheetMetal Fold/helper-sketch history: live FreeCAD 1.0.2 evidence
+  confirms Body-owned bend-line sketches preserve the prior solid Tip, and
+  `create_sketch` now enforces that contract across supported releases.
+- Moved SheetMetal stale-Tip, topology, and helper-object validation ahead of
+  native proxy creation; invalid null subshapes now return actionable
+  `Cannot resolve` errors while every recompute failure still rolls back.
+- Added live canonical/mutation coverage for edge flanges, sketch-line folds
+  with flat-domain holes, relief-configured hemmed corners, and solid-to-sheet
+  conversion, plus atomic negative regressions. Documented the upstream
+  SheetMetal 0.8.21 open-box `SMFromSolid` unfold limitation.
 
 This project uses **component-specific versioning**. Each component has its own
 release notes and version history.

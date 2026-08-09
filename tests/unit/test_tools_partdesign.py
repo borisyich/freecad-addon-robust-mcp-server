@@ -88,6 +88,9 @@ class TestPartDesignTools:
 
         assert result["name"] == "Sketch"
         assert "'XY_Plane'" in generated_code
+        assert "previous_tip = body.Tip" in generated_code
+        assert "body.Tip is sketch" in generated_code
+        assert "body.Tip = previous_tip" in generated_code
         mock_bridge.execute_python.assert_called_once()
 
     @pytest.mark.asyncio

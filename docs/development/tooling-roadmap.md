@@ -191,7 +191,7 @@ outside the formed PartDesign Body so unfolding cannot replace its Tip.
   transaction rollback, semantic reference type checks, and result evidence.
 - [x] Keep the registered-tool/documentation catalog test authoritative so the
   five tools cannot be added without agent-facing documentation.
-- [ ] Add live canonical parts when SheetMetal is installed in CI: an L-bracket
+- [x] Add live canonical parts when SheetMetal is installed in CI: an L-bracket
   (base + flange), a sketch-line fold reconstructed from a flat blank, a hemmed
   enclosure corner with relief/junction, and solid-to-sheet conversion.
 - [ ] For each live part, mutate thickness, radius, angle, and K-factor and prove
@@ -201,6 +201,20 @@ outside the formed PartDesign Body so unfolding cannot replace its Tip.
   references, non-planar unfold roots, missing material rules, multi-solid
   results, self-intersection, disconnected flanges, and unavailable workbench
   modules. Every failure must leave no new feature and preserve the prior Tip.
+
+The live suite now stores formed/unfolded solid, volume, bounds, bend-line, and
+flat-hole invariants and mutates native parameters for the L-bracket, sketch
+fold, and relief-configured hemmed corner. It also mutates `SMFromSolid`
+thickness/radius and audits every reported stationary root. SheetMetal 0.8.21
+currently forms the canonical open-box conversion but fails all of its native
+unfold roots (`Wire is not closed` or null shape), so the all-parts unfold/K-factor
+item remains open; each failed attempt is proven atomic. Negative live coverage
+now includes stale bases, wrong Face/Edge/Vertex references, non-planar unfold
+roots, multi-profile/null results, and self-crossing blanks. Missing material and
+unavailable-module ordering are covered before FreeCAD mutation. A deterministic
+native disconnected-flange producer is still needed; excessive end gaps are
+accepted by upstream as a smaller connected flange rather than a disconnected
+result.
 
 The engineering workflow and panel/bend graph are documented in
 `.agents/skills/freecad-engineering/references/sheet-metal-flat-patterns.md`.

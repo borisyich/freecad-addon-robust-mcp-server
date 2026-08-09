@@ -297,6 +297,8 @@ async def test_every_feature_variant_dispatches_to_native_proxy(
     assert native_import in code
     assert property_evidence in code
     assert "_sm_validate_refs" in code
+    assert 'getattr(subshape, "isNull"' in code
+    assert 'raise ValueError(f"Cannot resolve {base.Name}.{ref}")' in code
     assert 'doc.openTransaction("Create Sheet Metal Feature")' in code
     assert "doc.abortTransaction()" in code
     assert "tip is not base" in code
@@ -321,6 +323,52 @@ async def test_invalid_feature_payload_never_reaches_bridge(
             }
         )
     mock_bridge.execute_python.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_missing_workbench_is_checked_before_any_feature_is_created(
+    registered_tools, mock_bridge
+):
+    """An unavailable module must fail before topology or Body history changes."""
+    mock_bridge.execute_python.return_value = ExecutionResult(
+        success=False,
+        result=None,
+        stdout="",
+        stderr="",
+        error_type="RuntimeError",
+        error_traceback="RuntimeError: SheetMetal Workbench is not importable",
+        execution_time_ms=1.0,
+    )
+
+    with pytest.raises(ValueError, match="Workbench is not importable"):
+        await registered_tools["create_sheet_metal_feature"](
+            operation={
+                "op": "flange",
+                "base_feature": "Base",
+                "edges": ["Edge1"],
+                "length": 10.0,
+                "radius": 1.0,
+            }
+        )
+    code = mock_bridge.execute_python.await_args.args[0]
+
+    assert code.index("_sm_require_workbench()") < code.index(
+        'base = _sm_object(doc, operation["base_feature"]'
+    )
+    assert code.index("_sm_require_workbench()") < code.index(
+        "feature, body = _sm_new_feature"
+    )
+    assert "doc.abortTransaction()" in code
+
+
+def test_runtime_postconditions_reject_invalid_disconnected_results():
+    """Null, invalid, and non-single-solid feature results share one hard guard."""
+    from freecad_mcp.tools.sheetmetal import _SHEET_METAL_RUNTIME_HELPERS
+
+    assert "produced a null shape" in _SHEET_METAL_RUNTIME_HELPERS
+    assert "produced an invalid shape" in _SHEET_METAL_RUNTIME_HELPERS
+    assert "must produce one non-empty solid" in _SHEET_METAL_RUNTIME_HELPERS
+    assert "solid_count != 1" in _SHEET_METAL_RUNTIME_HELPERS
 
 
 @pytest.mark.asyncio
