@@ -487,6 +487,12 @@ direct solids, and warnings. For drawing/sketch tasks, pass the complete saved
 identifier list as `required_dimension_names`. The report is informative and
 does not by itself prove drawing correspondence. Parameter references multiplied
 by zero are treated as non-driving rather than accepted as validation bridges.
+For a sketch-only deliverable, pass
+`target={"kind":"sketch","name":"SketchName"}`; required dimensions are then
+traced to non-construction geometry of that sketch, while Body/solid/Tip findings
+are outside scope. Sketch profile diagnostics classify outer loops and holes and
+reject intersecting or overlapping contours instead of relying on closed-wire
+count alone.
 
 #### Validation & diagnostics (5 tools)
 

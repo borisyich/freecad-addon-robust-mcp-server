@@ -111,6 +111,7 @@ def test_generated_parametric_validation_code_compiles() -> None:
     assert '"has_solid"' in code
     assert "_analyze_sketch" in code
     assert "__REQUIRED_DIMENSION_NAMES__" not in code
+    assert "__VALIDATION_TARGET__" not in code
     assert "required_dimension_missing" in code
     assert "unused_spreadsheet_parameter" in code
 
@@ -397,6 +398,39 @@ def test_generated_report_describes_body_tip_history_and_sketch(monkeypatch) -> 
     categories = {item["category"] for item in report["findings"]}
     assert "required_dimension_missing" in categories
     assert "unused_spreadsheet_parameter" in categories
+
+    # Sketch scope traces dimensions to this sketch's regular geometry and does
+    # not inherit Body/Tip/solid failures from the surrounding document.
+    body.State = ["Error"]
+    body.Tip = None
+    target_namespace: dict[str, object] = {}
+    exec(  # noqa: S102
+        build_parametric_validation_code(
+            doc_name="Bracket",
+            recompute=True,
+            include_sketch_constraints=False,
+            required_dimension_names=["Width", "Depth"],
+            validation_target={"kind": "sketch", "name": "BaseSketch"},
+        ),
+        target_namespace,
+    )
+    target_report = target_namespace["_result_"]
+    assert target_report["validation_target"] == {
+        "kind": "sketch",
+        "name": "BaseSketch",
+    }
+    assert target_report["target_sketch"]["name"] == "BaseSketch"
+    assert target_report["counts"]["sketches_in_scope"] == 1
+    target_usage = {
+        item["name"]: item["status"]
+        for item in target_report["dimension_inventory"]["usage"]
+    }
+    assert target_usage == {"Width": "sketch_driving", "Depth": "missing"}
+    target_categories = {item["category"] for item in target_report["findings"]}
+    assert "body_invalid" not in target_categories
+    assert "body_issue" not in target_categories
+    assert "unused_spreadsheet_parameter" not in target_categories
+    assert "active final solid" not in target_report["summary"]
 
     # FreeCAD 1.0.x exposes named constraints through Constraint.Name but does
     # not provide SketchObject.getConstraintName(). Named expression paths must

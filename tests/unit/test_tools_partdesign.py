@@ -204,6 +204,13 @@ class TestPartDesignTools:
         assert "delete_constraint" in constraint_schema["discriminator"]["mapping"]
         assert len(geometry_schema["oneOf"]) > 1
         assert len(constraint_schema["oneOf"]) > 1
+        arc_properties = geometry_schema["$defs"]["AddArcOperation"]["properties"]
+        assert "degrees" in arc_properties["start_angle"]["description"]
+        assert "degrees" in arc_properties["end_angle"]["description"]
+        bspline_points = geometry_schema["$defs"]["AddBSplineOperation"]["properties"][
+            "points"
+        ]
+        assert "explicitly point-defined" in bspline_points["description"]
 
     @pytest.mark.asyncio
     async def test_edit_sketch_geometry_batches_operations_atomically(

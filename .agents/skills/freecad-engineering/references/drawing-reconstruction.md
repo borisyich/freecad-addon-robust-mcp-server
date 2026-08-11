@@ -103,6 +103,15 @@ asterisk. Give each item a stable unique identifier that can become a named
 driving sketch constraint or Spreadsheet alias. Do not discard apparently
 redundant values silently; use them as cross-checks or record a real conflict.
 
+For every ordinate or baseline item, the inventory must preserve the
+datum/reference, controlled axis, signed direction, and target feature in
+addition to value and unit. Never reinterpret a local ordinate as a global
+coordinate merely because its number is readable. Before converting an
+ordinate/baseline set to global coordinates, close at least one signed control
+chain from its datum through an intermediate feature to the target and reconcile
+the result with an overall/check dimension or a second view. Resolve a failed
+chain before constructing geometry.
+
 Rules:
 
 1. A dimension shown in a projection plane usually controls one of the two axes

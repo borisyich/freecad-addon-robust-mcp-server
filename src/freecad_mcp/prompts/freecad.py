@@ -285,7 +285,8 @@ significant findings.""",
 1. Create the sketch on the intended origin plane, datum plane, or planar face.
 2. Add ordered geometry with `edit_sketch_geometry`.
 3. Add ordered constraints with `edit_sketch_constraints`.
-4. Inspect solver and profile state with `get_sketch_info`.
+4. Inspect solver plus outer/hole/intersection profile topology with
+   `get_sketch_info`; 0 DoF alone is not acceptance.
 
 ## Geometry Operations
 `edit_sketch_geometry(sketch_name, operations)` supports:
@@ -303,6 +304,11 @@ edit_sketch_geometry(
     ],
 )
 ```
+
+`center_angles.start_angle` and `end_angle` are degrees. Prefer the
+radius-defined modes below when the source gives endpoints or adjoining lines.
+Use `add_bspline` only for a source curve explicitly defined by points or knots;
+never use it to approximate lines or stated circular arcs/fillets.
 
 Radius-defined arc examples:
 ```
@@ -539,12 +545,14 @@ safe_execute(
 - Shape existence - Object has geometry
 - Recompute state - Object up to date
 
-### validate_parametric_model(..., detail_level, finding_offset, finding_limit)
+### validate_parametric_model(..., target, detail_level, finding_offset, finding_limit)
 Mandatory final informative scan after creating or changing geometry:
 - reports Bodies, Tips, ordered history, and shape validity;
 - reports sketches, solver/profile status, remaining DoF, supports, and expressions;
 - verifies that every supplied required dimension identifier influences the
   active final solid; construction-only/helper bindings do not count;
+- with `target={"kind":"sketch","name":"..."}`, verifies influence on regular
+  geometry of that sketch and excludes Body/solid/Tip health from assessment;
 - reports Spreadsheet aliases that are not directly or transitively connected
   to the feature tree so they can be linked or removed;
 - reports standalone/direct solids and significant warnings;

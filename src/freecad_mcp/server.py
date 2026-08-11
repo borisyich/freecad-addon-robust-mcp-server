@@ -77,6 +77,11 @@ Use dedicated measure_* tools for numerical geometric evidence; obtain their
 FaceN/EdgeN/VertexN inputs from select_subshapes instead of guessing indices.
 For Spreadsheet-driven sketch dimensions, bind the alias to the dimensional
 constraint expression path and verify it with get_sketch_info.
+For drawing-derived sketches, preserve each ordinate/baseline datum, build
+straight parents before stated tangent fillets, and never use a B-spline unless
+the source explicitly defines a point-based free-form curve. Treat 0 DoF as
+solver evidence, not geometric acceptance; verify outer/hole nesting and contour
+intersections.
 For sheet-metal drawings:
 - call sheet_metal_capabilities before modeling;
 - when a flat pattern is supplied, inventory the complete blank, panel regions,
@@ -94,7 +99,8 @@ After every major feature:
 Compare one seed element before applying any pattern.
 Before completing a geometry-changing task, call
 validate_parametric_model and report significant findings. For drawing/sketch
-input, pass all saved dimension identifiers as required_dimension_names.
+input, pass all saved dimension identifiers as required_dimension_names. For a
+sketch-only deliverable, set target={"kind":"sketch","name":"..."}.
 """
 
 

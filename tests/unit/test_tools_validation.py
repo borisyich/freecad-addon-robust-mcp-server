@@ -387,6 +387,51 @@ class TestValidationTools:
         assert "['Width', 'HoleDiameter']" in generated_code
 
     @pytest.mark.asyncio
+    async def test_validate_parametric_model_accepts_sketch_target(
+        self, register_tools, mock_bridge
+    ):
+        report = {
+            "informational": True,
+            "assessment": "healthy",
+            "summary": "Sketch target is healthy.",
+            "validation_target": {"kind": "sketch", "name": "Sketch_FlatPattern"},
+            "target_sketch": {"name": "Sketch_FlatPattern"},
+            "findings": [],
+        }
+        mock_bridge.execute_python = AsyncMock(
+            return_value=ExecutionResult(
+                success=True,
+                result=report,
+                stdout="",
+                stderr="",
+                execution_time_ms=1.0,
+            )
+        )
+
+        result = await register_tools["validate_parametric_model"](
+            target={"kind": "sketch", "name": "Sketch_FlatPattern"},
+            required_dimension_names=["DATUM_A_TO_HOLE_1"],
+        )
+
+        assert result["validation_target"] == {
+            "kind": "sketch",
+            "name": "Sketch_FlatPattern",
+        }
+        generated_code = mock_bridge.execute_python.await_args.args[0]
+        assert "{'kind': 'sketch', 'name': 'Sketch_FlatPattern'}" in generated_code
+
+    @pytest.mark.asyncio
+    async def test_validate_parametric_model_rejects_blank_sketch_target(
+        self, register_tools, mock_bridge
+    ):
+        with pytest.raises(ValueError, match="target sketch name must not be empty"):
+            await register_tools["validate_parametric_model"](
+                target={"kind": "sketch", "name": "   "}
+            )
+
+        mock_bridge.execute_python.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_validate_parametric_model_default_is_compact_and_pages_findings(
         self, register_tools, mock_bridge
     ):

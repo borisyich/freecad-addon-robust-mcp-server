@@ -36,13 +36,17 @@ The Skill covers:
 - feature dependency/order guidance;
 - drawing-view identification, FreeCAD plane/axis mapping, and dimension-axis evidence;
 - saved inventories of every explicit non-starred source dimension;
+- ordinate/baseline datum preservation and a mandatory control dimension-chain
+  check before global-coordinate conversion;
 - mandatory same-view `compare_images` checkpoints after major features and
   before patterning a seed;
 - sketch arc construction by endpoints/radius and by tangent fillet between lines;
+- straight-lines-first sketch construction, semantic constraint selection,
+  explicit B-spline gating, and outer/hole/intersection topology checks;
 - the 50% ceiling for Fix/Block constraints;
 - existing-model modification;
 - lightweight intermediate validation;
 - mandatory final `validate_parametric_model` reporting, including source-
-  dimension usage and Spreadsheet connectivity/cleanliness.
+  dimension usage, sketch-target scope, and Spreadsheet connectivity/cleanliness.
 
 Detailed content is intentionally not copied into this documentation page.

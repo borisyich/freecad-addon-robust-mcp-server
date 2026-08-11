@@ -906,7 +906,7 @@ SKETCH_ANALYSIS_RUNTIME_HELPERS = _runtime_code(
             except Exception:
                 pass
 
-        closed_wire_count = 0
+        closed_wires = []
         open_wire_count = 0
         shape_valid = None
         shape = getattr(sketch, "Shape", None)
@@ -923,11 +923,209 @@ SKETCH_ANALYSIS_RUNTIME_HELPERS = _runtime_code(
                         except Exception:
                             is_closed = False
                         if is_closed:
-                            closed_wire_count += 1
+                            closed_wires.append(wire)
                         else:
                             open_wire_count += 1
             except Exception:
                 pass
+
+        closed_wire_count = len(closed_wires)
+        intersecting_wire_pairs = []
+        partially_overlapping_wire_pairs = []
+        wire_nesting = []
+        outer_wire_count = None
+        hole_wire_count = None
+        profile_face_count = None
+        face_maker_valid = None
+        topology_checked = False
+        topology_valid = None
+        topology_method = None
+        topology_error = None
+        part_available = False
+
+        tolerance = 1e-7
+        try:
+            box = shape.BoundBox
+            scale = max(
+                abs(float(box.XLength)),
+                abs(float(box.YLength)),
+                abs(float(box.ZLength)),
+                1.0,
+            )
+            tolerance = max(tolerance, scale * 1e-9)
+        except Exception:
+            pass
+
+        distance_pair_count = 0
+        for first_index in range(closed_wire_count):
+            for second_index in range(first_index + 1, closed_wire_count):
+                try:
+                    distance = float(
+                        closed_wires[first_index].distToShape(
+                            closed_wires[second_index]
+                        )[0]
+                    )
+                except Exception:
+                    continue
+                distance_pair_count += 1
+                if distance <= tolerance:
+                    intersecting_wire_pairs.append(
+                        {
+                            "wire_indices": [first_index, second_index],
+                            "distance": distance,
+                        }
+                    )
+
+        if closed_wires and not open_vertices and not open_wire_count:
+            try:
+                import Part
+
+                part_available = True
+                wire_faces = []
+                face_errors = []
+                for wire_index, wire in enumerate(closed_wires):
+                    try:
+                        face = Part.Face(wire)
+                        face_area = float(face.Area)
+                        face_valid = bool(face.isValid())
+                        if not face_valid or face_area <= tolerance * tolerance:
+                            face_errors.append(wire_index)
+                        wire_faces.append(face)
+                    except Exception:
+                        face_errors.append(wire_index)
+                        wire_faces.append(None)
+
+                containing_wires = {
+                    wire_index: [] for wire_index in range(closed_wire_count)
+                }
+                if not face_errors:
+                    for first_index in range(closed_wire_count):
+                        for second_index in range(first_index + 1, closed_wire_count):
+                            if any(
+                                item["wire_indices"] == [first_index, second_index]
+                                for item in intersecting_wire_pairs
+                            ):
+                                continue
+                            first_face = wire_faces[first_index]
+                            second_face = wire_faces[second_index]
+                            first_area = abs(float(first_face.Area))
+                            second_area = abs(float(second_face.Area))
+                            common_area = abs(
+                                float(first_face.common(second_face).Area)
+                            )
+                            area_tolerance = max(
+                                tolerance * tolerance,
+                                max(first_area, second_area) * 1e-9,
+                            )
+                            smaller_area = min(first_area, second_area)
+                            if common_area <= area_tolerance:
+                                continue
+                            if abs(common_area - smaller_area) <= area_tolerance:
+                                if first_area > second_area + area_tolerance:
+                                    containing_wires[second_index].append(first_index)
+                                elif second_area > first_area + area_tolerance:
+                                    containing_wires[first_index].append(second_index)
+                                else:
+                                    partially_overlapping_wire_pairs.append(
+                                        [first_index, second_index]
+                                    )
+                            else:
+                                partially_overlapping_wire_pairs.append(
+                                    [first_index, second_index]
+                                )
+
+                parent_by_wire = {}
+                for wire_index, containers in containing_wires.items():
+                    if containers:
+                        parent_by_wire[wire_index] = min(
+                            containers,
+                            key=lambda item: abs(float(wire_faces[item].Area)),
+                        )
+
+                def _wire_depth(wire_index):
+                    depth = 0
+                    visited = set()
+                    current = wire_index
+                    while current in parent_by_wire:
+                        if current in visited:
+                            return None
+                        visited.add(current)
+                        current = parent_by_wire[current]
+                        depth += 1
+                    return depth
+
+                depths = []
+                for wire_index in range(closed_wire_count):
+                    depth = _wire_depth(wire_index)
+                    depths.append(depth)
+                    wire_nesting.append(
+                        {
+                            "wire_index": wire_index,
+                            "parent_wire_index": parent_by_wire.get(wire_index),
+                            "nesting_depth": depth,
+                            "role": (
+                                "outer" if depth is not None and depth % 2 == 0
+                                else "hole" if depth is not None
+                                else "unknown"
+                            ),
+                        }
+                    )
+                outer_wire_count = sum(
+                    1 for depth in depths if depth is not None and depth % 2 == 0
+                )
+                hole_wire_count = sum(
+                    1 for depth in depths if depth is not None and depth % 2 == 1
+                )
+
+                try:
+                    profile_faces = Part.makeFace(
+                        closed_wires, "Part::FaceMakerBullseye"
+                    )
+                    face_maker_valid = bool(profile_faces.isValid())
+                    profile_face_count = len(profile_faces.Faces)
+                except Exception:
+                    face_maker_valid = False
+
+                topology_checked = True
+                topology_method = "wire_distance_and_face_maker_bullseye"
+                topology_valid = bool(
+                    not face_errors
+                    and not intersecting_wire_pairs
+                    and not partially_overlapping_wire_pairs
+                    and all(depth is not None for depth in depths)
+                    and face_maker_valid
+                    and (profile_face_count or 0) > 0
+                )
+            except Exception as exc:
+                topology_error = str(exc)
+
+        if (
+            topology_valid is None
+            and not part_available
+            and closed_wire_count == 1
+            and not open_vertices
+            and not open_wire_count
+        ):
+            # FreeCAD always provides Part, but keep compact unit-test and older
+            # embedded environments useful for the unambiguous one-wire case.
+            topology_checked = shape_valid is not False
+            topology_valid = shape_valid is not False
+            topology_method = "single_wire_shape_validity_fallback"
+            outer_wire_count = 1
+            hole_wire_count = 0
+            wire_nesting = [
+                {
+                    "wire_index": 0,
+                    "parent_wire_index": None,
+                    "nesting_depth": 0,
+                    "role": "outer",
+                }
+            ]
+
+        if intersecting_wire_pairs:
+            topology_checked = True
+            topology_valid = False
+            topology_method = topology_method or "wire_distance"
 
         regular_geometry_count = max(
             0,
@@ -939,8 +1137,14 @@ SKETCH_ANALYSIS_RUNTIME_HELPERS = _runtime_code(
             state = "invalid"
         elif open_vertices or open_wire_count:
             state = "open"
-        elif closed_wire_count > 0:
+        elif intersecting_wire_pairs or partially_overlapping_wire_pairs:
+            state = "intersecting"
+        elif topology_valid is False:
+            state = "invalid"
+        elif topology_valid is True and closed_wire_count > 0:
             state = "closed"
+        elif closed_wire_count > 0:
+            state = "topology_unchecked"
         else:
             state = "non_profile_geometry"
 
@@ -951,6 +1155,87 @@ SKETCH_ANALYSIS_RUNTIME_HELPERS = _runtime_code(
             "open_wire_count": open_wire_count,
             "open_vertices": open_vertices,
             "shape_valid": shape_valid,
+            "topology_checked": topology_checked,
+            "topology_valid": topology_valid,
+            "topology_method": topology_method,
+            "topology_error": topology_error,
+            "part_available": part_available,
+            "outer_wire_count": outer_wire_count,
+            "hole_wire_count": hole_wire_count,
+            "profile_face_count": profile_face_count,
+            "face_maker_valid": face_maker_valid,
+            "wire_nesting": wire_nesting,
+            "intersecting_wire_pairs": intersecting_wire_pairs,
+            "partially_overlapping_wire_pairs": partially_overlapping_wire_pairs,
+            "tolerance": tolerance,
+        }
+
+
+    def _sketch_constraint_quality(sketch, geometry_count):
+        try:
+            constraints = list(sketch.Constraints or [])
+        except Exception:
+            constraints = []
+        geometric_types = {
+            "Coincident",
+            "Horizontal",
+            "Vertical",
+            "Parallel",
+            "Perpendicular",
+            "Tangent",
+            "Equal",
+            "Symmetric",
+            "PointOnObject",
+        }
+        dimensional_types = {
+            "Distance",
+            "DistanceX",
+            "DistanceY",
+            "Radius",
+            "Diameter",
+            "Angle",
+        }
+        geometric_relation_count = 0
+        dimensional_constraint_count = 0
+        block_constraint_count = 0
+        absolute_coordinate_constraint_count = 0
+        for constraint in constraints:
+            constraint_type = str(getattr(constraint, "Type", ""))
+            if constraint_type in geometric_types:
+                geometric_relation_count += 1
+            if constraint_type in dimensional_types:
+                dimensional_constraint_count += 1
+            if constraint_type == "Block":
+                block_constraint_count += 1
+            if constraint_type in {"DistanceX", "DistanceY"}:
+                try:
+                    first_position = int(getattr(constraint, "FirstPos"))
+                    second_geometry = int(getattr(constraint, "Second"))
+                except Exception:
+                    continue
+                if first_position >= 0 and second_geometry < 0:
+                    absolute_coordinate_constraint_count += 1
+
+        coordinate_heavy = bool(
+            absolute_coordinate_constraint_count >= max(8, int(geometry_count))
+            and absolute_coordinate_constraint_count
+            > max(2, geometric_relation_count * 2)
+        )
+        return {
+            "geometric_relation_count": geometric_relation_count,
+            "dimensional_constraint_count": dimensional_constraint_count,
+            "block_constraint_count": block_constraint_count,
+            "absolute_coordinate_constraint_count": (
+                absolute_coordinate_constraint_count
+            ),
+            "coordinate_heavy": coordinate_heavy,
+            "assessment": (
+                "coordinate_heavy" if coordinate_heavy else "no_coordinate_overuse_detected"
+            ),
+            "limitation": (
+                "This heuristic cannot prove design intent; inspect the actual "
+                "constraint graph and source drawing."
+            ),
         }
 
 
@@ -1225,6 +1510,7 @@ SKETCH_ANALYSIS_RUNTIME_HELPERS = _runtime_code(
 
         solver = _sketch_solver_state(sketch)
         profile = _sketch_profile_state(sketch, construction_geometry_count)
+        constraint_quality = _sketch_constraint_quality(sketch, geometry_count)
 
         dependent = []
         dependent_getter = getattr(sketch, "getGeometryWithDependentParameters", None)
@@ -1273,9 +1559,26 @@ SKETCH_ANALYSIS_RUNTIME_HELPERS = _runtime_code(
         elif profile["state"] == "invalid":
             issues.append("Sketch shape is geometrically invalid.")
             hints.append("Check for self-intersections, overlapping edges, or zero-length geometry.")
+        elif profile["state"] == "intersecting":
+            issues.append("Closed sketch contours intersect or overlap each other.")
+            hints.append(
+                "Move or resize the affected outer/hole contours; closed wires "
+                "must be disjoint or strictly nested."
+            )
+        elif profile["state"] == "topology_unchecked":
+            issues.append("Closed-wire nesting and intersections could not be verified.")
+            hints.append("Run the profile check in a FreeCAD environment with Part available.")
         elif profile["state"] == "non_profile_geometry":
             issues.append("Sketch has no closed wire suitable for a profile operation.")
             hints.append("Connect the regular geometry into at least one closed contour.")
+
+        if constraint_quality["coordinate_heavy"]:
+            hints.append(
+                "The sketch is dominated by point-to-origin X/Y dimensions. "
+                "Replace coordinate locking with geometric relationships and "
+                "the smallest datum-based driving dimension set; 0 DoF alone "
+                "does not prove correct design intent."
+            )
 
         solver_healthy = solver_status not in {
             "over_constrained",
@@ -1290,6 +1593,7 @@ SKETCH_ANALYSIS_RUNTIME_HELPERS = _runtime_code(
             "external_geometry_count": external_geometry_count,
             "solver": solver,
             "profile": profile,
+            "constraint_quality": constraint_quality,
             "profile_ready": bool(profile["closed"] and solver_healthy),
         }
         if unconstrained:

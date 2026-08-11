@@ -104,7 +104,8 @@ or modification. It reports:
 - every `PartDesign::Body`, its state, shape validity, solid count, placement,
   Tip, and ordered history;
 - history object type/role counts, dependencies, expressions, and shape summaries;
-- every sketch, solver status, remaining DoF, profile state, supports,
+- every sketch, solver status, remaining DoF, profile state, outer/hole nesting,
+  intersecting contour pairs, constraint-quality heuristic, supports,
   expressions, constraint-type counts, named constraints, and solver-reported
   conflicting/redundant indices where available;
 - standalone sketches, Spreadsheets, and solid objects outside Bodies;
@@ -116,12 +117,21 @@ or modification. It reports:
 - findings categorized as errors or warnings;
 - explicit limitations.
 
+The default scope remains the active final-solid dependency graph. A sketch-only
+deliverable can instead use `target={"kind":"sketch","name":"..."}`; required
+dimensions are then traced to regular geometry of that sketch and Body/Tip/solid
+findings are excluded from the assessment.
+
 The report is intentionally not a hard pass/fail gate. It cannot prove:
 
 - correspondence to a drawing;
 - correctness of dimensions omitted from `required_dimension_names`;
 - manufacturability, tolerances, fits, material, or process planning;
 - semantic design intent merely from object names/types.
+
+It also does not equate 0 DoF with correctness. A coordinate-heavy warning
+identifies likely endpoint-by-endpoint X/Y locking, while the engineering Skill
+requires drawing comparison and datum-chain verification.
 
 Project instructions require the agent to call the tool immediately before its
 final user-facing response after geometry changes and summarize significant

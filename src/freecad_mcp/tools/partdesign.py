@@ -75,8 +75,14 @@ class AddArcOperation(_SketchOperation):
     y2: float | None = None
     line1_index: int | None = None
     line2_index: int | None = None
-    start_angle: float | None = None
-    end_angle: float | None = None
+    start_angle: float | None = Field(
+        default=None,
+        description="Start angle in degrees; used only with arc_mode='center_angles'.",
+    )
+    end_angle: float | None = Field(
+        default=None,
+        description="End angle in degrees; used only with arc_mode='center_angles'.",
+    )
     construction: bool = False
 
     @model_validator(mode="after")
@@ -188,10 +194,15 @@ class AddSlotOperation(_SketchOperation):
 
 
 class AddBSplineOperation(_SketchOperation):
-    """Add an interpolating B-spline."""
+    """Add an interpolating B-spline explicitly defined by source points."""
 
     op: Literal["add_bspline"]
-    points: list[list[float]]
+    points: list[list[float]] = Field(
+        description=(
+            "Interpolation points from an explicitly point-defined source curve. "
+            "Do not use a B-spline to approximate ordinary lines or circular arcs."
+        )
+    )
     closed: bool = False
     construction: bool = False
 

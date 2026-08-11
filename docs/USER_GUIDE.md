@@ -444,6 +444,20 @@ For drawing/sketch input, pass the complete saved non-starred dimension list as
 do not drive the feature tree directly or through other cells; connect intended
 parameters or delete redundant ones.
 
+For a sketch-only deliverable, call
+`validate_parametric_model(target={"kind":"sketch","name":"SketchName"}, ...)`.
+This checks required-dimension influence on non-construction geometry of that
+sketch without treating Body, solid, or Tip state as an error. Profile readiness
+includes outer/hole nesting and contour-intersection checks; five closed wires no
+longer imply one outer loop and four holes.
+
+Build drawing-derived sketches from straight segments and semantic relationships
+first, then insert stated tangent fillets/radii. Use a B-spline only for a source
+curve explicitly defined by points or knots. Preserve the datum/reference of
+every ordinate/baseline dimension and close one control dimension chain before
+converting it to global coordinates. A 0-DoF sketch can still be geometrically or
+dimensionally wrong.
+
 ### 1. Be Specific with Dimensions
 
 **Good:** "Create a box 50mm x 30mm x 10mm"

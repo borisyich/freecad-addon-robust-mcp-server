@@ -758,8 +758,10 @@ edit_sketch_geometry(
 
 `add_regular_polygon` creates a center/radius-based regular polygon inside an existing Sketcher sketch. `add_polyline` creates an explicit open or closed chain of Sketcher line segments. They are intentionally separate operations; the former does not accept arbitrary vertices.
 
-`add_arc` supports three modes. `center_angles` remains the default legacy form.
-The two radius-driven forms are:
+`add_arc` supports three modes. `center_angles` remains the default legacy form;
+its `start_angle` and `end_angle` values are degrees. For engineering drawings,
+prefer the two radius-driven forms when the source defines endpoints or adjoining
+edges rather than center angles:
 
 ```python
 # Arc through two endpoints with known radius. arc_side chooses the side of the
@@ -796,6 +798,10 @@ For `endpoints_radius`, the chord may not exceed the diameter. For
 `tangent_fillet`, create or identify both line segments first and pass their
 current geometry indices; an impossible radius is rejected rather than silently
 approximated.
+
+Use `add_bspline` only when the source explicitly defines a free-form curve by
+interpolation/control points or knots. Do not use it to approximate a line,
+circular arc, conic, unreadable boundary, or stated fillet radius.
 
 These do not duplicate the standalone Part tools: `create_regular_polygon` creates a `Part::RegularPolygon` document object, while `make_wire` creates a 3D `Part::Feature` wire from `[x, y, z]` points. Use the sketch operations for PartDesign profiles and the standalone tools for Part workbench geometry.
 
@@ -1927,6 +1933,7 @@ validate_parametric_model(
     recompute: bool = True,
     include_sketch_constraints: bool = False,
     required_dimension_names: list[str] | None = None,
+    target: dict | None = None,  # {"kind":"sketch", "name":"SketchName"}
     detail_level: str = "summary",  # summary | structure | full
     finding_offset: int = 0,
     finding_limit: int = 20,
@@ -1941,6 +1948,13 @@ Spreadsheet aliases, and pass the complete identifier list through
 by the caller; it cannot discover a dimension omitted from the source-image
 inventory.
 
+Omit `target` for the existing whole-model/final-solid diagnostic. When the
+deliverable is a sketch, pass for example
+`target={"kind":"sketch","name":"Sketch_FlatPattern"}`. The assessment then
+uses only that sketch: Body, solid, Tip, standalone-solid, and unused global
+Spreadsheet findings are outside scope. Required dimensions must influence
+non-construction geometry of the named sketch.
+
 The report includes:
 
 - document metadata and counts;
@@ -1950,11 +1964,13 @@ The report includes:
 - sketches with solver state (`fully_constrained`, `under_constrained`,
   `over_constrained`, `conflicting`, `redundant`, or `solver_error`), remaining
   degrees of freedom, solver-reported conflicting/redundant constraint indices,
-  profile state, supports, expressions, and constraint counts;
+  profile state, outer/hole counts, per-wire nesting roles, intersecting wire
+  pairs, supports, expressions, and constraint counts;
 - standalone sketches, Spreadsheets, and solid objects outside Bodies;
 - required-dimension usage, including `missing`,
   `defined_but_not_solid_driving`, and `solid_driving`
-  identifiers;
+  identifiers in model scope, or `defined_but_not_sketch_driving` and
+  `sketch_driving` in sketch scope;
 - each Spreadsheet alias, its direct and transitive dependencies, whether it is
   connected to a feature-tree expression, and an error finding for aliases that
   remain unused;
@@ -1970,9 +1986,19 @@ Spreadsheet cells, and optional individual constraints. Set
 `include_sketch_constraints=True` only together with `detail_level="full"`, and
 only when a compact response has identified a specific constraint-level problem.
 
-A source dimension counts only when the server can trace it to the active final
-solid. A named constraint on construction-only geometry, an inactive sketch,
-datum/helper object, or metadata-only property is reported as not solid-driving.
+`profile_ready` now requires verified closed-contour topology, not just a positive
+closed-wire count. Pairwise contour intersection/tangency/overlap fails the
+profile, while strict containment produces explicit `outer` and `hole` roles.
+Multiple disjoint outer loops are reported separately so an agent cannot infer
+hole semantics from `closed_wire_count`. The report can also warn about a sketch
+dominated by point-to-origin X/Y constraints; 0 DoF is not proof of correct
+geometry, datum interpretation, or design intent.
+
+A source dimension counts only when the server can trace it to the active
+validation target: the final solid in model scope or non-construction geometry
+of the named sketch in sketch scope. A named constraint on construction-only
+geometry, an inactive sketch, datum/helper object, or metadata-only property is
+reported as not driving.
 References that are structurally neutralized by multiplication by zero (for
 example `0 * (Parameters.Width + Parameters.Height)`) are also reported as
 non-driving; they cannot be used as an audit-only expression bridge. This is a

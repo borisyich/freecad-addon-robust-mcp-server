@@ -124,6 +124,20 @@ validate_parametric_model(
 )
 ```
 
+When the requested deliverable is a sketch rather than a final solid, scope the
+same diagnostic to that sketch:
+
+```text
+validate_parametric_model(
+    doc_name=<intended document>,
+    target={"kind":"sketch", "name":<intended sketch>},
+    required_dimension_names=[<all saved non-starred dimension identifiers>],
+)
+```
+
+In sketch scope, required dimensions must influence non-construction geometry of
+that exact sketch. Body, solid, and Tip state are not acceptance criteria.
+
 For other geometry-changing tasks, `required_dimension_names` may be omitted.
 
 Do this immediately before the final user-facing response. Summarize:
@@ -189,6 +203,10 @@ Read the detailed strategy in
   line when features belong together.
 - Prefer geometric constraints (`Horizontal`, `Vertical`, `Coincident`,
   `Tangent`, `Equal`, symmetry) plus a minimal set of driving dimensions.
+- Do not constrain nearly every endpoint with absolute X/Y coordinates. That can
+  produce 0 DoF while obscuring datum relationships, tangency, equality, and
+  feature intent. `fully_constrained` is solver evidence, not proof of correct
+  geometry or parameterization.
 - For Spreadsheet-driven dimensions, create a cell alias first and attach the
   expression to the dimensional constraint path (`Constraints[index]`). In
   `edit_sketch_constraints`, supply `expression` when creating the constraint,
@@ -206,6 +224,11 @@ Read the detailed strategy in
   Intermediate under-constrained sketches are acceptable only while actively
   being developed. Over-constrained, conflicting, redundant, or solver-error
   states must be corrected.
+
+For drawing-derived sketch construction, follow
+[references/sketch-construction.md](references/sketch-construction.md). It gives
+the required straight-lines-first workflow, fillet/radius selection, datum-chain
+check, B-spline gate, profile-topology acceptance, and validation-integrity rule.
 
 ## 3. Plan features by dependency and design intent
 
@@ -396,6 +419,12 @@ axis or plane, explicit/derived/assumed status, and confidence.
   dimension a stable identifier suitable for a named sketch constraint or
   Spreadsheet alias. Do not silently omit a dimension because it looks
   redundant; resolve how it is used or record a genuine conflict.
+- For every ordinate/baseline dimension, also save its datum/reference,
+  controlled axis, signed direction, and target feature. A value without its
+  datum is incomplete evidence. Before converting such dimensions to global
+  coordinates, independently close at least one control dimension chain from
+  datum to target and reconcile it with an overall/check dimension or another
+  view.
 - Build the axis-aware evidence table, saved dimension inventory, and feature
   plan before modeling. Each inventory item must later be represented by a
   named driving sketch constraint or by a Spreadsheet parameter connected to
@@ -486,6 +515,11 @@ when a valid FreeCAD pattern does not expose `AddSubShape`.
 
 ### Sketch arc construction
 
+Construct manufactured profiles from their straight parents first, then insert
+the stated tangent fillets/radii. `center_angles.start_angle` and `end_angle` are
+degrees, but prefer a radius-defined mode when the drawing specifies endpoints
+or adjoining elements rather than center angles.
+
 Use `edit_sketch_geometry(..., operations=[...])` for both of these supported
 radius-defined cases:
 
@@ -506,6 +540,10 @@ For the second form, create/identify the two lines first and use their current
 geometry indices. A radius that cannot fit the line geometry must be corrected,
 not approximated with an unrelated free arc.
 
+Call `add_bspline` only when the source explicitly defines the curve by points,
+knots, or equivalent tabulated free-form data. Never substitute a B-spline for a
+line, circular arc, conic, unreadable boundary, or stated fillet radius.
+
 ## 8. Completion criteria
 
 Before reporting completion:
@@ -519,9 +557,13 @@ Before reporting completion:
 - inspect the final model from the required views;
 - for drawing/sketch input, confirm that the saved inventory contains every
   non-starred source dimension and pass all identifiers to
-  `validate_parametric_model(required_dimension_names=[...])`;
+  `validate_parametric_model(required_dimension_names=[...])`; for a sketch-only
+  deliverable also pass `target={"kind":"sketch","name":...}`;
 - inspect each Spreadsheet alias: determine why it exists, connect it to the
   feature tree if required, or delete it if redundant;
+- treat 0 DoF as necessary solver evidence only: also verify outer/hole nesting,
+  contour intersections, drawing correspondence, datum chains, and the semantic
+  constraint pattern;
 - call `validate_parametric_model` and report its findings accurately. Do not
   finish while it reports missing/unlinked required dimensions or unused
   Spreadsheet parameters.
@@ -539,9 +581,12 @@ Full reports contain entire feature history, expressions, cells, and constraint
 records and can consume tens of thousands of tokens on complex documents.
 
 A required dimension is satisfied only when it has a verified path to the
-active final solid. Never add construction points, inactive helper sketches, or
-metadata-only links merely to make an identifier appear used; the validator
-reports them as `defined_but_not_solid_driving`.
+active validation target. In model scope that target is the final solid; in
+sketch scope it is non-construction geometry of the named sketch. Never add fake geometry,
+construction points, dummy constraints, inactive helper sketches,
+zero-multiplied expressions, metadata-only links, or no-op features merely to
+make an identifier appear used. Fix the real semantic dependency or report the
+limitation honestly.
 
 See [references/validation-and-editability.md](references/validation-and-editability.md)
 for interpretation details and [references/source-notes.md](references/source-notes.md)

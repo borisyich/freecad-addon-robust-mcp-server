@@ -1241,12 +1241,13 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                         },
                         {
                             "name": "validate_parametric_model",
-                            "description": "Compact final diagnostic; expanded structure/full reports only on request",
+                            "description": "Compact model or sketch-target diagnostic; expanded structure/full reports only on request",
                             "key_params": [
                                 "doc_name",
                                 "recompute",
                                 "include_sketch_constraints",
                                 "required_dimension_names",
+                                "target",
                                 "detail_level",
                                 "finding_offset",
                                 "finding_limit",

@@ -74,6 +74,10 @@ a rigid pass/fail workflow. For drawing/sketch reconstruction, first save every
 explicit non-starred source dimension under a stable identifier and pass the
 complete identifier list as `required_dimension_names`.
 
+When the deliverable is a sketch rather than a final solid, pass
+`target={{"kind":"sketch","name":"..."}}` so required dimensions are traced to
+that sketch's non-construction geometry and Body/solid/Tip state is out of scope.
+
 `execute_python`, `safe_execute`, and `run_macro` remain available. Their use
 does not waive editable/parametric model expectations.
 """

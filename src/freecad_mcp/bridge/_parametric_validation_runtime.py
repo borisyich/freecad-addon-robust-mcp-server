@@ -72,6 +72,7 @@ def build_parametric_validation_code(
     recompute: bool,
     include_sketch_constraints: bool,
     required_dimension_names: list[str] | None = None,
+    validation_target: dict[str, str] | None = None,
 ) -> str:
     """Build a self-contained script executed inside the FreeCAD process.
 
@@ -87,6 +88,9 @@ import FreeCAD
 __SKETCH_HELPERS__
 
 required_dimension_names = __REQUIRED_DIMENSION_NAMES__
+validation_target = __VALIDATION_TARGET__ or {"kind": "model"}
+validation_target_kind = validation_target.get("kind", "model")
+validation_target_name = validation_target.get("name")
 sheet_metal_proxy_geometry_properties = __SHEET_METAL_PROXY_PROPERTIES__
 
 
@@ -332,10 +336,16 @@ def _constraint_geometry_indices(constraint):
 
 def _constraint_solid_influence(sketch, constraint_index, active_object_names):
     result = {
-        "in_tip_dependency": getattr(sketch, "Name", None) in active_object_names,
+        "in_tip_dependency": bool(
+            validation_target_kind == "model"
+            and getattr(sketch, "Name", None) in active_object_names
+        ),
+        "in_target_dependency": getattr(sketch, "Name", None) in active_object_names,
         "geometry_indices": [],
         "construction_geometry_indices": [],
         "construction_only": False,
+        "target_driving": False,
+        "sketch_driving": False,
         "solid_driving": False,
         "reason": None,
     }
@@ -365,14 +375,20 @@ def _constraint_solid_influence(sketch, constraint_index, active_object_names):
         driving = True
     if not driving:
         result["reason"] = "constraint is reference/non-driving"
-    elif not result["in_tip_dependency"]:
-        result["reason"] = "sketch is not in the active Body Tip dependency graph"
+    elif not result["in_target_dependency"]:
+        result["reason"] = (
+            "sketch is not the requested validation target"
+            if validation_target_kind == "sketch"
+            else "sketch is not in the active Body Tip dependency graph"
+        )
     elif not indices:
         result["reason"] = "constraint has no verifiable profile geometry reference"
     elif result["construction_only"]:
         result["reason"] = "constraint references construction geometry only"
     else:
-        result["solid_driving"] = True
+        result["target_driving"] = True
+        result["solid_driving"] = validation_target_kind == "model"
+        result["sketch_driving"] = validation_target_kind == "sketch"
     return result
 
 
@@ -454,7 +470,11 @@ def _expression_binding_solid_influence(obj, property_name, active_object_names)
     type_id = getattr(obj, "TypeId", "")
     name = getattr(obj, "Name", None)
     if name not in active_object_names:
-        return False, "object is not in the active Body Tip dependency graph"
+        return False, (
+            "object is not the requested sketch validation target"
+            if validation_target_kind == "sketch"
+            else "object is not in the active Body Tip dependency graph"
+        )
     if type_id == "Sketcher::SketchObject":
         match = re.search(r"Constraints\[(\d+)\]", str(property_name))
         if match is None:
@@ -469,7 +489,7 @@ def _expression_binding_solid_influence(obj, property_name, active_object_names)
         else:
             index = int(match.group(1))
         influence = _constraint_solid_influence(obj, index, active_object_names)
-        return influence["solid_driving"], influence["reason"]
+        return influence["target_driving"], influence["reason"]
     if type_id.startswith("PartDesign::") and not any(
         token in type_id for token in ("Plane", "Line", "Point", "CoordinateSystem", "Body")
     ):
@@ -548,6 +568,8 @@ def _spreadsheet_summary(sheet, expression_bindings):
                 if not any(
                     _text_uses_effective_token(expression, token) for token in tokens
                 ):
+                    reference["target_driving"] = False
+                    reference["sketch_driving"] = False
                     reference["solid_driving"] = False
                     reference["neutralized_reference"] = True
                     reference["influence_reason"] = (
@@ -565,7 +587,10 @@ def _spreadsheet_summary(sheet, expression_bindings):
             "dependencies": [],
             "dependent_cells": [],
             "connected_to_tree": any(
-                reference.get("solid_driving") for reference in references
+                reference.get("target_driving") for reference in references
+            ),
+            "connected_to_target": any(
+                reference.get("target_driving") for reference in references
             ),
         }
         cells.append(cell_summary)
@@ -647,7 +672,13 @@ def _resolve_spreadsheet_connectivity(spreadsheets):
     for spreadsheet in spreadsheets:
         for cell in spreadsheet["cells"]:
             cell["connected_to_tree"] = cell["node_id"] in connected
-            cell["connected_to_final_solid"] = cell["connected_to_tree"]
+            cell["connected_to_target"] = cell["connected_to_tree"]
+            cell["connected_to_final_solid"] = bool(
+                validation_target_kind == "model" and cell["connected_to_tree"]
+            )
+            cell["connected_to_sketch"] = bool(
+                validation_target_kind == "sketch" and cell["connected_to_tree"]
+            )
             cell["dependent_cells"] = sorted(set(cell["dependent_cells"]))
         spreadsheet["unused_parameters"] = [
             parameter
@@ -838,7 +869,11 @@ def _sketch_summary(sketch, body_name=None):
         for key in ("conflicting", "redundant", "malformed")
     )
     profile_state = analysis.get("profile", {}).get("state", "unknown")
-    geometry_valid = profile_state != "invalid"
+    geometry_valid = profile_state not in {
+        "invalid",
+        "intersecting",
+        "topology_unchecked",
+    }
 
     result = {
         "name": getattr(sketch, "Name", None),
@@ -1022,6 +1057,8 @@ else:
 if doc is None:
     _result_ = {
         "informational": True,
+        "validation_target": validation_target,
+        "target_sketch": None,
         "document": None,
         "assessment": "unavailable",
         "summary": "No active document found.",
@@ -1060,6 +1097,31 @@ else:
             doc.recompute()
         except Exception as exc:
             recompute_error = str(exc)
+
+    target_object = None
+    target_lookup_error = None
+    if validation_target_kind == "sketch":
+        getter = getattr(doc, "getObject", None)
+        target_object = (
+            getter(validation_target_name) if callable(getter) else next(
+                (
+                    item
+                    for item in doc.Objects
+                    if getattr(item, "Name", None) == validation_target_name
+                ),
+                None,
+            )
+        )
+        if target_object is None:
+            target_lookup_error = (
+                f"Sketch validation target {validation_target_name!r} was not found."
+            )
+        elif getattr(target_object, "TypeId", None) != "Sketcher::SketchObject":
+            target_lookup_error = (
+                f"Validation target {validation_target_name!r} is "
+                f"{getattr(target_object, 'TypeId', None)!r}, not a Sketcher sketch."
+            )
+            target_object = None
 
     bodies = [
         _body_summary(obj)
@@ -1107,11 +1169,17 @@ else:
             }
         )
 
-    active_solid_dependency_names = _active_solid_dependency_names(doc)
+    active_solid_dependency_names = (
+        {validation_target_name}
+        if validation_target_kind == "sketch" and target_object is not None
+        else _active_solid_dependency_names(doc)
+        if validation_target_kind == "model"
+        else set()
+    )
     expression_bindings = []
     for obj in doc.Objects:
         for expression in _expression_summary(obj):
-            solid_driving, influence_reason = _expression_binding_solid_influence(
+            target_driving, influence_reason = _expression_binding_solid_influence(
                 obj,
                 expression["property"],
                 active_solid_dependency_names,
@@ -1123,7 +1191,13 @@ else:
                     "object_type": getattr(obj, "TypeId", None),
                     "property": expression["property"],
                     "expression": expression["expression"],
-                    "solid_driving": solid_driving,
+                    "target_driving": target_driving,
+                    "solid_driving": bool(
+                        validation_target_kind == "model" and target_driving
+                    ),
+                    "sketch_driving": bool(
+                        validation_target_kind == "sketch" and target_driving
+                    ),
                     "influence_reason": influence_reason,
                 }
             )
@@ -1139,9 +1213,19 @@ else:
     for body in bodies:
         all_sketches.extend(body["sketches"])
     all_sketches.extend(standalone_sketches)
+    scoped_sketches = (
+        [
+            sketch
+            for sketch in all_sketches
+            if sketch.get("name") == validation_target_name
+        ]
+        if validation_target_kind == "sketch"
+        else all_sketches
+    )
+    target_sketch = scoped_sketches[0] if scoped_sketches else None
 
     named_dimension_constraints = []
-    for sketch in all_sketches:
+    for sketch in scoped_sketches:
         getter = getattr(doc, "getObject", None)
         live_sketch = getter(sketch["name"]) if callable(getter) else next(
             (
@@ -1189,9 +1273,11 @@ else:
                     "dependencies": parameter["dependencies"],
                     "dependent_cells": parameter["dependent_cells"],
                     "connected_to_tree": parameter["connected_to_tree"],
+                    "connected_to_target": parameter["connected_to_target"],
                     "connected_to_final_solid": parameter[
                         "connected_to_final_solid"
                     ],
+                    "connected_to_sketch": parameter["connected_to_sketch"],
                 }
             )
 
@@ -1206,17 +1292,25 @@ else:
             item for item in spreadsheet_parameters if item["name"] == required_name
         ]
         driving_sketch_matches = [
-            item for item in sketch_matches if item.get("solid_driving") is True
+            item for item in sketch_matches if item.get("target_driving") is True
         ]
         linked_spreadsheet_matches = [
             item
             for item in spreadsheet_matches
-            if item["connected_to_final_solid"]
+            if item["connected_to_target"]
         ]
         if driving_sketch_matches or linked_spreadsheet_matches:
-            status = "solid_driving"
+            status = (
+                "sketch_driving"
+                if validation_target_kind == "sketch"
+                else "solid_driving"
+            )
         elif sketch_matches or spreadsheet_matches:
-            status = "defined_but_not_solid_driving"
+            status = (
+                "defined_but_not_sketch_driving"
+                if validation_target_kind == "sketch"
+                else "defined_but_not_solid_driving"
+            )
         else:
             status = "missing"
         dimension_usage.append(
@@ -1229,7 +1323,7 @@ else:
         )
 
     sketch_status_counts = {}
-    for sketch in all_sketches:
+    for sketch in scoped_sketches:
         status = sketch.get("analysis", {}).get("solver", {}).get("status", "unknown")
         sketch_status_counts[status] = sketch_status_counts.get(status, 0) + 1
 
@@ -1239,6 +1333,15 @@ else:
         object_type_counts[type_id] = object_type_counts.get(type_id, 0) + 1
 
     findings = []
+    if target_lookup_error:
+        findings.append(
+            {
+                "severity": "error",
+                "category": "validation_target_invalid",
+                "object": validation_target_name,
+                "message": target_lookup_error,
+            }
+        )
     if recompute_error:
         findings.append(
             {
@@ -1248,7 +1351,7 @@ else:
                 "message": f"Document recompute failed: {recompute_error}",
             }
         )
-    if not bodies:
+    if validation_target_kind == "model" and not bodies:
         findings.append(
             {
                 "severity": "warning",
@@ -1271,7 +1374,15 @@ else:
                     ),
                 }
             )
-        elif item["status"] == "defined_but_not_solid_driving":
+        elif item["status"] in {
+            "defined_but_not_solid_driving",
+            "defined_but_not_sketch_driving",
+        }:
+            target_description = (
+                f"non-construction geometry of sketch {validation_target_name!r}"
+                if validation_target_kind == "sketch"
+                else "the active final solid"
+            )
             findings.append(
                 {
                     "severity": "error",
@@ -1279,7 +1390,7 @@ else:
                     "object": None,
                     "message": (
                         f"Required drawing dimension {item['name']!r} exists but does "
-                        "not have a verified influence on the active final solid. "
+                        f"not have a verified influence on {target_description}. "
                         "Construction-only constraints, inactive sketches, datum "
                         "objects, and metadata links do not satisfy this check. "
                         "Do not delete or rebuild an accepted sketch constraint graph "
@@ -1289,23 +1400,30 @@ else:
                 }
             )
 
-    for spreadsheet in spreadsheets:
-        for parameter in spreadsheet["unused_parameters"]:
-            findings.append(
-                {
-                    "severity": "error",
-                    "category": "unused_spreadsheet_parameter",
-                    "object": spreadsheet["name"],
-                    "message": (
-                        f"Spreadsheet parameter {parameter['alias']!r} in "
-                        f"{parameter['cell']} has no expression binding. Determine "
-                        "why it was created; connect it to the feature tree if it is "
-                        "required, otherwise remove it."
-                    ),
-                }
-            )
+    if validation_target_kind == "model":
+        unused_parameters = [
+            (spreadsheet, parameter)
+            for spreadsheet in spreadsheets
+            for parameter in spreadsheet["unused_parameters"]
+        ]
+    else:
+        unused_parameters = []
+    for spreadsheet, parameter in unused_parameters:
+        findings.append(
+            {
+                "severity": "error",
+                "category": "unused_spreadsheet_parameter",
+                "object": spreadsheet["name"],
+                "message": (
+                    f"Spreadsheet parameter {parameter['alias']!r} in "
+                    f"{parameter['cell']} has no expression binding. Determine "
+                    "why it was created; connect it to the feature tree if it is "
+                    "required, otherwise remove it."
+                ),
+            }
+        )
 
-    for body in bodies:
+    for body in bodies if validation_target_kind == "model" else []:
         if not body["valid"]:
             findings.append(
                 {
@@ -1334,7 +1452,7 @@ else:
                 }
             )
 
-    for sketch in all_sketches:
+    for sketch in scoped_sketches:
         solver = sketch.get("analysis", {}).get("solver", {})
         status = solver.get("status", "unknown")
         index_data = sketch.get("solver_constraint_indices", {})
@@ -1405,18 +1523,59 @@ else:
                 }
             )
 
-        profile_state = sketch.get("analysis", {}).get("profile", {}).get("state")
-        if profile_state == "invalid":
+        profile = sketch.get("analysis", {}).get("profile", {})
+        profile_state = profile.get("state")
+        if profile_state in {"invalid", "intersecting", "topology_unchecked"}:
             findings.append(
                 {
                     "severity": "error",
                     "category": "sketch_profile_invalid",
                     "object": sketch["name"],
-                    "message": "Sketch profile geometry is invalid.",
+                    "message": (
+                        "Sketch profile topology is not ready: "
+                        f"state={profile_state}, outer loops="
+                        f"{profile.get('outer_wire_count')}, holes="
+                        f"{profile.get('hole_wire_count')}, intersecting pairs="
+                        f"{profile.get('intersecting_wire_pairs', [])}."
+                    ),
+                }
+            )
+        elif profile_state == "closed" and (profile.get("outer_wire_count") or 0) > 1:
+            findings.append(
+                {
+                    "severity": "warning",
+                    "category": "sketch_multiple_outer_loops",
+                    "object": sketch["name"],
+                    "message": (
+                        f"Sketch has {profile.get('outer_wire_count')} disjoint outer "
+                        f"loop(s) and {profile.get('hole_wire_count')} nested hole "
+                        "loop(s). Do not infer hole semantics from closed-wire count."
+                    ),
                 }
             )
 
-    for obj in uncontained_shape_objects:
+        constraint_quality = sketch.get("analysis", {}).get(
+            "constraint_quality", {}
+        )
+        if constraint_quality.get("coordinate_heavy"):
+            findings.append(
+                {
+                    "severity": "warning",
+                    "category": "sketch_coordinate_heavy_constraints",
+                    "object": sketch["name"],
+                    "message": (
+                        "Sketch is fully/mostly positioned with "
+                        f"{constraint_quality.get('absolute_coordinate_constraint_count')} "
+                        "point-to-origin X/Y dimensions and only "
+                        f"{constraint_quality.get('geometric_relation_count')} geometric "
+                        "relations. 0 DoF does not prove geometrical correctness or "
+                        "design intent; prefer Coincident, Horizontal, Vertical, "
+                        "Tangent, Equal, Radius, and datum-based dimensions."
+                    ),
+                }
+            )
+
+    for obj in uncontained_shape_objects if validation_target_kind == "model" else []:
         findings.append(
             {
                 "severity": "warning",
@@ -1434,17 +1593,30 @@ else:
     else:
         assessment = "healthy"
 
-    summary = (
-        f"Document '{doc.Name}': {len(bodies)} PartDesign Body/Bodies, "
-        f"{len(all_sketches)} sketch(es), "
-        f"{len(uncontained_shape_objects)} solid object(s) outside Bodies; "
-        f"assessment={assessment}."
+    if validation_target_kind == "sketch":
+        summary = (
+            f"Document '{doc.Name}', sketch target {validation_target_name!r}: "
+            f"{len(scoped_sketches)} matching sketch(es); assessment={assessment}. "
+            "Body, solid, and Tip state are outside this validation scope."
+        )
+    else:
+        summary = (
+            f"Document '{doc.Name}': {len(bodies)} PartDesign Body/Bodies, "
+            f"{len(all_sketches)} sketch(es), "
+            f"{len(uncontained_shape_objects)} solid object(s) outside Bodies; "
+            f"assessment={assessment}."
+        )
+
+    driving_status = (
+        "sketch_driving" if validation_target_kind == "sketch" else "solid_driving"
     )
 
     _result_ = {
         "informational": True,
         "assessment": assessment,
         "summary": summary,
+        "validation_target": validation_target,
+        "target_sketch": target_sketch,
         "document": {
             "name": getattr(doc, "Name", None),
             "label": getattr(doc, "Label", None),
@@ -1458,6 +1630,7 @@ else:
             "bodies": len(bodies),
             "body_history_items": sum(body["history_count"] for body in bodies),
             "sketches": len(all_sketches),
+            "sketches_in_scope": len(scoped_sketches),
             "standalone_sketches": len(standalone_sketches),
             "spreadsheets": len(spreadsheets),
             "spreadsheet_parameters": len(spreadsheet_parameters),
@@ -1471,7 +1644,7 @@ else:
             "required_names": required_dimension_names,
             "usage": dimension_usage,
             "all_used": bool(required_dimension_names) and all(
-                item["status"] == "solid_driving" for item in dimension_usage
+                item["status"] == driving_status for item in dimension_usage
             ),
             "named_dimension_constraints": named_dimension_constraints,
             "spreadsheet_parameters": spreadsheet_parameters,
@@ -1489,15 +1662,25 @@ else:
                 "path, bind the owning semantic feature property when appropriate, "
                 "or report a remaining diagnostic limitation."
             ),
-            "report": [
-                "document and Body names",
-                "Body and Tip validity",
-                "ordered feature history",
-                "sketch solver/profile status",
-                "required drawing-dimension usage",
-                "Spreadsheet parameter connectivity and unused aliases",
-                "significant findings and unresolved warnings",
-            ],
+            "report": (
+                [
+                    "document and target sketch name",
+                    "sketch solver, topology, outer-loop, and hole status",
+                    "constraint-quality warning; 0 DoF is not acceptance",
+                    "required drawing-dimension influence on non-construction geometry",
+                    "significant findings and unresolved warnings",
+                ]
+                if validation_target_kind == "sketch"
+                else [
+                    "document and Body names",
+                    "Body and Tip validity",
+                    "ordered feature history",
+                    "sketch solver/profile status",
+                    "required drawing-dimension usage",
+                    "Spreadsheet parameter connectivity and unused aliases",
+                    "significant findings and unresolved warnings",
+                ]
+            ),
         },
         "limitations": [
             "This is an informative structural and geometric diagnostic, "
@@ -1508,6 +1691,8 @@ else:
             "or design intent.",
             "Shape validity uses FreeCAD/OpenCASCADE isValid checks and does not "
             "run every expensive BOPCheck mode.",
+            "Sketch profile topology verifies closed-wire intersection and nesting, "
+            "but cannot infer which loop roles the source drawing intended.",
         ],
     }
 '''
@@ -1518,6 +1703,7 @@ else:
         .replace("__RECOMPUTE__", repr(recompute))
         .replace("__INCLUDE_CONSTRAINTS__", repr(include_sketch_constraints))
         .replace("__REQUIRED_DIMENSION_NAMES__", repr(required_dimension_names or []))
+        .replace("__VALIDATION_TARGET__", repr(validation_target))
         .replace(
             "__SHEET_METAL_PROXY_PROPERTIES__",
             repr(

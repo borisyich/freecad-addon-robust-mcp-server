@@ -10,9 +10,26 @@ may fail or create invalid geometry.
 from collections.abc import Awaitable, Callable
 from typing import Any, Literal
 
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+
 from freecad_mcp.bridge._parametric_validation_runtime import (
     build_parametric_validation_code,
 )
+
+
+class SketchValidationTarget(BaseModel):
+    """Restrict parametric validation to one Sketcher sketch."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["sketch"]
+    name: str = Field(
+        min_length=1,
+        description="Internal FreeCAD Name of the Sketcher::SketchObject to validate.",
+    )
+
+
+_VALIDATION_TARGET_ADAPTER = TypeAdapter(SketchValidationTarget)
 
 
 def _finding_page(
@@ -82,6 +99,8 @@ def _parametric_response(
         "assessment": report.get("assessment"),
         "summary": report.get("summary"),
         "detail_level": detail_level,
+        "validation_target": report.get("validation_target", {"kind": "model"}),
+        "target_sketch": report.get("target_sketch"),
         "document": report.get("document"),
         "counts": report.get("counts", {}),
         "sketch_solver_status_counts": report.get("sketch_solver_status_counts", {}),
@@ -415,6 +434,7 @@ else:
         recompute: bool = True,
         include_sketch_constraints: bool = False,
         required_dimension_names: list[str] | None = None,
+        target: SketchValidationTarget | None = None,
         detail_level: Literal["summary", "structure", "full"] = "summary",
         finding_offset: int = 0,
         finding_limit: int = 20,
@@ -426,8 +446,11 @@ else:
         it reports Bodies and Tips, ordered Body history, shape validity, sketch
         solver/profile state, expressions, direct solid objects outside Bodies,
         Spreadsheet parameter connectivity, required drawing-dimension usage,
-        and actionable findings. Call it before the final user-facing response
-        and summarize significant findings instead of merely saying "done".
+        and actionable findings. Set ``target={"kind":"sketch","name":"..."}``
+        to validate a sketch deliverable without treating the absence or state of
+        a Body, solid, or Tip as an error. Call it before the final user-facing
+        response and summarize significant findings instead of merely saying
+        "done".
 
         The tool does not verify that the model matches a drawing or that the
         chosen manufacturing process is correct. Those remain separate visual,
@@ -449,8 +472,13 @@ else:
                 explicit non-starred drawing dimension before modeling. Each name
                 must appear as a named driving sketch constraint or as a Spreadsheet
                 alias connected directly or transitively to an expression in the
-                active final-solid dependency graph. Construction-only geometry
-                and inactive/helper objects do not count as usage.
+                active final-solid dependency graph. With a sketch target, each name
+                must instead influence non-construction geometry of that exact
+                sketch. Construction-only geometry and inactive/helper objects do
+                not count as usage.
+            target: Optional sketch validation target. Omit it for the existing
+                whole-model/final-solid diagnostic. For a sketch-only deliverable,
+                pass ``{"kind":"sketch","name":"Sketch_FlatPattern"}``.
             detail_level: ``summary`` (default) returns completion-critical counts,
                 dimension influence, and a page of findings. ``structure`` adds
                 Bodies, sketches, and Spreadsheet structure. ``full`` returns the
@@ -496,12 +524,22 @@ else:
             seen_required_dimensions.add(name)
             normalized_required_dimensions.append(name)
 
+        normalized_target = None
+        if target is not None:
+            normalized_target = _VALIDATION_TARGET_ADAPTER.validate_python(
+                target
+            ).model_dump()
+            normalized_target["name"] = normalized_target["name"].strip()
+            if not normalized_target["name"]:
+                raise ValueError("target sketch name must not be empty")
+
         bridge = await get_bridge()
         code = build_parametric_validation_code(
             doc_name=doc_name,
             recompute=recompute,
             include_sketch_constraints=include_sketch_constraints,
             required_dimension_names=normalized_required_dimensions,
+            validation_target=normalized_target,
         )
         result = await bridge.execute_python(code)
         if result.success and result.result:
@@ -516,6 +554,8 @@ else:
             "informational": True,
             "assessment": "unavailable",
             "summary": error,
+            "validation_target": normalized_target or {"kind": "model"},
+            "target_sketch": None,
             "document": None,
             "counts": {
                 "bodies": 0,

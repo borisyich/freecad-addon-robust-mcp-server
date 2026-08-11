@@ -18,6 +18,35 @@ principles. These links are references, not runtime dependencies.
 
 ## FreeCAD parametric structure
 
+- FreeCAD documentation, **Sketcher Workbench**:
+  https://github.com/FreeCAD/FreeCAD-documentation/blob/main/wiki/Sketcher_Workbench.md
+  (live wiki: https://wiki.freecad.org/Sketcher_Workbench)
+  - profile sketches require closed contours without self-intersection,
+    contour-to-contour intersections, shared/duplicate edges, or T-connections;
+  - use geometric constraints before the minimum necessary dimensions, prefer
+    horizontal/vertical constraints and dimensions where appropriate, and use
+    Validate Sketch rather than treating fully constrained status as sufficient;
+  - a fully constrained sketch can still flip to an unintended solution after a
+    parameter change.
+- FreeCAD documentation, **Sketcher Micro Tutorial - Constraint Practices**:
+  https://github.com/FreeCAD/FreeCAD-documentation/blob/main/wiki/Sketcher_Micro_Tutorial_-_Constraint_Practices.md
+  (live wiki:
+  https://wiki.freecad.org/Sketcher_Micro_Tutorial_-_Constraint_Practices)
+  - prefer geometric relationships to datum/dimensional constraints when they
+    express the same intent; fewer dimensional constraints generally produce a
+    cleaner solver graph.
+- FreeCAD documentation, **Sketcher CreateFillet**:
+  https://github.com/FreeCAD/FreeCAD-documentation/blob/main/wiki/Sketcher_CreateFillet.md
+  (live wiki: https://wiki.freecad.org/Sketcher_CreateFillet)
+  - the native Sketcher fillet joins two non-parallel parent edges and preserves
+    their geometric relationship better than an unrelated free arc.
+- FreeCAD documentation, **Sketcher CreateBSpline**:
+  https://github.com/FreeCAD/FreeCAD-documentation/blob/main/wiki/Sketcher_CreateBSpline.md
+  (live wiki: https://wiki.freecad.org/Sketcher_CreateBSpline)
+  - a B-spline is explicitly defined by control points or knot points and brings
+    internal geometry, degree, knot multiplicity, and weight semantics; it is not
+    a generic replacement for lines or circular arcs.
+
 - FreeCAD documentation, **Basic Part Design Tutorial**:
   https://github.com/FreeCAD/FreeCAD-documentation/blob/main/wiki/Basic_Part_Design_Tutorial.md
   - PartDesign starts with a Body and builds a solid from sketches and additive/

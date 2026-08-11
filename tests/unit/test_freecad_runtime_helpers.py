@@ -1,5 +1,7 @@
 """Tests for Python snippets executed inside the FreeCAD interpreter."""
 
+from typing import ClassVar
+
 from freecad_mcp.tools._freecad_runtime_helpers import (
     BODY_RUNTIME_HELPERS,
     FEATURE_VALIDATION_RUNTIME_HELPERS,
@@ -384,6 +386,137 @@ def test_sketch_analysis_reports_open_endpoints() -> None:
     ]
     assert result["profile_ready"] is False
     assert any("Coincident" in hint for hint in result["hints"])
+
+
+def test_sketch_profile_rejects_intersecting_closed_wires() -> None:
+    """Closed wire count must not hide a hole crossing the outer contour."""
+    from freecad_mcp.tools._freecad_runtime_helpers import (
+        SKETCH_ANALYSIS_RUNTIME_HELPERS,
+    )
+
+    class _IntersectingWire(_Wire):
+        def distToShape(self, _other):
+            return 0.0, [], []
+
+    class _IntersectingSketch(_Sketch):
+        GeometryCount = 2
+        Shape = _SketchShape([_IntersectingWire(True), _IntersectingWire(True)])
+
+    result = _load_helpers(SKETCH_ANALYSIS_RUNTIME_HELPERS)["_analyze_sketch"](
+        _IntersectingSketch()
+    )
+
+    assert result["profile"]["state"] == "intersecting"
+    assert result["profile"]["topology_valid"] is False
+    assert result["profile"]["intersecting_wire_pairs"] == [
+        {"wire_indices": [0, 1], "distance": 0.0}
+    ]
+    assert result["profile_ready"] is False
+
+
+def test_sketch_profile_classifies_outer_and_hole_wires(monkeypatch) -> None:
+    """Strict containment must be reported separately from closed-wire count."""
+    import sys
+    from types import SimpleNamespace
+
+    from freecad_mcp.tools._freecad_runtime_helpers import (
+        SKETCH_ANALYSIS_RUNTIME_HELPERS,
+    )
+
+    class _NestedWire(_Wire):
+        def __init__(self, low: float, high: float) -> None:
+            super().__init__(True)
+            self.low = low
+            self.high = high
+
+        def distToShape(self, other):
+            gap = min(other.low - self.low, self.high - other.high)
+            return abs(float(gap)), [], []
+
+    class _Face:
+        def __init__(self, wire: _NestedWire) -> None:
+            self.wire = wire
+            self.Area = (wire.high - wire.low) ** 2
+
+        def isValid(self) -> bool:
+            return True
+
+        def common(self, other):
+            low = max(self.wire.low, other.wire.low)
+            high = min(self.wire.high, other.wire.high)
+            area = max(0.0, high - low) ** 2
+            return SimpleNamespace(Area=area)
+
+    class _MadeFace:
+        Faces: ClassVar[list[object]] = [object()]
+
+        def isValid(self) -> bool:
+            return True
+
+    monkeypatch.setitem(
+        sys.modules,
+        "Part",
+        SimpleNamespace(Face=_Face, makeFace=lambda _wires, _maker: _MadeFace()),
+    )
+
+    class _NestedSketch(_Sketch):
+        GeometryCount = 2
+        Shape = _SketchShape([_NestedWire(0.0, 10.0), _NestedWire(2.0, 8.0)])
+
+    result = _load_helpers(SKETCH_ANALYSIS_RUNTIME_HELPERS)["_analyze_sketch"](
+        _NestedSketch()
+    )
+
+    profile = result["profile"]
+    assert profile["state"] == "closed"
+    assert profile["topology_valid"] is True
+    assert profile["outer_wire_count"] == 1
+    assert profile["hole_wire_count"] == 1
+    assert profile["wire_nesting"] == [
+        {
+            "wire_index": 0,
+            "parent_wire_index": None,
+            "nesting_depth": 0,
+            "role": "outer",
+        },
+        {
+            "wire_index": 1,
+            "parent_wire_index": 0,
+            "nesting_depth": 1,
+            "role": "hole",
+        },
+    ]
+    assert result["profile_ready"] is True
+
+
+def test_sketch_analysis_warns_about_coordinate_heavy_constraints() -> None:
+    """Zero DoF from absolute point coordinates is not design-intent evidence."""
+    from freecad_mcp.tools._freecad_runtime_helpers import (
+        SKETCH_ANALYSIS_RUNTIME_HELPERS,
+    )
+
+    class _CoordinateConstraint:
+        Type = "DistanceX"
+        FirstPos = 1
+        Second = -2000
+
+    class _CoordinateSketch(_Sketch):
+        GeometryCount = 10
+        ConstraintCount = 10
+        Constraints: ClassVar[list[_CoordinateConstraint]] = [
+            _CoordinateConstraint() for _ in range(10)
+        ]
+        FullyConstrained = True
+        DoF = 0
+
+    result = _load_helpers(SKETCH_ANALYSIS_RUNTIME_HELPERS)["_analyze_sketch"](
+        _CoordinateSketch()
+    )
+
+    assert result["solver"]["status"] == "fully_constrained"
+    assert result["constraint_quality"]["coordinate_heavy"] is True
+    assert result["constraint_quality"]["absolute_coordinate_constraint_count"] == 10
+    assert any("0 DoF alone" in hint for hint in result["hints"])
 
 
 class _SketchVector:

@@ -220,6 +220,19 @@
   `SketchObject.getConstraintName()`. Profile constraints feeding native
   SheetMetal features now count as solid-driving, while construction-only
   constraints remain rejected.
+- Added sketch-scoped `validate_parametric_model(target={"kind":"sketch",...})`
+  so required dimensions are traced to non-construction geometry of the named
+  sketch without Body/solid/Tip findings affecting the assessment.
+- Hardened sketch profile readiness with pairwise contour intersection checks,
+  FaceMaker topology validation, and explicit outer/hole nesting roles; closed
+  wire count alone no longer implies a valid hole arrangement.
+- Added coordinate-heavy constraint diagnostics and expanded the engineering
+  Skill with straight-lines-first construction, datum-chain verification,
+  B-spline gating, validation-integrity rules, and the explicit warning that
+  0 DoF does not prove geometric correctness or design intent.
+- Clarified in the public `add_arc` schema that center angles use degrees and
+  documented radius-defined endpoint/fillet modes as the preferred engineering
+  forms.
 
 This project uses **component-specific versioning**. Each component has its own
 release notes and version history.

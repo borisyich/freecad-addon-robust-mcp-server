@@ -179,3 +179,34 @@ def test_freecad_engineering_skill_has_codex_routing_metadata() -> None:
     assert "validate_parametric_model" in skill
     assert 'allow_implicit_invocation: true' in metadata
     assert 'value: "freecad"' in metadata
+
+
+def test_freecad_engineering_skill_covers_sketch_design_intent() -> None:
+    skill = (ROOT / ".agents/skills/freecad-engineering/SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    reference_path = (
+        ROOT / ".agents/skills/freecad-engineering/references/sketch-construction.md"
+    )
+    reference = reference_path.read_text(encoding="utf-8")
+
+    assert "references/sketch-construction.md" in skill
+    assert 'target={"kind":"sketch"' in skill
+    for concept in (
+        "0 DoF",
+        "absolute X/Y coordinates",
+        "add_bspline",
+        "datum/reference",
+        "control dimension chain",
+        "fake geometry",
+    ):
+        assert concept in skill
+    for concept in (
+        "straight segments first",
+        "tangent_fillet",
+        "close at least one control chain",
+        "outer_wire_count == 1",
+        "fully_constrained",
+        "Never add fake geometry",
+    ):
+        assert concept in reference

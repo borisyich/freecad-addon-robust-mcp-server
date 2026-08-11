@@ -23,9 +23,20 @@ third.
   features;
 - `solver_error`: undo/rework the latest sketch change;
 - `profile=open`: acceptable for paths, but not for Pad/Pocket profile operations;
-- `profile=closed`: suitable for profile operations when solver state is healthy;
-- `profile=invalid`: inspect self-intersections, duplicate/zero-length geometry,
-  and overlapping edges.
+- `profile=closed`: suitable only when `topology_valid=true`; inspect reported
+  `outer_wire_count`, `hole_wire_count`, nesting roles, and intersecting pairs
+  against the intended drawing topology;
+- `profile=intersecting`: closed contours touch, cross, or overlap and are not a
+  valid outer/hole arrangement;
+- `profile=invalid` or `topology_unchecked`: inspect self-intersections,
+  duplicate/zero-length geometry, overlapping edges, and topology diagnostics.
+
+`closed_wire_count` alone does not establish one outer loop plus N holes. A
+fully constrained sketch likewise proves only that the solver reports 0 DoF; it
+does not prove drawing correspondence, correct datums, valid nesting, or good
+design intent. Treat `sketch_coordinate_heavy_constraints` as a prompt to replace
+point-to-origin coordinate locking with semantic geometric relationships and a
+minimal datum-based dimension set.
 
 Fix/Block constraints are not a substitute for design intent. Their count may
 not exceed 50% of sketch geometry; use geometric or dimensional constraints, or
@@ -79,6 +90,12 @@ stored on each constraint, including FreeCAD 1.0.x builds that do not expose a
 `SketchObject.getConstraintName()` convenience method. This name resolution
 does not weaken the geometry check: a constraint that references construction
 geometry only is still not accepted as driving the final solid.
+
+When the deliverable is a sketch, pass
+`target={"kind":"sketch","name":"..."}`. Required dimensions are then traced to
+non-construction geometry of that exact sketch and report `sketch_driving` or
+`defined_but_not_sketch_driving`; Body, Tip, standalone-solid, and unused global
+Spreadsheet findings do not determine the sketch-scope assessment.
 
 Use the validator's compact default first. Request `structure` only for a
 reported structural problem and `full` only for a focused history/expression or

@@ -651,6 +651,9 @@ class TestMcpInstructions:
             "Compare one seed element before applying any pattern",
             "validate_parametric_model",
             "required_dimension_names",
+            'target={"kind":"sketch","name":"..."}',
+            "never use a B-spline unless",
+            "Treat 0 DoF as solver evidence",
         )
         for clause in required_clauses:
             assert clause in normalized_instructions
