@@ -468,6 +468,9 @@ OBJECT_INSPECTION_RUNTIME = dedent(
                 continue
             if output_name == "value":
                 item = _finite_number(item)
+                if item is not None and result["constraint_type"] == "Angle":
+                    item = math.degrees(item)
+                    result["value_unit"] = "deg"
             elif isinstance(item, (int, float, str, bool)):
                 pass
             else:

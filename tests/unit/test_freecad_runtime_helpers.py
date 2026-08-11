@@ -614,6 +614,33 @@ class _NamedExpressionSketch(_DetailedSketch):
         raise LookupError(name)
 
 
+class _AngleConstraint(_Constraint):
+    Type = "Angle"
+    Value = 3.141592653589793 / 4
+    Name = "Slope"
+    Label = "Slope"
+
+
+class _AngleDetailedSketch(_DetailedSketch):
+    Constraints = [_AngleConstraint()]
+    ExpressionEngine = []
+
+
+def test_sketch_details_report_angle_constraint_values_in_degrees() -> None:
+    """Sketcher radians must not leak through the public sketch-info payload."""
+    from freecad_mcp.tools._freecad_runtime_helpers import (
+        SKETCH_ANALYSIS_RUNTIME_HELPERS,
+    )
+
+    helpers = _load_helpers(SKETCH_ANALYSIS_RUNTIME_HELPERS)
+    result = helpers["_sketch_detailed_info"](_AngleDetailedSketch())
+
+    constraint = result["constraints"][0]
+    assert constraint["constraint_type"] == "Angle"
+    assert round(constraint["value"], 6) == 45.0
+    assert constraint["value_unit"] == "deg"
+
+
 def test_sketch_details_match_named_constraint_expression_paths() -> None:
     """FreeCAD canonical named paths must map back to constraint entries."""
     from freecad_mcp.tools._freecad_runtime_helpers import (

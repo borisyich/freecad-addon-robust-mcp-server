@@ -82,6 +82,13 @@ def test_feature_operation_schema_is_strict_and_discriminated():
     flange_definition = schema["$defs"]["FlangeOperation"]
     assert flange_definition["additionalProperties"] is False
     assert flange_definition["properties"]["length"]["exclusiveMinimum"] == 0
+    assert "degrees" in flange_definition["properties"]["angle"]["description"]
+    assert "degrees" in schema["$defs"]["FoldOperation"]["properties"]["angle"][
+        "description"
+    ]
+    assert "degrees" in schema["$defs"]["HemOperation"]["properties"]["roll_angle"][
+        "description"
+    ]
 
 
 def test_operation_validation_rejects_bad_topology_and_unknown_fields():

@@ -265,7 +265,11 @@ class PolarMultiTransform(BaseModel):
     model_config = ConfigDict(extra="forbid")
     kind: Literal["polar"]
     axis: Literal["X", "Y", "Z"] = "Z"
-    angle: float = Field(gt=0, le=360)
+    angle: float = Field(
+        gt=0,
+        le=360,
+        description="Total polar-pattern angle in degrees.",
+    )
     occurrences: int = Field(ge=2)
 
 
@@ -330,7 +334,13 @@ class AddConstraintOperation(_SketchOperation):
     point1: int = -1
     geometry2: int = -2
     point2: int = -1
-    value: float | None = None
+    value: float | None = Field(
+        default=None,
+        description=(
+            "Numeric constraint value. Linear dimensions use millimetres; "
+            "constraint_type='Angle' uses degrees."
+        ),
+    )
     expression: str | None = None
     constraint_name: str | None = None
 
@@ -385,7 +395,11 @@ class DimensionalConstraintOperation(_SketchOperation):
     point1: int = -1
     geometry2: int = -2
     point2: int = -1
-    value: float
+    value: float = Field(
+        description=(
+            "Constraint value in millimetres, except op='angle' which uses degrees."
+        )
+    )
     expression: str | None = None
     constraint_name: str | None = None
 
@@ -1453,6 +1467,7 @@ _result_ = {{
         code = f"""
 {SKETCH_ANALYSIS_RUNTIME_HELPERS}
 
+import math
 import Sketcher
 
 operations = {normalized_operations!r}
@@ -1608,10 +1623,13 @@ try:
         elif constraint_type == "Angle":
             if value is None:
                 raise ValueError("Angle constraint requires a value")
+            angle_value_rad = math.radians(float(value))
             constraint = (
-                Sketcher.Constraint(constraint_type, geometry1, geometry2, value)
+                Sketcher.Constraint(
+                    constraint_type, geometry1, geometry2, angle_value_rad
+                )
                 if geometry2 >= 0
-                else Sketcher.Constraint(constraint_type, geometry1, value)
+                else Sketcher.Constraint(constraint_type, geometry1, angle_value_rad)
             )
         else:
             raise ValueError(f"Unknown constraint type: {{constraint_type}}")
@@ -3557,7 +3575,7 @@ _result_ = {{
         Args:
             feature_name: Name of the feature to pattern.
             axis: Pattern axis. Options: "X", "Y", "Z".
-            angle: Total pattern angle. Defaults to 360.0.
+            angle: Total pattern angle in degrees. Defaults to 360.0.
             occurrences: Number of pattern instances. Defaults to 6.
             name: Pattern feature name. Auto-generated if None.
             doc_name: Document containing the feature. Uses active document if None.
@@ -4965,6 +4983,7 @@ _result_ = {{
 
         Returns:
             Sketch status plus the explicitly requested, paged detail sections.
+            Angle-constraint values are reported in degrees, matching the MCP input.
         """
         if min(geometry_offset, constraint_offset) < 0:
             raise ValueError(

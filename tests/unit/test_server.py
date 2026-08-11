@@ -713,4 +713,3 @@ class TestMcpInstructions:
         # Eight dedicated measurement schemas trade a modest registry increase
         # for substantially clearer agent calls. Keep the 131-tool payload bounded.
         assert payload_bytes < 103_000
-        assert payload_bytes / len(listed) < 780

@@ -35,7 +35,9 @@ class CylinderPrimitive(_PrimitiveBase):
     kind: Literal["cylinder"]
     radius: float = Field(default=5.0, gt=0)
     height: float = Field(default=10.0, gt=0)
-    angle: float = Field(default=360.0, gt=0, le=360)
+    angle: float = Field(
+        default=360.0, gt=0, le=360, description="Sweep angle in degrees."
+    )
 
 
 class SpherePrimitive(_PrimitiveBase):
@@ -48,7 +50,9 @@ class ConePrimitive(_PrimitiveBase):
     radius1: float = Field(default=5.0, ge=0)
     radius2: float = Field(default=0.0, ge=0)
     height: float = Field(default=10.0, gt=0)
-    angle: float = Field(default=360.0, gt=0, le=360)
+    angle: float = Field(
+        default=360.0, gt=0, le=360, description="Sweep angle in degrees."
+    )
 
     @model_validator(mode="after")
     def validate_radii(self) -> "ConePrimitive":
@@ -61,9 +65,11 @@ class TorusPrimitive(_PrimitiveBase):
     kind: Literal["torus"]
     radius1: float = Field(default=10.0, gt=0)
     radius2: float = Field(default=2.0, gt=0)
-    angle1: float = -180.0
-    angle2: float = 180.0
-    angle3: float = Field(default=360.0, gt=0, le=360)
+    angle1: float = Field(default=-180.0, description="First torus angle in degrees.")
+    angle2: float = Field(default=180.0, description="Second torus angle in degrees.")
+    angle3: float = Field(
+        default=360.0, gt=0, le=360, description="Torus sweep angle in degrees."
+    )
 
 
 class WedgePrimitive(_PrimitiveBase):
@@ -95,7 +101,9 @@ class HelixPrimitive(_PrimitiveBase):
     pitch: float = Field(default=5.0, gt=0)
     height: float = Field(default=20.0, gt=0)
     radius: float = Field(default=5.0, gt=0)
-    angle: float = 0.0
+    angle: float = Field(
+        default=0.0, description="Helix cone angle in degrees."
+    )
     left_handed: bool = False
 
 
@@ -2494,11 +2502,8 @@ if not hasattr(obj, "Shape"):
 # Wrap in transaction for undo support
 doc.openTransaction("Revolve Shape")
 try:
-    import math
-
     axis_point = FreeCAD.Vector({axis_point[0]}, {axis_point[1]}, {axis_point[2]})
     axis_dir = FreeCAD.Vector({axis_direction[0]}, {axis_direction[1]}, {axis_direction[2]})
-    angle_rad = math.radians({angle})
 
     revolved = obj.Shape.revolve(axis_point, axis_dir, {angle})
 

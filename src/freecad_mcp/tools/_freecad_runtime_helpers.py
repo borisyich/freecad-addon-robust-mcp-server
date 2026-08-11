@@ -742,6 +742,9 @@ FEATURE_VALIDATION_RUNTIME_HELPERS = _runtime_code(
 
 SKETCH_ANALYSIS_RUNTIME_HELPERS = _runtime_code(
     r'''
+    import math
+
+
     def _sketch_point_name(position):
         try:
             position = int(position)
@@ -1449,6 +1452,9 @@ SKETCH_ANALYSIS_RUNTIME_HELPERS = _runtime_code(
                 if output_name == "value":
                     try:
                         item = float(item)
+                        if detail["constraint_type"] == "Angle":
+                            item = math.degrees(item)
+                            detail["value_unit"] = "deg"
                     except Exception:
                         item = str(item)
                 detail[output_name] = item

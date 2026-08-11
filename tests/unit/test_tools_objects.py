@@ -654,6 +654,16 @@ class TestObjectTools:
             "helix",
         }
         assert len(schema["oneOf"]) == 7
+        for definition, fields in {
+            "CylinderPrimitive": ("angle",),
+            "ConePrimitive": ("angle",),
+            "TorusPrimitive": ("angle1", "angle2", "angle3"),
+            "HelixPrimitive": ("angle",),
+        }.items():
+            for field in fields:
+                assert "degrees" in schema["$defs"][definition]["properties"][field][
+                    "description"
+                ]
 
     @pytest.mark.asyncio
     async def test_create_primitive_rejects_fields_from_another_kind(

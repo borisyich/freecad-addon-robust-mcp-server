@@ -337,8 +337,10 @@ edit_sketch_geometry(
 such as `horizontal`, `vertical`, `coincident`, `parallel`, `perpendicular`,
 `tangent`, `equal`, `distance`, `distance_x`, `distance_y`, `radius`, `angle`,
 `fix`, plus generic `add_constraint` and `delete_constraint`. Dimensional
-operations may include `constraint_name` and a Spreadsheet expression. Use
-`set_expression`/`clear_expression` with `constraint_index` to change existing
+operations may include `constraint_name` and a Spreadsheet expression. Numeric
+`angle` constraint values are degrees at the MCP boundary; FreeCAD's internal
+Sketcher radians are handled by the tool. Use `set_expression`/`clear_expression`
+with `constraint_index` to change existing
 bindings. `constraint_index` is zero-based; GUI/solver constraint numbers are
 one-based, and sketch results expose both forms. The resulting number of
 Fix/Block constraints must never exceed 50% of

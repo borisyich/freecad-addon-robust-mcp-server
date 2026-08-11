@@ -212,6 +212,9 @@ Read the detailed strategy in
   `edit_sketch_constraints`, supply `expression` when creating the constraint,
   or use `set_expression`/`clear_expression` for an existing index. A readable
   `constraint_name` documents intent but does not replace the expression path.
+  Numeric sketch `angle` constraint values are degrees at the MCP boundary. An
+  angle expression must evaluate to an angular quantity: store `45 deg` in the
+  Spreadsheet or multiply a unitless alias by `1 deg`; do not pass radians.
 - After constraint edits, use compact `get_sketch_info()` first. Request
   `detail_level="constraints"` or paged `"full"` only when exact indices,
   referenced elements, datum/name/driving state, or expression bindings are

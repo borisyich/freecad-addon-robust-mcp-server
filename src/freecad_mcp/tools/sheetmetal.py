@@ -30,7 +30,9 @@ class FlangeOperation(_SheetMetalOperation):
     edges: list[EdgeReference] = Field(min_length=1)
     length: float = Field(gt=0)
     radius: float = Field(gt=0)
-    angle: float = Field(default=90.0, gt=0, le=180)
+    angle: float = Field(
+        default=90.0, gt=0, le=180, description="Bend angle in degrees."
+    )
     invert: bool = False
     bend_type: Literal[
         "material_outside", "material_inside", "thickness_outside", "offset"
@@ -52,7 +54,9 @@ class FoldOperation(_SheetMetalOperation):
     face: FaceReference
     bend_line_sketch: str = Field(min_length=1)
     radius: float = Field(gt=0)
-    angle: float = Field(default=90.0, gt=0, le=180)
+    angle: float = Field(
+        default=90.0, gt=0, le=180, description="Fold angle in degrees."
+    )
     k_factor: float = Field(ge=0, le=1)
     invert: bool = False
     invert_solid: bool = False
@@ -121,7 +125,9 @@ class HemOperation(_SheetMetalOperation):
     width: float = Field(default=10.0, gt=0)
     radius: float = Field(default=1.0, gt=0)
     opening: float = Field(default=1.0, ge=0)
-    roll_angle: float = Field(default=225.0, gt=180, lt=360)
+    roll_angle: float = Field(
+        default=225.0, gt=180, lt=360, description="Hem roll angle in degrees."
+    )
     include_bend: bool = True
     opened: bool = False
     invert: bool = False

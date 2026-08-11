@@ -191,12 +191,14 @@ class TestPartDesignTools:
     def test_sketch_batch_operation_schemas_are_discriminated(self):
         """Batch items must expose per-operation fields instead of unknown arrays."""
         from freecad_mcp.tools.partdesign import (
+            _MULTI_TRANSFORM_STAGE_ADAPTER,
             _SKETCH_CONSTRAINT_OPERATION_ADAPTER,
             _SKETCH_GEOMETRY_OPERATION_ADAPTER,
         )
 
         geometry_schema = _SKETCH_GEOMETRY_OPERATION_ADAPTER.json_schema()
         constraint_schema = _SKETCH_CONSTRAINT_OPERATION_ADAPTER.json_schema()
+        transform_schema = _MULTI_TRANSFORM_STAGE_ADAPTER.json_schema()
 
         assert geometry_schema["discriminator"]["propertyName"] == "op"
         assert constraint_schema["discriminator"]["propertyName"] == "op"
@@ -211,6 +213,18 @@ class TestPartDesignTools:
             "points"
         ]
         assert "explicitly point-defined" in bspline_points["description"]
+        dimensional_value = constraint_schema["$defs"][
+            "DimensionalConstraintOperation"
+        ]["properties"]["value"]
+        generic_value = constraint_schema["$defs"]["AddConstraintOperation"][
+            "properties"
+        ]["value"]
+        assert "degrees" in dimensional_value["description"]
+        assert "degrees" in generic_value["description"]
+        polar_angle = transform_schema["$defs"]["PolarMultiTransform"]["properties"][
+            "angle"
+        ]
+        assert "degrees" in polar_angle["description"]
 
     @pytest.mark.asyncio
     async def test_edit_sketch_geometry_batches_operations_atomically(

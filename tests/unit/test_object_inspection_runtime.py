@@ -12,6 +12,20 @@ def _load_runtime() -> dict[str, object]:
     return namespace
 
 
+def test_constraint_serializer_reports_angle_values_in_degrees() -> None:
+    """Structured object inspection should not expose raw Sketcher radians."""
+    runtime = _load_runtime()
+
+    class AngleConstraint:
+        Type = "Angle"
+        Value = 3.141592653589793 / 2
+
+    result = runtime["_constraint_value"](AngleConstraint())
+
+    assert result["value"] == 90.0
+    assert result["value_unit"] == "deg"
+
+
 class _Vector:
     def __init__(self, x: float, y: float, z: float) -> None:
         self.x = x

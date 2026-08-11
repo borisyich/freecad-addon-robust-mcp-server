@@ -379,7 +379,7 @@ async def test_sketch_geometry_and_constraint_operation_catalog(live_tools: dict
         ),
         "angle": (
             [{"op": "add_line", "x1": 0, "y1": 0, "x2": 9, "y2": 2}],
-            {"op": "angle", "geometry1": 0, "value": 0.5},
+            {"op": "angle", "geometry1": 0, "value": 45.0},
         ),
         "fix": (
             [
