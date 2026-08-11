@@ -74,6 +74,12 @@ the final B-rep is invariant under those parameters. The validator reports this
 case as `defined_but_not_solid_driving`; treat it as an error in requirement
 correspondence.
 
+Named Sketcher expression paths are traced through the actual constraint name
+stored on each constraint, including FreeCAD 1.0.x builds that do not expose a
+`SketchObject.getConstraintName()` convenience method. This name resolution
+does not weaken the geometry check: a constraint that references construction
+geometry only is still not accepted as driving the final solid.
+
 Use the validator's compact default first. Request `structure` only for a
 reported structural problem and `full` only for a focused history/expression or
 constraint diagnosis. Full reports can be extremely large.

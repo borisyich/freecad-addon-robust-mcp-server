@@ -1989,6 +1989,14 @@ and offsets; and base/from-solid thickness and radius. Those endpoints count as
 solid-driving only when the feature is in the active Tip dependency graph.
 Arbitrary Dynamic properties—even on the same object—remain untrusted.
 
+For Sketcher expressions, both indexed paths such as `Constraints[12]` and
+named paths such as `.Constraints.HoleCenterX` are resolved to the underlying
+constraint. FreeCAD 1.0.x exposes the latter name on `Constraint.Name` rather
+than through a `SketchObject.getConstraintName()` method, so the validator uses
+the native constraint records and retains the same profile-versus-construction
+geometry check. A named constraint on construction geometry therefore remains
+non-driving even when the sketch feeds a native SheetMetal feature.
+
 Before final completion, investigate every unused Spreadsheet alias: connect it
 to the tree if it was intended to drive geometry, or remove it if it is
 redundant. A clean final report must not contain missing/unlinked required

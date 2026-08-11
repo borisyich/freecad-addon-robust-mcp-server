@@ -1,5 +1,5 @@
 # Changelog
-## AFTER FORK ORIGINAL REPO
+## AFTER FORK ORIGINAL REPO (consistent history of changes)
 
 - Debugged tools
 - Added effective-volume validation and rollback for Pad, Revolution, Additive Loft, and Additive Pipe.
@@ -214,6 +214,12 @@
   by the public feature dispatcher, including flange length/gaps/relief, hem,
   corner-relief offsets, and conversion parameters, without trusting arbitrary
   custom metadata.
+- Fixed false-negative Spreadsheet/Sketcher dependency validation for named
+  expression paths such as `.Constraints.HoleCenterX` on FreeCAD 1.0.x, where
+  names are exposed through `Constraint.Name` instead of
+  `SketchObject.getConstraintName()`. Profile constraints feeding native
+  SheetMetal features now count as solid-driving, while construction-only
+  constraints remain rejected.
 
 This project uses **component-specific versioning**. Each component has its own
 release notes and version history.

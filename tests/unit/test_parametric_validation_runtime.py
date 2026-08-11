@@ -398,9 +398,25 @@ def test_generated_report_describes_body_tip_history_and_sketch(monkeypatch) -> 
     assert "required_dimension_missing" in categories
     assert "unused_spreadsheet_parameter" in categories
 
+    # FreeCAD 1.0.x exposes named constraints through Constraint.Name but does
+    # not provide SketchObject.getConstraintName(). Named expression paths must
+    # still resolve to their profile/construction geometry.
+    sketch.getConstraintName = None
+    drives_solid, reason = namespace["_expression_binding_solid_influence"](
+        sketch, ".Constraints.Width", {"BaseSketch"}
+    )
+    assert drives_solid is True
+    assert reason is None
+
     # A named dimensional constraint attached only to construction geometry
     # must not satisfy final-solid influence, even in an active sketch.
     sketch.getConstruction = lambda _index: True
+    drives_solid, reason = namespace["_expression_binding_solid_influence"](
+        sketch, ".Constraints.Width", {"BaseSketch"}
+    )
+    assert drives_solid is False
+    assert reason == "constraint references construction geometry only"
+
     influence = namespace["_constraint_solid_influence"](sketch, 0, {"BaseSketch"})
     assert influence["construction_only"] is True
     assert influence["solid_driving"] is False

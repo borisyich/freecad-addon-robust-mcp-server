@@ -376,6 +376,37 @@ def _constraint_solid_influence(sketch, constraint_index, active_object_names):
     return result
 
 
+def _sketch_constraint_index_by_name(sketch, constraint_name):
+    """Resolve a named Sketcher constraint across FreeCAD Python APIs."""
+    try:
+        constraints = list(sketch.Constraints or [])
+    except Exception:
+        constraints = []
+    for index, constraint in enumerate(constraints):
+        try:
+            if str(getattr(constraint, "Name", "") or "") == constraint_name:
+                return index
+        except Exception:
+            pass
+
+    # Some FreeCAD builds expose a convenience getter while 1.0.x exposes
+    # names only on the individual Constraint objects. Keep the getter as a
+    # compatibility fallback for older or alternate Python bindings.
+    getter = getattr(sketch, "getConstraintName", None)
+    if callable(getter):
+        try:
+            count = max(len(constraints), int(getattr(sketch, "ConstraintCount", 0)))
+        except Exception:
+            count = len(constraints)
+        for index in range(count):
+            try:
+                if str(getter(index) or "") == constraint_name:
+                    return index
+            except Exception:
+                pass
+    return None
+
+
 def _active_solid_dependency_names(doc):
     """Return objects reachable backwards from each active Body Tip."""
     names = set()
@@ -428,17 +459,11 @@ def _expression_binding_solid_influence(obj, property_name, active_object_names)
         match = re.search(r"Constraints\[(\d+)\]", str(property_name))
         if match is None:
             constraint_name = str(property_name).split("Constraints.", 1)
-            index = None
-            if len(constraint_name) == 2:
-                getter = getattr(obj, "getConstraintName", None)
-                if callable(getter):
-                    for candidate in range(int(getattr(obj, "ConstraintCount", 0))):
-                        try:
-                            if getter(candidate) == constraint_name[1]:
-                                index = candidate
-                                break
-                        except Exception:
-                            pass
+            index = (
+                _sketch_constraint_index_by_name(obj, constraint_name[1])
+                if len(constraint_name) == 2
+                else None
+            )
             if index is None:
                 return False, "sketch expression is not bound to a verifiable constraint"
         else:
