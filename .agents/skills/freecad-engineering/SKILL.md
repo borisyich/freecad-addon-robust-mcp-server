@@ -100,9 +100,9 @@ workflow, deliver a native editable FreeCAD model:
   Pattern, Rib, Fillet, or Chamfer where they express the design intent;
 - key dimensions controlled by named constraints, expressions, or Spreadsheet
   aliases when reuse or editing benefits from them;
-- for drawing/sketch reconstruction, a saved dimension inventory containing
-  every explicit non-starred dimension from the source and a stable identifier
-  for each value;
+- for drawing/sketch reconstruction, a saved evidence manifest containing every
+  explicit non-starred source dimension, a stable identifier, and a justified
+  `driving`, `verification`, or `unresolved` role for each value;
 - a valid Body Tip and no accidental visible helper solids.
 
 `execute_python`, `safe_execute`, and `run_macro` are always available. They may
@@ -114,13 +114,14 @@ editable history rather than only assigning a final `Shape` to `Part::Feature`.
 
 After any task that creates or changes model geometry, call:
 
-For a drawing/sketch reconstruction, pass the saved non-starred dimension
-identifiers to the validator:
+For a drawing/sketch reconstruction, pass every saved `driving` dimension
+identifier to the validator. Check `verification` dimensions deterministically
+against the solved model and retain their observed evidence separately:
 
 ```text
 validate_parametric_model(
     doc_name=<intended document>,
-    required_dimension_names=[<all saved non-starred dimension identifiers>],
+    required_dimension_names=[<all driving source dimension identifiers>],
 )
 ```
 
@@ -131,7 +132,7 @@ same diagnostic to that sketch:
 validate_parametric_model(
     doc_name=<intended document>,
     target={"kind":"sketch", "name":<intended sketch>},
-    required_dimension_names=[<all saved non-starred dimension identifiers>],
+    required_dimension_names=[<all driving source dimension identifiers>],
 )
 ```
 
@@ -148,7 +149,8 @@ Do this immediately before the final user-facing response. Summarize:
 4. sketch solver/profile status, especially under-, over-, redundant, or
    conflicting constraints;
 5. solids outside Bodies and other significant findings;
-6. whether every required source dimension drives the model;
+6. whether every driving source dimension drives the model and every
+   verification dimension has measured pass/fail evidence;
 7. whether every Spreadsheet alias is connected directly or transitively to
    the feature tree, or has been removed as redundant;
 8. limitations that still require visual or dimensional verification.
@@ -207,6 +209,10 @@ Read the detailed strategy in
   produce 0 DoF while obscuring datum relationships, tangency, equality, and
   feature intent. `fully_constrained` is solver evidence, not proof of correct
   geometry or parameterization.
+- For ordinate drawings, classify every absolute coordinate as `source_backed`,
+  `derived` from a closed dimension chain, or `solver_lock`. Preserve justified
+  source/derived coordinates and minimize only solver-lock coordinates. Treat a
+  `coordinate_review_recommended` diagnostic as a mandatory audit, not a ban.
 - For Spreadsheet-driven dimensions, create a cell alias first and attach the
   expression to the dimensional constraint path (`Constraints[index]`). In
   `edit_sketch_constraints`, supply `expression` when creating the constraint,
@@ -232,6 +238,8 @@ For drawing-derived sketch construction, follow
 [references/sketch-construction.md](references/sketch-construction.md). It gives
 the required straight-lines-first workflow, fillet/radius selection, datum-chain
 check, B-spline gate, profile-topology acceptance, and validation-integrity rule.
+For a flat pattern, accept external contour, radius transitions, holes, bend
+lines, and final parameterization as separate feature-group checkpoints.
 
 ## 3. Plan features by dependency and design intent
 
@@ -418,23 +426,25 @@ axis or plane, explicit/derived/assumed status, and confidence.
   in the full sheet. Upscaling improves presentation to the VLM but does not
   restore detail absent from the source pixels.
 - Before creating geometry, extract and save every explicit dimension from the
-  drawing/sketch except dimensions marked with an asterisk. Give each saved
-  dimension a stable identifier suitable for a named sketch constraint or
-  Spreadsheet alias. Do not silently omit a dimension because it looks
-  redundant; resolve how it is used or record a genuine conflict.
+  drawing/sketch except dimensions marked with an asterisk. Give each a stable
+  identifier and classify it from source evidence as `driving`, `verification`,
+  or `unresolved`. Do not silently omit a redundant/check dimension: measure it
+  as verification instead of over-defining the model. Do not reclassify a value
+  merely because it conflicts with the current CAD hypothesis.
 - For every ordinate/baseline dimension, also save its datum/reference,
   controlled axis, signed direction, and target feature. A value without its
   datum is incomplete evidence. Before converting such dimensions to global
   coordinates, independently close at least one control dimension chain from
   datum to target and reconcile it with an overall/check dimension or another
   view.
-- Build the axis-aware evidence table, saved dimension inventory, and feature
-  plan before modeling. Each inventory item must later be represented by a
-  named driving sketch constraint or by a Spreadsheet parameter connected to
-  the feature tree.
+- Build the axis-aware evidence manifest and feature plan before modeling. Every
+  driving item must later be a named constraint or connected Spreadsheet
+  parameter; every verification item must retain deterministic observed value,
+  tolerance, pass/fail, and evidence.
 - Resolve ambiguity autonomously by choosing the interpretation most consistent
-  across all views. Record assumptions and alternatives; revise them when later
-  evidence conflicts.
+  across all views. Keep interpretation mutable after modeling starts: record
+  assumptions and rejected alternatives, and revise datum, endpoints, radii,
+  signs, dimension roles, and feature mapping when observations conflict.
 
 ### 5.4 Compare the current feature against the correct references
 
@@ -444,7 +454,9 @@ reference crop before taking the screenshot. Prefer a single explicit call such
 as `get_screenshot(view_angle="Left", settle_time_seconds=2.0, ...)`; do not rely
 only on a preceding `set_view_angle` call or on the default isometric view.
 
-Compare equivalent views only: front-to-front, top-to-top, left/right-to-the
+Run numerical checks before visual comparison. For sketches, compare bounding
+box extents, hole centers/radii, and other deterministic manifest values first;
+then compare equivalent views only: front-to-front, top-to-top, left/right-to-the
 matching side, section-to-section, and isometric-to-isometric. A good match in
 one projection does not prove correct depth, axis direction, or hidden geometry.
 
@@ -543,6 +555,12 @@ For the second form, create/identify the two lines first and use their current
 geometry indices. A radius that cannot fit the line geometry must be corrected,
 not approximated with an unrelated free arc.
 
+If a source-backed radius transition conflicts when `Tangent` is added, stop the
+current feature group. Do not delete tangency to preserve the current arc
+hypothesis. Reinspect the exact crop and revise endpoints, radius, arc side,
+datum, or dimension-chain interpretation; rebuild the transition and repeat the
+checkpoint before adding later geometry.
+
 Call `add_bspline` only when the source explicitly defines the curve by points,
 knots, or equivalent tabulated free-form data. Never substitute a B-spline for a
 line, circular arc, conic, unreadable boundary, or stated fillet radius.
@@ -558,9 +576,10 @@ Before reporting completion:
 - explain any remaining under-constrained sketches and why they are acceptable;
 - hide or remove temporary construction solids;
 - inspect the final model from the required views;
-- for drawing/sketch input, confirm that the saved inventory contains every
-  non-starred source dimension and pass all identifiers to
-  `validate_parametric_model(required_dimension_names=[...])`; for a sketch-only
+- for drawing/sketch input, confirm that the evidence manifest contains every
+  non-starred source dimension; pass every driving identifier to
+  `validate_parametric_model(required_dimension_names=[...])`, and confirm
+  measured evidence for every verification identifier; for a sketch-only
   deliverable also pass `target={"kind":"sketch","name":...}`;
 - inspect each Spreadsheet alias: determine why it exists, connect it to the
   feature tree if required, or delete it if redundant;

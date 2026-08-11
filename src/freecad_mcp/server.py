@@ -67,7 +67,8 @@ Before modifying geometry:
 - reuse one explicit document and one PartDesign Body;
 - establish drawing-view to FreeCAD-plane correspondence;
 - for drawing/sketch input, save every explicit non-starred dimension under a
-  stable identifier before modeling.
+  stable identifier before modeling and classify it as driving, verification,
+  or unresolved.
 Prefer standard MCP tools. Use execute_python or safe_execute only when
 a required operation is unavailable or broken.
 Use compact/default detail levels first. Request full topology, properties,
@@ -81,7 +82,9 @@ For drawing-derived sketches, preserve each ordinate/baseline datum, build
 straight parents before stated tangent fillets, and never use a B-spline unless
 the source explicitly defines a point-based free-form curve. Treat 0 DoF as
 solver evidence, not geometric acceptance; verify outer/hole nesting and contour
-intersections.
+intersections. If a source-backed Tangent constraint conflicts, stop and
+reinspect the drawing crop; revise endpoints, radius, arc side, datum, or the
+dimension-chain interpretation instead of deleting tangency.
 For sheet-metal drawings:
 - call sheet_metal_capabilities before modeling;
 - when a flat pattern is supplied, inventory the complete blank, panel regions,
@@ -92,15 +95,17 @@ For sheet-metal drawings:
   generated flat pattern with the source.
 After every major feature:
 - recompute;
-- inspect the result;
+- inspect topology and deterministic dimensions before visual comparison;
 - for drawing reconstruction, compare the equivalent reference/candidate view
   with compare_images;
-- correct the causal feature if geometry differs from the target.
+- update the discrepancy ledger, then correct the interpretation manifest and/or
+  causal CAD feature if geometry differs from the target.
 Compare one seed element before applying any pattern.
 Before completing a geometry-changing task, call
 validate_parametric_model and report significant findings. For drawing/sketch
-input, pass all saved dimension identifiers as required_dimension_names. For a
-sketch-only deliverable, set target={"kind":"sketch","name":"..."}.
+input, pass all driving dimension identifiers as required_dimension_names and
+retain numerical evidence for every verification dimension. For a sketch-only
+deliverable, set target={"kind":"sketch","name":"..."}.
 """
 
 

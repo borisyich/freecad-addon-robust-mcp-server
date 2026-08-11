@@ -468,14 +468,15 @@ else:
             include_sketch_constraints: Include every individual sketch constraint
                 with name, type, datum, driving/reference state, and index. Defaults
                 to False because large sketches can make the response very long.
-            required_dimension_names: Stable identifiers extracted from every
-                explicit non-starred drawing dimension before modeling. Each name
+            required_dimension_names: Stable identifiers for all source dimensions
+                classified as driving in the pre-model evidence manifest. Each name
                 must appear as a named driving sketch constraint or as a Spreadsheet
                 alias connected directly or transitively to an expression in the
                 active final-solid dependency graph. With a sketch target, each name
                 must instead influence non-construction geometry of that exact
-                sketch. Construction-only geometry and inactive/helper objects do
-                not count as usage.
+                sketch. Check/reference dimensions belong in separate deterministic
+                measurement evidence. Construction-only geometry and inactive/helper
+                objects do not count as usage.
             target: Optional sketch validation target. Omit it for the existing
                 whole-model/final-solid diagnostic. For a sketch-only deliverable,
                 pass ``{"kind":"sketch","name":"Sketch_FlatPattern"}``.

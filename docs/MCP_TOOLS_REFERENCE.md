@@ -1942,11 +1942,14 @@ validate_parametric_model(
 
 When the input is a drawing or sketch, first extract and save every explicit
 source dimension except dimensions marked with an asterisk. Assign stable unique
-identifiers, implement them as named driving sketch constraints or connected
-Spreadsheet aliases, and pass the complete identifier list through
-`required_dimension_names`. The validator can verify only identifiers supplied
-by the caller; it cannot discover a dimension omitted from the source-image
-inventory.
+identifiers and classify each item as `driving`, `verification`, or `unresolved`
+from source evidence and the dimension-chain plan. Implement driving dimensions
+as named sketch constraints or connected Spreadsheet aliases and pass the
+complete driving list through `required_dimension_names`. Check verification
+dimensions with deterministic measurements and retain expected, observed,
+tolerance, pass/fail, and tool evidence separately. The validator can verify only
+identifiers supplied by the caller; it cannot discover an omitted dimension or
+infer its role from source pixels.
 
 Omit `target` for the existing whole-model/final-solid diagnostic. When the
 deliverable is a sketch, pass for example
@@ -1992,7 +1995,11 @@ profile, while strict containment produces explicit `outer` and `hole` roles.
 Multiple disjoint outer loops are reported separately so an agent cannot infer
 hole semantics from `closed_wire_count`. The report can also warn about a sketch
 dominated by point-to-origin X/Y constraints; 0 DoF is not proof of correct
-geometry, datum interpretation, or design intent.
+geometry, datum interpretation, or design intent. The warning triggers when
+there are at least eight such constraints and at least one per sketch geometry,
+even when geometric relations are also numerous. Treat it as a provenance audit:
+classify coordinates as source-backed, derived from a checked chain, or
+solver-lock, and minimize the last category rather than banning ordinate data.
 
 A source dimension counts only when the server can trace it to the active
 validation target: the final solid in model scope or non-construction geometry

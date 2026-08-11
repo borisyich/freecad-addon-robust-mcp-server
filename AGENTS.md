@@ -13,9 +13,10 @@ modifies, repairs, or validates a mechanical model in FreeCAD.
 5. Handle drawing ambiguity autonomously as defined by the Skill; do not stop
    merely to ask the user for a missing or unclear noncritical value.
 6. Use `multi_transform_pattern` instead of chaining one PartDesign Pattern directly onto another.
-7. For drawing/sketch input, save all explicit non-starred dimensions, compare
-   every major feature and the pre-pattern seed with `compare_images`, and pass
-   all dimension identifiers to final validation.
+7. For drawing/sketch input, save all explicit non-starred dimensions and
+   classify them as driving, verification, or unresolved. Pass all driving IDs
+   to final validation; deterministically measure every verification dimension.
+   Compare every major feature and the pre-pattern seed with `compare_images`.
 8. Use `select_subshapes` instead of manual Face/Edge enumeration when
    choosing sketch support or topology-sensitive feature references.
 9. Bind Spreadsheet-driven sketch dimensions through constraint expressions and

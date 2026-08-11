@@ -476,14 +476,17 @@ structure unless the user explicitly requests direct B-rep output.
 `execute_python`, `safe_execute`, and `run_macro` remain available.
 
 For drawing/sketch input, the Skill requires saving every explicit non-starred
-source dimension before modeling. Each identifier must drive the model through a
-named constraint or connected Spreadsheet alias. `compare_images` is required
-after every major feature and before any pattern multiplies a seed element.
+source dimension before modeling and classifying it as driving, verification, or
+unresolved. Driving identifiers control the model through named constraints or
+connected Spreadsheet aliases; verification identifiers retain deterministic
+measurement evidence without over-defining the model. `compare_images` is
+required after numerical checks for every major feature and before any pattern
+multiplies a seed element.
 
 After any model creation or geometry change, call `validate_parametric_model`
 immediately before the final response and summarize the actual Bodies, Tips,
 history, sketches, solver state, source-dimension usage, Spreadsheet connectivity,
-direct solids, and warnings. For drawing/sketch tasks, pass the complete saved
+direct solids, and warnings. For drawing/sketch tasks, pass the complete driving
 identifier list as `required_dimension_names`. The report is informative and
 does not by itself prove drawing correspondence. Parameter references multiplied
 by zero are treated as non-driving rather than accepted as validation bridges.
@@ -493,6 +496,13 @@ traced to non-construction geometry of that sketch, while Body/solid/Tip finding
 are outside scope. Sketch profile diagnostics classify outer loops and holes and
 reject intersecting or overlapping contours instead of relying on closed-wire
 count alone.
+
+For flat-pattern sketches, the Skill gates coarse outer contour, radius
+transitions, holes, bend lines, and final parameterization separately. Each gate
+recomputes, checks topology and deterministic dimensions, performs same-view
+comparison, updates a discrepancy ledger, and may revise both the source
+interpretation and CAD. A source-backed tangency conflict blocks progress until
+endpoints, radius, arc side, datum, and the dimension chain are rechecked.
 
 #### Validation & diagnostics (5 tools)
 

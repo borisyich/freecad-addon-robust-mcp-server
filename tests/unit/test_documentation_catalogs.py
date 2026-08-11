@@ -46,8 +46,7 @@ def test_tools_overview_contains_every_registered_tool() -> None:
     tool_names: list[str] = []
     for path in sorted((ROOT / "src/freecad_mcp/tools").glob("*.py")):
         tool_names.extend(
-            _registered_tool_name(node)
-            for node in _decorated_functions(path, "tool")
+            _registered_tool_name(node) for node in _decorated_functions(path, "tool")
         )
 
     text = (ROOT / "docs/guide/tools.md").read_text(encoding="utf-8")
@@ -80,7 +79,8 @@ def test_resources_page_contains_every_registered_resource_uri() -> None:
 def test_prompts_page_contains_every_registered_prompt() -> None:
     source = ROOT / "src/freecad_mcp/prompts/freecad.py"
     prompt_names = [
-        node.name for node in _decorated_functions(source, "prompt")  # type: ignore[attr-defined]
+        node.name
+        for node in _decorated_functions(source, "prompt")  # type: ignore[attr-defined]
     ]
     text = (ROOT / "docs/guide/prompts.md").read_text(encoding="utf-8")
     assert f"**{len(prompt_names)} MCP prompts**" in text
@@ -108,7 +108,9 @@ def test_every_sheet_metal_reference_example_is_live_tested() -> None:
     )
     for example in examples:
         match = marker.search(example)
-        assert match is not None, "Every Sheet Metal Python example needs a live-test marker"
+        assert match is not None, (
+            "Every Sheet Metal Python example needs a live-test marker"
+        )
         test_name = match.group(2)
         assert f"async def {test_name}(" in test_source
         targets.add(test_name)
@@ -169,15 +171,15 @@ def test_freecad_engineering_skill_covers_flat_pattern_reconstruction() -> None:
 
 
 def test_freecad_engineering_skill_has_codex_routing_metadata() -> None:
-    skill = (
-        ROOT / ".agents/skills/freecad-engineering/SKILL.md"
-    ).read_text(encoding="utf-8")
+    skill = (ROOT / ".agents/skills/freecad-engineering/SKILL.md").read_text(
+        encoding="utf-8"
+    )
     metadata = (
         ROOT / ".agents/skills/freecad-engineering/agents/openai.yaml"
     ).read_text(encoding="utf-8")
     assert skill.startswith("---\nname: freecad-engineering\n")
     assert "validate_parametric_model" in skill
-    assert 'allow_implicit_invocation: true' in metadata
+    assert "allow_implicit_invocation: true" in metadata
     assert 'value: "freecad"' in metadata
 
 
@@ -195,6 +197,8 @@ def test_freecad_engineering_skill_covers_sketch_design_intent() -> None:
     for concept in (
         "0 DoF",
         "absolute X/Y coordinates",
+        "source_backed",
+        "verification",
         "add_bspline",
         "datum/reference",
         "control dimension chain",
@@ -204,6 +208,14 @@ def test_freecad_engineering_skill_covers_sketch_design_intent() -> None:
     for concept in (
         "straight segments first",
         "tangent_fillet",
+        "Tangent + current geometry conflicts",
+        "coarse external contour",
+        "deterministic dimension checks",
+        "measure_bounding_box",
+        'detail_level="geometry"',
+        '"role": "verification"',
+        '"role": "driving"',
+        "solver_lock",
         "close at least one control chain",
         "outer_wire_count == 1",
         "fully_constrained",

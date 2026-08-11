@@ -130,20 +130,24 @@ def register_checkpoint_tools(mcp: Any) -> None:
         if rework_reasons:
             decision = "rework"
             required_action = (
-                "Do not create the next feature. Undo or remove only the failed "
-                "feature, confirm the previous valid Body Tip/state is restored, "
-                "correct the cause, and repeat this checkpoint."
+                "Do not create the next feature. Reinspect source evidence and "
+                "revise the interpretation/evidence manifest when it caused the "
+                "discrepancy; then undo, repair, or rebuild only the causal CAD "
+                "feature and repeat this checkpoint."
             )
         elif unresolved_reasons:
             decision = "rework"
             required_action = (
                 "Reinspect all available views and dimensions, choose the most "
                 "geometrically consistent interpretation with the fewest unsupported "
-                "assumptions, record that assumption, and rework/recheck the feature."
+                "assumptions, update the interpretation/evidence manifest, and "
+                "rework/recheck the feature."
             )
         else:
             decision = "continue"
-            required_action = "Checkpoint accepted; proceed to the next planned feature."
+            required_action = (
+                "Checkpoint accepted; proceed to the next planned feature."
+            )
 
         return {
             "checkpoint_name": checkpoint_name,

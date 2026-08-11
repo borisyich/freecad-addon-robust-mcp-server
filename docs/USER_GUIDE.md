@@ -439,8 +439,10 @@ The canonical engineering policy is `.agents/skills/freecad-engineering/SKILL.md
 (or MCP resource `freecad://skills/freecad-engineering`). It classifies stock and
 process, covers milling/turning/sheet-metal strategies, and requires
 `validate_parametric_model` before the final response after geometry changes.
-For drawing/sketch input, pass the complete saved non-starred dimension list as
-`required_dimension_names`. The final report also flags Spreadsheet aliases that
+For drawing/sketch input, save every non-starred dimension but classify it as
+driving, verification, or unresolved. Pass the complete driving list as
+`required_dimension_names`; retain deterministic measured evidence for every
+verification item. The final report also flags Spreadsheet aliases that
 do not drive the feature tree directly or through other cells; connect intended
 parameters or delete redundant ones.
 
@@ -485,17 +487,20 @@ This makes it easier to reference objects later.
 For complex parts, build step by step:
 
 1. Create one logically reviewable feature.
-1. Recompute and inspect shape, Body Tip, solid count, dimensions, and volume effect.
+1. Recompute and inspect topology, then deterministic dimensions and volume effect.
 1. For drawing reconstruction, compare the equivalent reference and candidate
-   views with `compare_images` after every major feature.
+   views with `compare_images` only after the numerical checks.
+1. Update the discrepancy ledger and revise source interpretation as well as CAD
+   when observations invalidate the current hypothesis.
 1. Rework invalid or clearly incorrect geometry before adding dependent features.
 1. Use compact `inspect_object()` or `detail_level="shape"` for routine checks.
    Request paged `topology` only for face/edge/vertex evidence and `full` only for a
    specific property diagnosis. Use `select_subshapes` instead of iterating every
    face or edge when choosing sketch support, Fillet, Chamfer, Draft, or Thickness.
 1. Immediately before the final response, call `validate_parametric_model`. For
-   drawing/sketch input include all saved dimension identifiers, then resolve any
-   missing/unlinked dimensions or unused Spreadsheet aliases before completion.
+   drawing/sketch input include all driving dimension identifiers and verify all
+   check dimensions, then resolve missing/unlinked dimensions or unused
+   Spreadsheet aliases before completion.
 
 ### Semantic face, edge, and vertex selection
 

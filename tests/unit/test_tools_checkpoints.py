@@ -87,7 +87,32 @@ async def test_checkpoint_requires_rework_for_blocking_discrepancy(registered_to
 
 
 @pytest.mark.asyncio
-async def test_checkpoint_requires_autonomous_rework_for_unresolved_dimension(registered_tools):
+async def test_tangent_conflict_blocks_and_reopens_interpretation(registered_tools):
+    result = await registered_tools["evaluate_model_checkpoint"](
+        checkpoint_name="RadiusTransitions",
+        geometry_valid=True,
+        visual_comparison_performed=True,
+        discrepancies=[
+            {
+                "category": "tangent_constraint_conflict",
+                "severity": "minor",
+                "expected": "R4 transition tangent to both parent lines",
+                "observed": "Sketcher reports a conflict",
+                "evidence": "constraint 18 and dimension crop 03",
+                "proposed_reaction": "recheck endpoints, radius, side, and datum",
+            }
+        ],
+    )
+
+    assert result["decision"] == "rework"
+    assert "interpretation/evidence manifest" in result["required_action"]
+    assert "tangent_constraint_conflict" in result["policy"]["blocking_categories"]
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_requires_autonomous_rework_for_unresolved_dimension(
+    registered_tools,
+):
     result = await registered_tools["evaluate_model_checkpoint"](
         checkpoint_name="WallThickness",
         geometry_valid=True,

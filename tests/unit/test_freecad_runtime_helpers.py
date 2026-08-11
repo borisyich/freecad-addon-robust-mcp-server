@@ -490,7 +490,7 @@ def test_sketch_profile_classifies_outer_and_hole_wires(monkeypatch) -> None:
 
 
 def test_sketch_analysis_warns_about_coordinate_heavy_constraints() -> None:
-    """Zero DoF from absolute point coordinates is not design-intent evidence."""
+    """A coordinate-heavy sketch warns even with many geometric relations."""
     from freecad_mcp.tools._freecad_runtime_helpers import (
         SKETCH_ANALYSIS_RUNTIME_HELPERS,
     )
@@ -500,11 +500,15 @@ def test_sketch_analysis_warns_about_coordinate_heavy_constraints() -> None:
         FirstPos = 1
         Second = -2000
 
+    class _GeometricConstraint:
+        Type = "Coincident"
+
     class _CoordinateSketch(_Sketch):
-        GeometryCount = 10
-        ConstraintCount = 10
-        Constraints: ClassVar[list[_CoordinateConstraint]] = [
-            _CoordinateConstraint() for _ in range(10)
+        GeometryCount = 26
+        ConstraintCount = 71
+        Constraints: ClassVar[list[object]] = [
+            *[_CoordinateConstraint() for _ in range(38)],
+            *[_GeometricConstraint() for _ in range(33)],
         ]
         FullyConstrained = True
         DoF = 0
@@ -515,8 +519,49 @@ def test_sketch_analysis_warns_about_coordinate_heavy_constraints() -> None:
 
     assert result["solver"]["status"] == "fully_constrained"
     assert result["constraint_quality"]["coordinate_heavy"] is True
-    assert result["constraint_quality"]["absolute_coordinate_constraint_count"] == 10
+    assert result["constraint_quality"]["coordinate_review_recommended"] is True
+    assert result["constraint_quality"]["absolute_coordinate_constraint_count"] == 38
+    assert result["constraint_quality"]["geometric_relation_count"] == 33
+    assert result["constraint_quality"]["coordinate_constraints_per_geometry"] == (
+        38 / 26
+    )
+    assert result["constraint_quality"]["required_provenance_categories"] == [
+        "source_backed",
+        "derived",
+        "solver_lock",
+    ]
     assert any("0 DoF alone" in hint for hint in result["hints"])
+
+
+def test_sketch_analysis_tangent_conflict_blocks_hypothesis_preservation() -> None:
+    """Tangency conflict should send the agent back to source interpretation."""
+    from freecad_mcp.tools._freecad_runtime_helpers import (
+        SKETCH_ANALYSIS_RUNTIME_HELPERS,
+    )
+
+    class _TangentConstraint:
+        Type = "Tangent"
+
+    class _TangentConflictSketch(_Sketch):
+        ConstraintCount = 1
+        Constraints: ClassVar[list[_TangentConstraint]] = [_TangentConstraint()]
+
+        def solve(self) -> int:
+            return -3
+
+        def getLastConflicting(self) -> list[int]:
+            return [0]
+
+    result = _load_helpers(SKETCH_ANALYSIS_RUNTIME_HELPERS)["_analyze_sketch"](
+        _TangentConflictSketch()
+    )
+
+    assert result["solver"]["status"] == "conflicting"
+    assert any("Tangent constraint conflicts" in issue for issue in result["issues"])
+    assert any("reinspect the drawing crop" in hint for hint in result["hints"])
+    assert not any(
+        "remove the conflicting one" in hint.lower() for hint in result["hints"]
+    )
 
 
 class _SketchVector:

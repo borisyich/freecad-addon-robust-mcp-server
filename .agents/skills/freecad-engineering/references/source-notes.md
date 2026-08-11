@@ -23,6 +23,9 @@ principles. These links are references, not runtime dependencies.
   (live wiki: https://wiki.freecad.org/Sketcher_Workbench)
   - profile sketches require closed contours without self-intersection,
     contour-to-contour intersections, shared/duplicate edges, or T-connections;
+  - dimensional constraints can be toggled between driving and reference mode,
+    supporting the distinction between independent model inputs and solved check
+    measurements;
   - use geometric constraints before the minimum necessary dimensions, prefer
     horizontal/vertical constraints and dimensions where appropriate, and use
     Validate Sketch rather than treating fully constrained status as sufficient;

@@ -1219,10 +1219,27 @@ SKETCH_ANALYSIS_RUNTIME_HELPERS = _runtime_code(
                 if first_position >= 0 and second_geometry < 0:
                     absolute_coordinate_constraint_count += 1
 
+        coordinate_constraints_per_geometry = (
+            absolute_coordinate_constraint_count / geometry_count
+            if geometry_count > 0
+            else 0.0
+        )
+        coordinate_to_geometric_relation_ratio = (
+            absolute_coordinate_constraint_count / geometric_relation_count
+            if geometric_relation_count > 0
+            else (
+                float(absolute_coordinate_constraint_count)
+                if absolute_coordinate_constraint_count
+                else 0.0
+            )
+        )
+        # This is deliberately a review signal, not a hard rejection. Ordinate
+        # drawings can legitimately produce many datum-backed coordinates, but
+        # at least one point-to-origin coordinate per geometry is enough to
+        # require a provenance audit even when many geometric relations exist.
         coordinate_heavy = bool(
-            absolute_coordinate_constraint_count >= max(8, int(geometry_count))
-            and absolute_coordinate_constraint_count
-            > max(2, geometric_relation_count * 2)
+            absolute_coordinate_constraint_count >= 8
+            and coordinate_constraints_per_geometry >= 1.0
         )
         return {
             "geometric_relation_count": geometric_relation_count,
@@ -1231,13 +1248,26 @@ SKETCH_ANALYSIS_RUNTIME_HELPERS = _runtime_code(
             "absolute_coordinate_constraint_count": (
                 absolute_coordinate_constraint_count
             ),
+            "coordinate_constraints_per_geometry": (
+                coordinate_constraints_per_geometry
+            ),
+            "coordinate_to_geometric_relation_ratio": (
+                coordinate_to_geometric_relation_ratio
+            ),
             "coordinate_heavy": coordinate_heavy,
+            "coordinate_review_recommended": coordinate_heavy,
             "assessment": (
                 "coordinate_heavy" if coordinate_heavy else "no_coordinate_overuse_detected"
             ),
+            "required_provenance_categories": [
+                "source_backed",
+                "derived",
+                "solver_lock",
+            ],
             "limitation": (
-                "This heuristic cannot prove design intent; inspect the actual "
-                "constraint graph and source drawing."
+                "The runtime cannot infer coordinate provenance from Sketcher "
+                "constraints alone. Classify coordinates from the source evidence "
+                "as source_backed, derived, or solver_lock before judging quality."
             ),
         }
 
@@ -1530,12 +1560,33 @@ SKETCH_ANALYSIS_RUNTIME_HELPERS = _runtime_code(
         issues = []
         hints = []
         solver_status = solver["status"]
+        tangent_conflict = False
+        if solver_status in {"over_constrained", "conflicting"}:
+            try:
+                constraints = list(sketch.Constraints or [])
+            except Exception:
+                constraints = []
+            conflict_indices = (
+                solver.get("constraint_references", {})
+                .get("conflicting", {})
+                .get("indices", [])
+            )
+            if not conflict_indices and constraints:
+                conflict_indices = [len(constraints) - 1]
+            tangent_conflict = any(
+                0 <= index < len(constraints)
+                and str(getattr(constraints[index], "Type", "")) == "Tangent"
+                for index in conflict_indices
+            )
+
         if solver_status == "over_constrained":
             issues.append("Sketch is over-constrained.")
-            hints.append("Remove or revise the most recently added constraint.")
+            if not tangent_conflict:
+                hints.append("Remove or revise the most recently added constraint.")
         elif solver_status == "conflicting":
             issues.append("Sketch contains conflicting constraints.")
-            hints.append("Inspect the latest constraints and remove the conflicting one.")
+            if not tangent_conflict:
+                hints.append("Inspect the latest constraints and remove the conflicting one.")
         elif solver_status == "redundant":
             issues.append("Sketch contains a redundant constraint.")
             hints.append("Remove the redundant constraint before adding more dimensions.")
@@ -1553,6 +1604,17 @@ SKETCH_ANALYSIS_RUNTIME_HELPERS = _runtime_code(
                 hints.append(f"Constrain geometry indices {indices}.")
             else:
                 hints.append("Add positional or dimensional constraints to remove remaining motion.")
+
+        if tangent_conflict:
+            issues.append(
+                "A Tangent constraint conflicts with the current geometry interpretation."
+            )
+            hints.append(
+                "Do not delete or relax source-backed tangency merely to satisfy "
+                "the solver. Stop this feature group, reinspect the drawing crop, "
+                "and revise endpoints, radius, arc side, datum, or dimension-chain "
+                "interpretation before rebuilding the transition."
+            )
 
         if profile["state"] == "open":
             count = len(profile["open_vertices"])
@@ -1581,9 +1643,10 @@ SKETCH_ANALYSIS_RUNTIME_HELPERS = _runtime_code(
         if constraint_quality["coordinate_heavy"]:
             hints.append(
                 "The sketch is dominated by point-to-origin X/Y dimensions. "
-                "Replace coordinate locking with geometric relationships and "
-                "the smallest datum-based driving dimension set; 0 DoF alone "
-                "does not prove correct design intent."
+                "Classify each as source-backed, derived from a checked chain, "
+                "or solver-lock; preserve justified ordinate constraints and "
+                "minimize solver-lock coordinates. 0 DoF alone does not prove "
+                "correct design intent."
             )
 
         solver_healthy = solver_status not in {

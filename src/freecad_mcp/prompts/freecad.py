@@ -97,12 +97,13 @@ mechanical model, activate `$freecad-engineering`. The canonical policy is
 - Resolve drawing ambiguity autonomously using the most consistent evidence and
   disclose assumptions.
 - Before modeling from a drawing/sketch, save every explicit non-starred source
-  dimension with a stable identifier. Implement each identifier as a named
-  driving sketch constraint or a connected Spreadsheet alias.
+  dimension with a stable identifier. Classify it as driving, verification, or
+  unresolved. Implement driving IDs as named constraints/connected aliases and
+  measure every verification ID deterministically.
 - Immediately before the final user-facing response after any geometry change,
   call `{FINAL_PARAMETRIC_VALIDATION_TOOL}` and summarize significant findings.
-  For drawing/sketch input, pass the complete saved identifier list as
-  `required_dimension_names`.
+  For drawing/sketch input, pass the complete driving-identifier list as
+  `required_dimension_names` and retain verification evidence separately.
 
 ## Quick Reference
 
@@ -287,6 +288,14 @@ significant findings.""",
 3. Add ordered constraints with `edit_sketch_constraints`.
 4. Inspect solver plus outer/hole/intersection profile topology with
    `get_sketch_info`; 0 DoF alone is not acceptance.
+5. For flat patterns, checkpoint coarse external contour, radius transitions,
+   holes, bend lines, then final parameterization separately. At each checkpoint
+   recompute, check topology, run deterministic dimension checks, compare the
+   source view, update the discrepancy ledger, and only then continue.
+
+If source-backed tangency conflicts, do not delete Tangent merely to satisfy the
+solver. Reinspect the drawing crop and revise endpoints, radius, arc side, datum,
+or dimension-chain interpretation before rebuilding the transition.
 
 ## Geometry Operations
 `edit_sketch_geometry(sketch_name, operations)` supports:

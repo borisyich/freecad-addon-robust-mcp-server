@@ -643,6 +643,7 @@ class TestMcpInstructions:
             "inspect the intended document and existing feature history",
             "use select_subshapes rather than manual Face/Edge enumeration",
             "save every explicit non-starred dimension",
+            "driving, verification, or unresolved",
             "bind the alias to the dimensional constraint expression path",
             "when a flat pattern is supplied, inventory the complete blank",
             "do not substitute additive PartDesign features for sheet-metal bends",
@@ -654,6 +655,8 @@ class TestMcpInstructions:
             'target={"kind":"sketch","name":"..."}',
             "never use a B-spline unless",
             "Treat 0 DoF as solver evidence",
+            "source-backed Tangent constraint conflicts",
+            "deterministic dimensions before visual comparison",
         )
         for clause in required_clauses:
             assert clause in normalized_instructions

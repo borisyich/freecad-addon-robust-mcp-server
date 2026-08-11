@@ -1569,8 +1569,11 @@ else:
                         "point-to-origin X/Y dimensions and only "
                         f"{constraint_quality.get('geometric_relation_count')} geometric "
                         "relations. 0 DoF does not prove geometrical correctness or "
-                        "design intent; prefer Coincident, Horizontal, Vertical, "
-                        "Tangent, Equal, Radius, and datum-based dimensions."
+                        "design intent. Classify coordinates as source-backed, "
+                        "derived from a checked dimension chain, or solver-lock; "
+                        "preserve justified ordinate dimensions, prefer Coincident, "
+                        "Horizontal, Vertical, Tangent, Equal, and Radius, and "
+                        "minimize solver-lock coordinates."
                     ),
                 }
             )
@@ -1685,8 +1688,9 @@ else:
         "limitations": [
             "This is an informative structural and geometric diagnostic, "
             "not a hard acceptance gate.",
-            "It can verify only required dimension identifiers supplied by the "
-            "caller; it cannot discover omitted drawing dimensions from pixels.",
+            "It can verify only driving dimension identifiers supplied by the "
+            "caller; it cannot discover omitted drawing dimensions, assign their "
+            "driving/verification roles, or inspect source pixels.",
             "It does not prove correspondence to a drawing, manufacturability, "
             "or design intent.",
             "Shape validity uses FreeCAD/OpenCASCADE isValid checks and does not "

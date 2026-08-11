@@ -36,6 +36,8 @@ BLOCKING_DISCREPANCY_CATEGORIES: Final[frozenset[str]] = frozenset(
         "silhouette_mismatch",
         "view_mismatch",
         "topology_mismatch",
+        "tangent_constraint_conflict",
+        "dimension_chain_mismatch",
     }
 )
 
@@ -71,8 +73,10 @@ After any model creation or geometry change, call
 `{FINAL_PARAMETRIC_VALIDATION_TOOL}` immediately before the final user-facing
 response and summarize its significant findings. The report is informative, not
 a rigid pass/fail workflow. For drawing/sketch reconstruction, first save every
-explicit non-starred source dimension under a stable identifier and pass the
-complete identifier list as `required_dimension_names`.
+explicit non-starred source dimension under a stable identifier and classify it
+as driving, verification, or unresolved. Pass only the complete
+driving-identifier list as `required_dimension_names`; check every verification
+dimension deterministically and retain its evidence.
 
 When the deliverable is a sketch rather than a final solid, pass
 `target={{"kind":"sketch","name":"..."}}` so required dimensions are traced to
@@ -83,16 +87,14 @@ does not waive editable/parametric model expectations.
 """
 
 DRAWING_RECONSTRUCTION_WORKFLOW: Final[str] = (
-    _SKILL_ROUTER
-    + "\nFor drawing reconstruction, also read the skill section "
+    _SKILL_ROUTER + "\nFor drawing reconstruction, also read the skill section "
     "'Reconstruct from drawings or images' and its referenced guidance. "
     "Use `compare_images` after every major feature and before patterning a "
     "single seed element.\n"
 )
 
 MODEL_MODIFICATION_WORKFLOW: Final[str] = (
-    _SKILL_ROUTER
-    + "\nFor an existing model, also read the skill section "
+    _SKILL_ROUTER + "\nFor an existing model, also read the skill section "
     "'Modify existing models' and inspect the current history before editing.\n"
 )
 

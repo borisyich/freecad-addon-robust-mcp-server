@@ -233,6 +233,13 @@
 - Clarified in the public `add_arc` schema that center angles use degrees and
   documented radius-defined endpoint/fillet modes as the preferred engineering
   forms.
+- Added flat-pattern sketch feature-group gates with numerical checks before
+  visual comparison, mutable interpretation/evidence manifests, driving versus
+  verification dimension roles, and a blocking response to source-backed
+  tangency conflicts.
+- Expanded coordinate-heavy sketch diagnostics to flag at least one absolute
+  X/Y constraint per geometry and require source-backed/derived/solver-lock
+  provenance review without rejecting legitimate ordinate drawings.
 
 This project uses **component-specific versioning**. Each component has its own
 release notes and version history.
