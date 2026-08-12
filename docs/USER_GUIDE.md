@@ -506,7 +506,8 @@ For complex parts, build step by step:
 
 `inspect_object(detail_level="topology")` returns a paged topology catalogue. Faces include
 surface type, a representative oriented normal, area, adjacent faces, and local
-convexity. Edges include curve type, endpoints, length, direction/radius, and
+convexity; cylindrical faces additionally include radius, axis direction, and a
+point on the axis. Edges include curve type, endpoints, length, direction/radius, and
 adjacent faces. Vertices include a world point, tolerance, and adjacent
 edges/faces. Use `select_subshapes` to convert engineering intent into `FaceN`,
 `EdgeN`, or `VertexN`:
@@ -521,6 +522,18 @@ select_subshapes(
         "sort_order": "desc", "limit": 1,
     },
     detail_level="summary",
+)
+
+# Cylindrical bosses/holes near a known axis, without one measure_radius call per face.
+select_subshapes(
+    object_name="Imported",
+    criteria={
+        "kind": "face", "surface_types": ["Cylinder"],
+        "radius_min": 4.99, "radius_max": 5.01,
+        "axis_direction": [0, 0, 1],
+        "axis_point": [20, 10, 0], "axis_point_tolerance": 0.01,
+    },
+    detail_level="summary", page_size=200,
 )
 
 # Four longest X-parallel straight edges for a fillet/chamfer candidate set.
@@ -544,6 +557,9 @@ select_subshapes(
 ```
 
 The selector narrows candidates but does not replace geometric verification.
+`criteria.limit` and `page_size` both accept up to 200 results. Cylinder-axis
+direction is undirected, and `axis_point` may be any point on the expected
+infinite axis.
 Inspect the returned records and confirm the selected references on the current
 Body Tip before creating topology-sensitive downstream features.
 

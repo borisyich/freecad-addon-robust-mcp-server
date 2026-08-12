@@ -179,10 +179,37 @@ _result_ = True
         assert len(cylindrical_faces) == 1
         assert cylindrical_faces[0]["convexity"] in {"convex", "concave"}
         assert cylindrical_faces[0]["normal"] is not None
+        assert cylindrical_faces[0]["radius"] == pytest.approx(5.0)
+        axis_direction = cylindrical_faces[0]["axis_direction"]
+        assert axis_direction["x"] == pytest.approx(0.0)
+        assert axis_direction["y"] == pytest.approx(0.0)
+        assert abs(axis_direction["z"]) == pytest.approx(1.0)
+        axis_point = cylindrical_faces[0]["axis_point"]
+        assert axis_point["x"] == pytest.approx(30.0)
+        assert axis_point["y"] == pytest.approx(0.0)
         assert any(
             edge["curve_type"] == "Circle"
             for edge in cylinder_info["shape_info"]["edges"]
         )
+
+        selected_cylinder = await tools["select_subshapes"](
+            object_name="Cylinder",
+            doc_name=doc_name,
+            criteria={
+                "kind": "face",
+                "surface_types": ["cylindrical"],
+                "radius_min": 4.99,
+                "radius_max": 5.01,
+                "axis_direction": [0, 0, -1],
+                "axis_direction_tolerance_deg": 1,
+                "axis_point": [30, 0, 100],
+                "axis_point_tolerance": 1e-6,
+            },
+            detail_level="summary",
+            page_size=200,
+        )
+        assert selected_cylinder["references"] == [cylindrical_faces[0]["name"]]
+        assert selected_cylinder["pagination"]["page_size"] == 200
 
         serialized = json.dumps(result)
         assert " object at " not in serialized

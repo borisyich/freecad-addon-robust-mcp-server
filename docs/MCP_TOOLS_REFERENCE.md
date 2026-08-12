@@ -257,8 +257,10 @@ The legacy `include_properties`/`include_shape` arguments remain accepted.
 
 With `detail_level="topology"`, `shape_info.faces` includes `surface_type`, an
 oriented normal sampled at a representative point, `area`, `centroid`, adjacent
-`FaceN` references, local `convexity`, and
-participating edges. `shape_info.edges` includes `curve_type`, start/end points,
+`FaceN` references, local `convexity`, and participating edges. Cylindrical faces
+also include `radius`, `axis_direction`, and `axis_point` (the OCCT cylinder
+center used as a stable point on the infinite axis). `shape_info.edges` includes
+`curve_type`, start/end points,
 length, radius when available, direction, and adjacent faces. `convexity` describes
 the local surface curvature at a representative point (`flat`, `convex`,
 `concave`, `saddle`, or `unknown`); it is not an assertion about manufacturability.
@@ -289,6 +291,22 @@ select_subshapes(
     detail_level="summary",
     offset=0,
     page_size=20,
+)
+
+select_subshapes(
+    object_name="Imported",
+    criteria={
+        "kind": "face",
+        "surface_types": ["Cylinder"],
+        "radius_min": 4.99,
+        "radius_max": 5.01,
+        "axis_direction": [0, 0, 1],
+        "axis_direction_tolerance_deg": 1,
+        "axis_point": [20, 10, 0],
+        "axis_point_tolerance": 0.01,
+    },
+    detail_level="summary",
+    page_size=200,
 )
 
 select_subshapes(
@@ -324,6 +342,12 @@ plus pagination metadata. Use `summary` for compact selection evidence and
 `full` only to resolve a specific ambiguity. Location filters use
 `centroid_bounds`; the old input key `center` and `center_x/y/z` sort names are
 accepted for compatibility.
+
+Face radius uses `radius_min`/`radius_max`. Cylinder axes are geometrically
+undirected, so either sign of `axis_direction` matches. `axis_point` may be any
+point on the expected infinite axis: comparison uses perpendicular distance and
+`axis_point_tolerance`, not the arbitrary longitudinal position of the serialized
+surface center. `page_size` and `criteria.limit` both accept values from 1 to 200.
 
 The implementation is selective and lazy: it requests only the selected
 topology kind, and `references` computes only fields used by the supplied
@@ -2030,7 +2054,10 @@ The report includes:
   degrees of freedom, solver-reported conflicting/redundant constraint indices,
   profile state, outer/hole counts, per-wire nesting roles, intersecting wire
   pairs, supports, expressions, and constraint counts;
-- standalone sketches, Spreadsheets, and solid objects outside Bodies;
+- standalone sketches, Spreadsheets, and solid objects outside Bodies; native
+  parametric `Part::*` primitives and boolean chains are classified as editable
+  Part history and do not cause a warning merely because they are outside a
+  `PartDesign::Body`, while static/imported `Part::Feature` shapes still do;
 - required-dimension usage, including `missing`,
   `defined_but_not_solid_driving`, and `solid_driving`
   identifiers in model scope, or `defined_but_not_sketch_driving` and

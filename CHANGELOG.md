@@ -246,6 +246,13 @@
 - Added qualified subelement GUI selection, transient `highlight_faces`, planar
   local `move_faces` direct edits, explicit `Current` camera semantics, and
   validation warnings for static generic `PartDesign::Feature` snapshots.
+- Added cylindrical-face `radius`, `axis_direction`, and `axis_point` to object
+  topology and semantic selection, with matching radius/axis filters.
+- Made `validate_parametric_model` accept native `Part::*` primitive/boolean
+  chains as editable parametric history while retaining warnings for static or
+  imported `Part::Feature` shapes.
+- Aligned `select_subshapes.page_size` with `criteria.limit`; both now allow up
+  to 200 matches.
 
 This project uses **component-specific versioning**. Each component has its own
 release notes and version history.

@@ -1198,13 +1198,17 @@ async def inspect_object(
 @mcp.tool()
 async def select_subshapes(
     object_name: str,
-    criteria: FaceSelectionCriteria | EdgeSelectionCriteria,
+    criteria: FaceSelectionCriteria | EdgeSelectionCriteria | VertexSelectionCriteria,
     doc_name: str | None = None,
     detail_level: Literal["references", "summary", "full"] = "references",
     offset: int = 0,
     page_size: int = 20,
 ) -> dict:
-    """Return paged semantic matches and consumable FaceN/EdgeN references."""
+    """Return paged semantic matches and consumable topology references.
+
+    Cylindrical face records expose radius, axis_direction, and axis_point.
+    Face criteria can filter all three; page_size and criteria.limit accept 200.
+    """
     pass
 ```
 

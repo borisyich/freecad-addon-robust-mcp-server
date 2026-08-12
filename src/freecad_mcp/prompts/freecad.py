@@ -566,7 +566,9 @@ Mandatory final informative scan after creating or changing geometry:
   geometry of that sketch and excludes Body/solid/Tip health from assessment;
 - reports Spreadsheet aliases that are not directly or transitively connected
   to the feature tree so they can be linked or removed;
-- reports standalone/direct solids and significant warnings;
+- reports standalone/direct solids and significant warnings; native parametric
+  Part primitives/booleans are valid editable history outside a Body, while
+  static/imported Part::Feature shapes remain review findings;
 - does not by itself prove drawing correspondence or manufacturability.
 
 Use the compact default first. Request `structure` only for a reported

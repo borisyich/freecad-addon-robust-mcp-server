@@ -485,7 +485,7 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                         },
                         {
                             "name": "select_subshapes",
-                            "description": "Select paged FaceN/EdgeN/VertexN references by semantic geometry and world location",
+                            "description": "Select paged FaceN/EdgeN/VertexN references by semantic geometry, including cylindrical face radius/axis, and world location",
                             "key_params": [
                                 "object_name",
                                 "criteria",

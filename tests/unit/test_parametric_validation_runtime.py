@@ -787,3 +787,105 @@ def test_generic_partdesign_features_are_reported_as_static_snapshots(
     assert len(findings) == 4
     assert all(item["severity"] == "warning" for item in findings)
     assert report["assessment"] == "review_recommended"
+
+
+def test_native_part_boolean_chain_is_healthy_and_static_import_is_warned(
+    monkeypatch,
+) -> None:
+    """Part primitives/booleans are editable history, unlike Part::Feature imports."""
+    import sys
+    from types import SimpleNamespace
+
+    class BoundBox:
+        XMin = YMin = ZMin = 0.0
+        XMax = YMax = ZMax = 10.0
+        XLength = YLength = ZLength = 10.0
+
+    class SolidShape:
+        ShapeType = "Solid"
+        Solids = [object()]
+        Shells = [object()]
+        Faces = [object()]
+        Edges = [object()]
+        Vertexes = [object()]
+        Volume = 100.0
+        Area = 100.0
+
+        def isNull(self):  # noqa: N802
+            return False
+
+        def isValid(self):  # noqa: N802
+            return True
+
+    SolidShape.BoundBox = BoundBox()
+
+    def part_object(name, type_id, *, out_list=None):
+        return SimpleNamespace(
+            Name=name,
+            Label=name,
+            TypeId=type_id,
+            State=[],
+            ViewObject=SimpleNamespace(Visibility=name == "Cut"),
+            Shape=SolidShape(),
+            ExpressionEngine=[],
+            InList=[],
+            OutList=list(out_list or []),
+        )
+
+    base = part_object("BaseCylinder", "Part::Cylinder")
+    tool = part_object("ToolCylinder", "Part::Cylinder")
+    cut = part_object("Cut", "Part::Cut", out_list=[base, tool])
+    base.InList = [cut]
+    tool.InList = [cut]
+    doc = SimpleNamespace(
+        Name="PartChain",
+        Label="PartChain",
+        FileName="",
+        Objects=[base, tool, cut],
+        recompute=lambda: None,
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "FreeCAD",
+        SimpleNamespace(ActiveDocument=doc, listDocuments=lambda: {doc.Name: doc}),
+    )
+
+    namespace: dict[str, object] = {}
+    exec(
+        build_parametric_validation_code(
+            doc_name=doc.Name,
+            recompute=True,
+            include_sketch_constraints=False,
+        ),
+        namespace,
+    )
+    report = namespace["_result_"]
+
+    assert report["assessment"] == "healthy"
+    assert report["findings"] == []
+    assert report["counts"]["parametric_part_features"] == 3
+    assert {item["classification"] for item in report["uncontained_shape_objects"]} == {
+        "parametric_part_feature"
+    }
+    assert namespace["_active_solid_dependency_names"](doc) == {
+        "BaseCylinder",
+        "ToolCylinder",
+        "Cut",
+    }
+
+    imported = part_object("Imported", "Part::Feature")
+    doc.Objects = [imported]
+    imported_namespace: dict[str, object] = {}
+    exec(
+        build_parametric_validation_code(
+            doc_name=doc.Name,
+            recompute=True,
+            include_sketch_constraints=False,
+        ),
+        imported_namespace,
+    )
+    imported_report = imported_namespace["_result_"]
+    assert imported_report["assessment"] == "review_recommended"
+    assert [item["category"] for item in imported_report["findings"]] == [
+        "direct_shape_feature"
+    ]

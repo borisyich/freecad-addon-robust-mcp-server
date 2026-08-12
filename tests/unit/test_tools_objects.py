@@ -328,6 +328,67 @@ class TestObjectTools:
         ]
 
     @pytest.mark.asyncio
+    async def test_select_subshapes_filters_cylindrical_faces_by_radius_and_axis(
+        self, register_tools, mock_bridge
+    ):
+        """Cylinder geometry should be selectable without separate measurements."""
+        mock_bridge.get_object = AsyncMock(
+            return_value=ObjectInfo(
+                name="Imported",
+                label="Imported",
+                type_id="Part::Feature",
+                shape_info={
+                    "shape_type": "Solid",
+                    "is_null": False,
+                    "faces": [
+                        {
+                            "name": "Face1",
+                            "index": 1,
+                            "surface_type": "Cylinder",
+                            "radius": 3.0,
+                            "axis_direction": {"x": 0.0, "y": 0.0, "z": -1.0},
+                            "axis_point": {"x": 10.0, "y": 5.0, "z": 20.0},
+                        },
+                        {
+                            "name": "Face2",
+                            "index": 2,
+                            "surface_type": "Cylinder",
+                            "radius": 5.0,
+                            "axis_direction": {"x": 1.0, "y": 0.0, "z": 0.0},
+                            "axis_point": {"x": 0.0, "y": 0.0, "z": 0.0},
+                        },
+                    ],
+                },
+            )
+        )
+
+        result = await register_tools["select_subshapes"](
+            object_name="Imported",
+            criteria={
+                "kind": "face",
+                "surface_types": ["cylindrical"],
+                "radius_min": 2.99,
+                "radius_max": 3.01,
+                "axis_direction": [0, 0, 1],
+                "axis_direction_tolerance_deg": 1,
+                # Any point on the infinite axis is accepted, even when it is
+                # shifted from the serialized surface.Center along that axis.
+                "axis_point": [10, 5, -100],
+                "axis_point_tolerance": 1e-5,
+            },
+            detail_level="summary",
+            page_size=200,
+        )
+
+        assert result["references"] == ["Face1"]
+        assert result["pagination"]["page_size"] == 200
+        assert result["matches"][0]["radius"] == 3.0
+        request = mock_bridge.get_object.await_args.kwargs
+        assert {"radius", "axis_direction", "axis_point"}.issubset(
+            request["topology_fields"]
+        )
+
+    @pytest.mark.asyncio
     async def test_select_subshapes_filters_edges_by_direction_and_adjacency(
         self, register_tools, mock_bridge
     ):

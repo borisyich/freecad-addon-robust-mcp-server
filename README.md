@@ -499,6 +499,10 @@ are outside scope. Sketch profile diagnostics classify outer loops and holes and
 reject intersecting or overlapping contours instead of relying on closed-wire
 count alone.
 
+Native parametric `Part::*` primitives and boolean chains are accepted as
+editable history even without a `PartDesign::Body`; static/imported
+`Part::Feature` shape snapshots remain explicit review findings.
+
 For flat-pattern sketches, the Skill gates coarse outer contour, radius
 transitions, holes, bend lines, and final parameterization separately. Each gate
 recomputes, checks topology and deterministic dimensions, performs same-view

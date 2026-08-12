@@ -423,28 +423,59 @@ def _sketch_constraint_index_by_name(sketch, constraint_name):
     return None
 
 
+def _is_parametric_part_type(type_id):
+    """Recognize native Part features while excluding static Shape containers."""
+    return str(type_id or "").startswith("Part::") and type_id not in {
+        "Part::Feature",
+        "Part::FeaturePython",
+    }
+
+
 def _active_solid_dependency_names(doc):
-    """Return objects reachable backwards from each active Body Tip."""
+    """Return objects reachable backwards from active Body and Part outputs."""
     names = set()
+    stack = []
     for body in getattr(doc, "Objects", []) or []:
         if getattr(body, "TypeId", None) != "PartDesign::Body":
             continue
         tip = getattr(body, "Tip", None)
-        stack = [tip] if tip is not None else []
-        visited = set()
-        while stack:
-            current = stack.pop()
-            marker = id(current)
-            if marker in visited:
-                continue
-            visited.add(marker)
-            name = getattr(current, "Name", None)
-            if name:
-                names.add(name)
-            stack.extend(
-                item for item in (getattr(current, "OutList", []) or [])
-                if item is not None
-            )
+        if tip is not None:
+            stack.append(tip)
+
+    part_features = []
+    for obj in getattr(doc, "Objects", []) or []:
+        if not _is_parametric_part_type(getattr(obj, "TypeId", "")):
+            continue
+        shape = _shape_summary(obj)
+        if shape["present"] and shape["is_null"] is not True and (shape["solid_count"] or 0) > 0:
+            part_features.append(obj)
+    part_feature_names = {
+        getattr(obj, "Name", None) for obj in part_features if getattr(obj, "Name", None)
+    }
+    dependency_names = {
+        getattr(dependency, "Name", None)
+        for obj in part_features
+        for dependency in (getattr(obj, "OutList", []) or [])
+        if getattr(dependency, "Name", None) in part_feature_names
+    }
+    stack.extend(
+        obj for obj in part_features if getattr(obj, "Name", None) not in dependency_names
+    )
+
+    visited = set()
+    while stack:
+        current = stack.pop()
+        marker = id(current)
+        if marker in visited:
+            continue
+        visited.add(marker)
+        name = getattr(current, "Name", None)
+        if name:
+            names.add(name)
+        stack.extend(
+            item for item in (getattr(current, "OutList", []) or [])
+            if item is not None
+        )
     return names
 
 
@@ -509,6 +540,8 @@ def _expression_binding_solid_influence(obj, property_name, active_object_names)
                         "recognized native SheetMetal geometry-driving property",
                     )
                 return False, "expression is attached to a dynamic/custom metadata property"
+        return True, None
+    if _is_parametric_part_type(type_id):
         return True, None
     return False, "expression endpoint is not a shape-producing active feature"
 
@@ -1180,6 +1213,8 @@ else:
                 "classification": (
                     "direct_shape_feature"
                     if type_id in {"Part::Feature", "Part::FeaturePython"}
+                    else "parametric_part_feature"
+                    if _is_parametric_part_type(type_id)
                     else "uncontained_solid"
                 ),
             }
@@ -1367,13 +1402,17 @@ else:
                 "message": f"Document recompute failed: {recompute_error}",
             }
         )
-    if validation_target_kind == "model" and not bodies:
+    if (
+        validation_target_kind == "model"
+        and not bodies
+        and not uncontained_shape_objects
+    ):
         findings.append(
             {
                 "severity": "warning",
                 "category": "no_partdesign_body",
                 "object": getattr(doc, "Name", None),
-                "message": "No PartDesign Body was found. The document may be imported, direct-shape, or non-parametric.",
+                "message": "No shape-bearing PartDesign Body or Part feature was found.",
             }
         )
 
@@ -1614,12 +1653,17 @@ else:
             )
 
     for obj in uncontained_shape_objects if validation_target_kind == "model" else []:
+        if obj["classification"] == "parametric_part_feature":
+            continue
         findings.append(
             {
                 "severity": "warning",
                 "category": obj["classification"],
                 "object": obj["name"],
-                "message": "Solid exists outside a PartDesign Body; confirm that it is intentional and not a replacement for editable feature history.",
+                "message": (
+                    "Static or unsupported solid exists outside a PartDesign Body; "
+                    "confirm that loss of native editable history is intentional."
+                ),
             }
         )
 
@@ -1677,6 +1721,10 @@ else:
             "spreadsheet_parameters": len(spreadsheet_parameters),
             "required_dimensions": len(required_dimension_names),
             "uncontained_shape_objects": len(uncontained_shape_objects),
+            "parametric_part_features": sum(
+                item["classification"] == "parametric_part_feature"
+                for item in uncontained_shape_objects
+            ),
         },
         "sketch_solver_status_counts": sketch_status_counts,
         "expression_bindings": expression_bindings,

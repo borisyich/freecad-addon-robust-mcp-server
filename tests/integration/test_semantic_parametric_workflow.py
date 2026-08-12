@@ -71,7 +71,7 @@ async def _assert_parametric_model_valid(
     usage = {
         item["name"]: item["status"] for item in report["dimension_inventory"]["usage"]
     }
-    assert usage == {name: "solid_driving" for name in required_names}, usage
+    assert usage == dict.fromkeys(required_names, "solid_driving"), usage
 
     dimensions_sheet = next(
         item for item in report["spreadsheets"] if item["name"] == "Dimensions"
@@ -81,8 +81,53 @@ async def _assert_parametric_model_valid(
 
 
 @pytest.mark.asyncio
+async def test_native_part_boolean_chain_does_not_require_partdesign_review(
+    live_tools: dict[str, Any],  # noqa: F811 - imported pytest fixture
+) -> None:
+    """A healthy Part primitive/boolean history is valid outside a Body."""
+    tools = live_tools
+    doc_name = "McpAuditNativePartValidation"
+    await _fresh(tools, doc_name)
+    await _call(
+        tools,
+        "execute_python",
+        code="""
+import FreeCAD
+import Part
+doc = FreeCAD.ActiveDocument
+base = doc.addObject("Part::Cylinder", "BaseCylinder")
+base.Radius = 10.0
+base.Height = 20.0
+tool = doc.addObject("Part::Cylinder", "ToolCylinder")
+tool.Radius = 3.0
+tool.Height = 20.0
+cut = doc.addObject("Part::Cut", "Cut")
+cut.Base = base
+cut.Tool = tool
+doc.recompute()
+_result_ = {"cut_valid": cut.Shape.isValid(), "volume": cut.Shape.Volume}
+""",
+    )
+
+    report = await _call(
+        tools,
+        "validate_parametric_model",
+        doc_name=doc_name,
+        recompute=True,
+        detail_level="full",
+    )
+
+    assert report["assessment"] == "healthy", report
+    assert report["findings"] == []
+    assert report["counts"]["parametric_part_features"] == 3
+    assert {item["classification"] for item in report["uncontained_shape_objects"]} == {
+        "parametric_part_feature"
+    }
+
+
+@pytest.mark.asyncio
 async def test_semantic_selector_and_sketch_expressions_survive_parameter_update(
-    live_tools: dict[str, Any],
+    live_tools: dict[str, Any],  # noqa: F811 - imported pytest fixture
 ) -> None:
     """Build and resize a dressed, through-holed cylinder using only semantic refs.
 

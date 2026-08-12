@@ -147,6 +147,12 @@ class FaceSelectionCriteria(_PrimitiveBase):
     normal_tolerance_deg: float = Field(default=10.0, ge=0, le=180)
     area_min: float | None = Field(default=None, ge=0)
     area_max: float | None = Field(default=None, ge=0)
+    radius_min: float | None = Field(default=None, ge=0)
+    radius_max: float | None = Field(default=None, ge=0)
+    axis_direction: list[float] | None = Field(default=None, min_length=3, max_length=3)
+    axis_direction_tolerance_deg: float = Field(default=10.0, ge=0, le=90)
+    axis_point: list[float] | None = Field(default=None, min_length=3, max_length=3)
+    axis_point_tolerance: float = Field(default=1e-6, ge=0)
     convexity: Literal["flat", "convex", "concave", "saddle", "unknown"] | None = None
     adjacent_face_count_min: int | None = Field(default=None, ge=0)
     adjacent_face_count_max: int | None = Field(default=None, ge=0)
@@ -161,12 +167,16 @@ class FaceSelectionCriteria(_PrimitiveBase):
     sort_by: Literal[
         "index",
         "area",
+        "radius",
         "centroid_x",
         "centroid_y",
         "centroid_z",
         "center_x",
         "center_y",
         "center_z",
+        "axis_point_x",
+        "axis_point_y",
+        "axis_point_z",
     ] = "index"
     sort_order: Literal["asc", "desc"] = "asc"
     limit: int | None = Field(default=None, ge=1, le=200)
@@ -187,7 +197,14 @@ class FaceSelectionCriteria(_PrimitiveBase):
             raise ValueError(
                 "adjacent_face_count_min must not exceed adjacent_face_count_max"
             )
+        if (
+            self.radius_min is not None
+            and self.radius_max is not None
+            and self.radius_min > self.radius_max
+        ):
+            raise ValueError("radius_min must not exceed radius_max")
         _validate_direction(self.normal, "normal")
+        _validate_direction(self.axis_direction, "axis_direction")
         return self
 
 
@@ -348,6 +365,31 @@ def _inside_range(value: Any, minimum: Any, maximum: Any) -> bool:
     )
 
 
+def _point_to_axis_distance(
+    point: dict[str, Any] | None,
+    axis_point: list[float],
+    axis_direction: dict[str, Any] | None,
+) -> float | None:
+    """Measure a point to an infinite axis, ignoring the axis anchor choice."""
+    if not point or not axis_direction:
+        return None
+    try:
+        offset = [
+            float(axis_point[index]) - float(point[axis])
+            for index, axis in enumerate(("x", "y", "z"))
+        ]
+        direction = [float(axis_direction[axis]) for axis in ("x", "y", "z")]
+        direction_length = math.sqrt(sum(value * value for value in direction))
+        unit = [value / direction_length for value in direction]
+        projection = sum(left * right for left, right in zip(offset, unit, strict=True))
+        residual = [
+            left - projection * right for left, right in zip(offset, unit, strict=True)
+        ]
+        return math.sqrt(sum(value * value for value in residual))
+    except Exception:
+        return None
+
+
 def _centroid_matches(
     centroid: dict[str, Any] | None, bounds: CoordinateRange | None
 ) -> bool:
@@ -365,7 +407,7 @@ def _centroid_matches(
     return True
 
 
-def _selection_topology_request(  # noqa: PLR0912
+def _selection_topology_request(  # noqa: PLR0912, PLR0915
     criteria: SubshapeSelectionCriteria,
     detail_level: Literal["references", "summary", "full"],
 ) -> tuple[tuple[str, ...], tuple[str, ...] | None]:
@@ -385,10 +427,25 @@ def _selection_topology_request(  # noqa: PLR0912
                     "centroid",
                     "convexity",
                     "adjacent_faces",
+                    "radius",
+                    "axis_direction",
+                    "axis_point",
                 }
             )
         if criteria.surface_types:
             fields.add("surface_type")
+        if (
+            criteria.radius_min is not None
+            or criteria.radius_max is not None
+            or criteria.sort_by == "radius"
+        ):
+            fields.add("radius")
+        if criteria.axis_direction is not None:
+            fields.add("axis_direction")
+        if criteria.axis_point is not None or criteria.sort_by.startswith(
+            "axis_point_"
+        ):
+            fields.update({"axis_direction", "axis_point"})
         if criteria.normal is not None:
             fields.add("normal")
         if (
@@ -465,7 +522,7 @@ def _selection_topology_request(  # noqa: PLR0912
     return (kind,), tuple(sorted(fields))
 
 
-def _semantic_matches(  # noqa: PLR0912
+def _semantic_matches(  # noqa: PLR0912, PLR0915
     shape_info: dict[str, Any], criteria: SubshapeSelectionCriteria
 ) -> list[dict[str, Any]]:
     """Filter enriched ``shape_info`` using typed semantic criteria."""
@@ -514,6 +571,24 @@ def _semantic_matches(  # noqa: PLR0912
                 item.get("area"), criteria.area_min, criteria.area_max
             ):
                 continue
+            if not _inside_range(
+                item.get("radius"), criteria.radius_min, criteria.radius_max
+            ):
+                continue
+            if criteria.axis_direction is not None:
+                angle = _vector_angle_deg(
+                    item.get("axis_direction"), criteria.axis_direction, undirected=True
+                )
+                if angle is None or angle > criteria.axis_direction_tolerance_deg:
+                    continue
+            if criteria.axis_point is not None:
+                distance = _point_to_axis_distance(
+                    item.get("axis_point"),
+                    criteria.axis_point,
+                    item.get("axis_direction"),
+                )
+                if distance is None or distance > criteria.axis_point_tolerance:
+                    continue
             if (
                 criteria.convexity is not None
                 and item.get("convexity") != criteria.convexity
@@ -569,11 +644,19 @@ def _semantic_matches(  # noqa: PLR0912
     def sort_value(item: dict[str, Any]) -> tuple[bool, float]:
         if criteria.sort_by == "index":
             value = item.get("index")
-        elif criteria.sort_by.startswith(("center_", "centroid_", "point_")):
+        elif criteria.sort_by.startswith(
+            ("center_", "centroid_", "point_", "axis_point_")
+        ):
             axis = criteria.sort_by[-1]
             value = (
-                item.get("point") or item.get("centroid") or item.get("center") or {}
-            ).get(axis)
+                item.get("axis_point")
+                if criteria.sort_by.startswith("axis_point_")
+                else item.get("point")
+                or item.get("centroid")
+                or item.get("center")
+                or {}
+            ) or {}
+            value = value.get(axis)
         else:
             value = item.get(criteria.sort_by)
         if value is None:
@@ -622,6 +705,8 @@ def _compact_subshape(item: dict[str, Any]) -> dict[str, Any]:
         "area",
         "length",
         "radius",
+        "axis_direction",
+        "axis_point",
         "centroid",
         "centroid_kind",
         "convexity",
@@ -859,7 +944,8 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
         measurement tools.
 
         Face criteria can filter by surface type, representative oriented
-        normal, area, local convexity, adjacency count, and centroid position.
+        normal, area, cylindrical radius/axis, local convexity, adjacency count,
+        and centroid position.
         Edge criteria can filter by curve type, undirected line direction,
         length, radius, required adjacent surface types, adjacency count, and
         centroid position. Vertex criteria filter the world point and adjacent
@@ -875,15 +961,15 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
                 ``summary`` adds compact evidence; ``full`` adds complete topology
                 records and should be used only for a focused diagnosis.
             offset: Zero-based output-page offset.
-            page_size: Output-page size, from 1 to 100.
+            page_size: Output-page size, from 1 to 200.
 
         Returns:
             Object identity, total match count, page metadata, and references.
         """
         if offset < 0:
             raise ValueError("offset must be non-negative")
-        if not 1 <= page_size <= 100:
-            raise ValueError("page_size must be between 1 and 100")
+        if not 1 <= page_size <= 200:
+            raise ValueError("page_size must be between 1 and 200")
         normalized = (
             criteria
             if isinstance(

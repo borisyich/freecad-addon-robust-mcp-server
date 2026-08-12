@@ -36,6 +36,19 @@ OBJECT_INSPECTION_RUNTIME = dedent(
         }
 
 
+    def _cylindrical_surface_value(surface):
+        # Return stable cylinder geometry without probing unrelated surfaces.
+        if surface is None or "cylinder" not in type(surface).__name__.lower():
+            return None
+        axis = _safe_attr(surface, "Axis")
+        center = _safe_attr(surface, "Center")
+        return {
+            "radius": _finite_number(_safe_attr(surface, "Radius")),
+            "axis_direction": _vector_value(axis) if axis is not None else None,
+            "axis_point": _vector_value(center) if center is not None else None,
+        }
+
+
     def _rotation_value(value):
         axis = _safe_attr(value, "Axis")
         angle_rad = _finite_number(_safe_attr(value, "Angle"))
@@ -353,6 +366,12 @@ OBJECT_INSPECTION_RUNTIME = dedent(
                 value["surface_type"] = (
                     type(surface).__name__ if surface is not None else None
                 )
+            if any(wants(field) for field in ("radius", "axis_direction", "axis_point")):
+                cylinder = _cylindrical_surface_value(surface)
+                if cylinder is not None:
+                    for field in ("radius", "axis_direction", "axis_point"):
+                        if wants(field):
+                            value[field] = cylinder[field]
             if wants("normal"):
                 value["normal"] = normal
             if wants("area"):
