@@ -714,5 +714,5 @@ class TestMcpInstructions:
         assert description_bytes < 10_000
         assert largest_tool_bytes < 8_000
         # Eight dedicated measurement schemas trade a modest registry increase
-        # for substantially clearer agent calls. Keep the 131-tool payload bounded.
-        assert payload_bytes < 103_000
+        # for substantially clearer agent calls. Keep the 133-tool payload bounded.
+        assert payload_bytes < 106_000

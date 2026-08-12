@@ -101,9 +101,7 @@ class HelixPrimitive(_PrimitiveBase):
     pitch: float = Field(default=5.0, gt=0)
     height: float = Field(default=20.0, gt=0)
     radius: float = Field(default=5.0, gt=0)
-    angle: float = Field(
-        default=0.0, description="Helix cone angle in degrees."
-    )
+    angle: float = Field(default=0.0, description="Helix cone angle in degrees.")
     left_handed: bool = False
 
 
@@ -367,6 +365,106 @@ def _centroid_matches(
     return True
 
 
+def _selection_topology_request(  # noqa: PLR0912
+    criteria: SubshapeSelectionCriteria,
+    detail_level: Literal["references", "summary", "full"],
+) -> tuple[tuple[str, ...], tuple[str, ...] | None]:
+    """Request only the topology records and evidence needed by a selector."""
+    kind = f"{criteria.kind}s"
+    if detail_level == "full":
+        return (kind,), None
+
+    fields: set[str] = set()
+    if isinstance(criteria, FaceSelectionCriteria):
+        if detail_level == "summary":
+            fields.update(
+                {
+                    "surface_type",
+                    "normal",
+                    "area",
+                    "centroid",
+                    "convexity",
+                    "adjacent_faces",
+                }
+            )
+        if criteria.surface_types:
+            fields.add("surface_type")
+        if criteria.normal is not None:
+            fields.add("normal")
+        if (
+            criteria.area_min is not None
+            or criteria.area_max is not None
+            or criteria.sort_by == "area"
+        ):
+            fields.add("area")
+        if criteria.convexity is not None:
+            fields.add("convexity")
+        if criteria.centroid_bounds is not None or criteria.sort_by.startswith(
+            ("center_", "centroid_")
+        ):
+            fields.add("centroid")
+        if (
+            criteria.adjacent_face_count_min is not None
+            or criteria.adjacent_face_count_max is not None
+        ):
+            fields.add("adjacent_faces")
+    elif isinstance(criteria, EdgeSelectionCriteria):
+        if detail_level == "summary":
+            fields.update(
+                {
+                    "curve_type",
+                    "direction",
+                    "length",
+                    "radius",
+                    "centroid",
+                    "adjacent_faces",
+                }
+            )
+        if criteria.curve_types:
+            fields.add("curve_type")
+        if criteria.direction is not None:
+            fields.add("direction")
+        if (
+            criteria.length_min is not None
+            or criteria.length_max is not None
+            or criteria.sort_by == "length"
+        ):
+            fields.add("length")
+        if (
+            criteria.radius_min is not None
+            or criteria.radius_max is not None
+            or criteria.sort_by == "radius"
+        ):
+            fields.add("radius")
+        if criteria.centroid_bounds is not None or criteria.sort_by.startswith(
+            ("center_", "centroid_")
+        ):
+            fields.add("centroid")
+        if (
+            criteria.adjacent_face_count_min is not None
+            or criteria.adjacent_face_count_max is not None
+        ):
+            fields.add("adjacent_faces")
+        if criteria.adjacent_surface_types:
+            fields.update({"adjacent_faces", "adjacent_surface_types"})
+    else:
+        if detail_level == "summary":
+            fields.update({"point", "adjacent_edges", "adjacent_faces", "tolerance"})
+        if criteria.point_bounds is not None or criteria.sort_by.startswith("point_"):
+            fields.add("point")
+        if (
+            criteria.adjacent_edge_count_min is not None
+            or criteria.adjacent_edge_count_max is not None
+        ):
+            fields.add("adjacent_edges")
+        if (
+            criteria.adjacent_face_count_min is not None
+            or criteria.adjacent_face_count_max is not None
+        ):
+            fields.add("adjacent_faces")
+    return (kind,), tuple(sorted(fields))
+
+
 def _semantic_matches(  # noqa: PLR0912
     shape_info: dict[str, Any], criteria: SubshapeSelectionCriteria
 ) -> list[dict[str, Any]]:
@@ -442,6 +540,9 @@ def _semantic_matches(  # noqa: PLR0912
                 continue
             if criteria.adjacent_surface_types:
                 adjacent_types = {
+                    _normalized_type_name(value)
+                    for value in item.get("adjacent_surface_types") or []
+                } or {
                     _normalized_type_name(
                         face_by_name.get(name, {}).get("surface_type")
                     )
@@ -471,10 +572,7 @@ def _semantic_matches(  # noqa: PLR0912
         elif criteria.sort_by.startswith(("center_", "centroid_", "point_")):
             axis = criteria.sort_by[-1]
             value = (
-                item.get("point")
-                or item.get("centroid")
-                or item.get("center")
-                or {}
+                item.get("point") or item.get("centroid") or item.get("center") or {}
             ).get(axis)
         else:
             value = item.get(criteria.sort_by)
@@ -668,7 +766,9 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
         """
         if min(face_offset, edge_offset, vertex_offset) < 0:
             raise ValueError("topology offsets must be non-negative")
-        if not all(1 <= value <= 100 for value in (face_limit, edge_limit, vertex_limit)):
+        if not all(
+            1 <= value <= 100 for value in (face_limit, edge_limit, vertex_limit)
+        ):
             raise ValueError("topology page limits must be between 1 and 100")
 
         effective_detail = detail_level
@@ -793,15 +893,20 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
             else _SUBSHAPE_CRITERIA_ADAPTER.validate_python(criteria)
         )
         bridge = await get_bridge()
+        topology_kinds, topology_fields = _selection_topology_request(
+            normalized, detail_level
+        )
         obj = await bridge.get_object(
             object_name,
             doc_name,
             include_properties=False,
             include_shape=True,
             include_topology=True,
-            face_limit=None,
-            edge_limit=None,
-            vertex_limit=None,
+            face_limit=None if normalized.kind == "face" else 0,
+            edge_limit=None if normalized.kind == "edge" else 0,
+            vertex_limit=None if normalized.kind == "vertex" else 0,
+            topology_kinds=topology_kinds,
+            topology_fields=topology_fields,
         )
         if not obj:
             raise ValueError(f"Object not found: {object_name!r}")
@@ -1418,9 +1523,13 @@ _result_ = {{
     ) -> dict[str, Any]:
         """Get, set, or clear the FreeCAD GUI selection.
 
+        ``set`` accepts both object names and qualified subelements such as
+        ``Body.Face12``, ``Pad.Edge7``, or ``Sketch.Vertex3``.
+
         Args:
             action: Selection operation.
-            object_names: Object names required for ``set``.
+            object_names: Object names or ``Object.FaceN``/``Object.EdgeN``/
+                ``Object.VertexN`` references required for ``set``.
             clear_existing: Clear the previous selection before ``set``.
             doc_name: Document used for ``get`` or ``set``. Uses active document if None.
 
@@ -1455,25 +1564,47 @@ else:
         FreeCADGui.Selection.clearSelection()
         _result_ = {{"success": True, "action": action, "selected_count": 0}}
     else:
+        import re
+
         doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
         if doc is None:
             raise ValueError("No document found")
         if {clear_existing!r}:
             FreeCADGui.Selection.clearSelection()
         selected_names = []
+        selected_references = []
         missing_names = []
-        for object_name in {object_names!r}:
+        for selection_reference in {object_names!r}:
+            object_name = selection_reference
+            subelement = None
+            owner_name, separator, candidate = selection_reference.rpartition(".")
+            if separator and re.fullmatch(r"(?:Face|Edge|Vertex)\\d+", candidate):
+                object_name = owner_name
+                subelement = candidate
             obj = doc.getObject(object_name)
             if obj is None:
-                missing_names.append(object_name)
+                missing_names.append(selection_reference)
             else:
-                FreeCADGui.Selection.addSelection(obj)
-                selected_names.append(obj.Name)
+                if subelement is None:
+                    FreeCADGui.Selection.addSelection(obj)
+                else:
+                    try:
+                        obj.Shape.getElement(subelement)
+                    except Exception:
+                        missing_names.append(selection_reference)
+                        continue
+                    FreeCADGui.Selection.addSelection(obj, subelement)
+                if obj.Name not in selected_names:
+                    selected_names.append(obj.Name)
+                selected_references.append(
+                    f"{{obj.Name}}.{{subelement}}" if subelement else obj.Name
+                )
         _result_ = {{
             "success": not missing_names,
             "action": action,
-            "selected_count": len(selected_names),
+            "selected_count": len(selected_references),
             "selected_names": selected_names,
+            "selected_references": selected_references,
             "missing_names": missing_names,
         }}
 """
@@ -1790,6 +1921,161 @@ except Exception:
         if result.success:
             return result.result
         raise ValueError(result.error_traceback or "Shell operation failed")
+
+    @mcp.tool()
+    async def move_faces(
+        object_name: str,
+        face_names: list[str],
+        distance: float,
+        operation: Literal["auto", "add", "remove"] = "auto",
+        result_name: str | None = None,
+        hide_source: bool = True,
+        doc_name: str | None = None,
+    ) -> dict[str, Any]:
+        """Move/offset selected planar faces by a signed normal distance.
+
+        This is a local direct-edit operation. Positive distance extends material
+        along each face's oriented normal; negative distance removes material in
+        the opposite direction. ``operation`` can override the automatic
+        fuse/cut choice when working with cavity faces or unusual orientations.
+
+        The result is an auditable static shape feature with links to the source,
+        selected faces, and distance. It is intentionally reported as a direct
+        edit rather than pretending to be a native parametric PartDesign feature.
+
+        Args:
+            object_name: Shape-bearing source object.
+            face_names: One or more ``FaceN`` references from ``select_subshapes``.
+            distance: Signed offset distance along each oriented face normal.
+            operation: ``auto`` (add for positive, remove for negative), ``add``,
+                or ``remove``.
+            result_name: Optional result object name.
+            hide_source: Hide the source after a successful operation.
+            doc_name: Document containing the source object.
+
+        Returns:
+            Result identity, operation evidence, and static/direct-edit status.
+        """
+        if not face_names:
+            raise ValueError("face_names must contain at least one FaceN reference")
+        if not math.isfinite(distance) or abs(distance) <= 1e-12:
+            raise ValueError("distance must be a finite non-zero value")
+        for face_name in face_names:
+            if not (
+                face_name.startswith("Face")
+                and face_name[4:].isdigit()
+                and int(face_name[4:]) > 0
+            ):
+                raise ValueError(f"Invalid face reference: {face_name!r}")
+
+        bridge = await get_bridge()
+        code = f"""
+import Part
+
+doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
+if doc is None:
+    raise ValueError("No document found")
+
+obj = doc.getObject({object_name!r})
+if obj is None:
+    raise ValueError(f"Object not found: {object_name!r}")
+if not hasattr(obj, "Shape") or obj.Shape.isNull():
+    raise ValueError("Object has no usable shape")
+
+face_names = {face_names!r}
+faces = []
+for face_name in face_names:
+    index = int(face_name[4:]) - 1
+    if index < 0 or index >= len(obj.Shape.Faces):
+        raise ValueError(f"Subelement not found: {{obj.Name}}.{{face_name}}")
+    face = obj.Shape.Faces[index]
+    surface_type = type(getattr(face, "Surface", None)).__name__.lower()
+    if "plane" not in surface_type:
+        raise ValueError(
+            f"move_faces currently supports planar faces; {{face_name}} is {{surface_type or 'unknown'}}"
+        )
+    faces.append((face_name, face))
+
+mode = {operation!r}
+if mode == "auto":
+    mode = "add" if {distance!r} > 0 else "remove"
+
+doc.openTransaction("Move Faces")
+try:
+    result_shape = obj.Shape
+    for face_name, face in faces:
+        center = face.CenterOfMass
+        try:
+            u, v = face.Surface.parameter(center)
+        except Exception:
+            u_min, u_max, v_min, v_max = face.ParameterRange
+            u, v = (u_min + u_max) * 0.5, (v_min + v_max) * 0.5
+        normal = face.normalAt(u, v)
+        if normal.Length <= 1e-12:
+            raise ValueError(f"Could not determine oriented normal for {{face_name}}")
+        normal.normalize()
+        prism = face.extrude(normal * {distance!r})
+        result_shape = (
+            result_shape.fuse(prism) if mode == "add" else result_shape.cut(prism)
+        )
+
+    try:
+        result_shape = result_shape.removeSplitter()
+    except Exception:
+        pass
+    if result_shape.isNull() or not result_shape.isValid():
+        raise ValueError("Local face move produced an invalid shape")
+
+    body = next(
+        (
+            parent for parent in (getattr(obj, "InList", []) or [])
+            if getattr(parent, "TypeId", "") == "PartDesign::Body"
+        ),
+        None,
+    )
+    requested_name = {result_name!r} or f"{{obj.Name}}_move_faces"
+    result = (
+        body.newObject("PartDesign::Feature", requested_name)
+        if body is not None
+        else doc.addObject("Part::Feature", requested_name)
+    )
+    result.Shape = result_shape
+    result.addProperty("App::PropertyLink", "SourceObject", "Direct Edit")
+    result.SourceObject = obj
+    result.addProperty("App::PropertyStringList", "SourceFaces", "Direct Edit")
+    result.SourceFaces = face_names
+    result.addProperty("App::PropertyLength", "OffsetDistance", "Direct Edit")
+    result.OffsetDistance = {distance!r}
+    result.addProperty("App::PropertyString", "DirectEditOperation", "Direct Edit")
+    result.DirectEditOperation = f"move_faces:{{mode}}"
+    if {hide_source!r} and hasattr(obj, "ViewObject"):
+        obj.ViewObject.Visibility = False
+
+    doc.recompute()
+    doc.commitTransaction()
+    _result_ = {{
+        "name": result.Name,
+        "label": result.Label,
+        "type_id": result.TypeId,
+        "source_object": obj.Name,
+        "face_names": face_names,
+        "distance": float({distance!r}),
+        "operation": mode,
+        "static_snapshot": True,
+        "direct_edit": True,
+        "response_guidance": (
+            "This local direct edit stores a static Shape snapshot. Use native Sketcher/PartDesign "
+            "features when future dimensional edits are required."
+        ),
+    }}
+except Exception:
+    doc.abortTransaction()
+    raise
+"""
+        result = await bridge.execute_python(code)
+        if result.success and result.result:
+            return result.result
+        raise ValueError(result.error_traceback or "Move faces failed")
 
     @mcp.tool()
     async def offset_3d(

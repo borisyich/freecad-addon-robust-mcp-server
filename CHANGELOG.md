@@ -240,6 +240,12 @@
 - Expanded coordinate-heavy sketch diagnostics to flag at least one absolute
   X/Y constraint per geometry and require source-backed/derived/solver-lock
   provenance review without rejecting legitimate ordinate drawings.
+- Made `select_subshapes` request only the selected topology kind and required
+  semantic fields; topology adjacency now uses indexed incidence traversal
+  instead of full edge-by-face and vertex-by-edge/face scans.
+- Added qualified subelement GUI selection, transient `highlight_faces`, planar
+  local `move_faces` direct edits, explicit `Current` camera semantics, and
+  validation warnings for static generic `PartDesign::Feature` snapshots.
 
 This project uses **component-specific versioning**. Each component has its own
 release notes and version history.

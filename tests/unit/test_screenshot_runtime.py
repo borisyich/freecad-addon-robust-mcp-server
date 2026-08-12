@@ -59,3 +59,24 @@ def test_screenshot_runtime_supports_temp_base64_mode() -> None:
     assert "tempfile.NamedTemporaryFile" in code
     assert "base64.b64encode" in code
     assert "os.unlink(image_path)" in code
+
+
+def test_screenshot_runtime_current_view_changes_only_requested_framing() -> None:
+    code = build_screenshot_code(
+        view_angle="Current",
+        width=800,
+        height=600,
+        doc_name=None,
+        fit_all=False,
+        background="Current",
+        show_corner_cross=False,
+        corner_cross_size=10,
+        settle_time_seconds=0.0,
+        save_to_disk=False,
+        output_path=None,
+        return_data=True,
+    )
+
+    assert 'view_type not in ("Current", "FitAll")' in code
+    assert "view.viewIsometric()" in code
+    assert 'if False or view_type == "FitAll":' in code

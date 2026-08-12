@@ -325,6 +325,12 @@ plus pagination metadata. Use `summary` for compact selection evidence and
 `centroid_bounds`; the old input key `center` and `center_x/y/z` sort names are
 accepted for compatibility.
 
+The implementation is selective and lazy: it requests only the selected
+topology kind, and `references` computes only fields used by the supplied
+criteria. Expensive adjacency, curvature, normals, and bounding boxes are not
+built unless filtering or the requested detail level needs them. This keeps
+semantic selection usable on large imported STEP topology.
+
 Line direction is treated as undirected, so `[1, 0, 0]` also matches an edge
 stored from right to left. Type names are case-insensitive and accept common
 forms such as `planar`/`Plane`, `circular`/`Circle`, and
@@ -491,8 +497,33 @@ selection(
 ) -> dict
 ```
 
-For `action="set"`, provide at least one object name. The result reports selected
-and missing object names rather than silently ignoring unresolved references.
+For `action="set"`, provide at least one object name or qualified subelement such
+as `"hf_201.Face357"`. Qualified `FaceN`, `EdgeN`, and `VertexN` references are
+validated against the owning Shape and passed to FreeCAD's subelement selection
+API. The result reports selected references and missing names rather than
+silently ignoring unresolved references.
+
+#### move_faces
+
+Locally add or remove material by moving selected planar faces along their
+oriented normals.
+
+```python
+move_faces(
+    object_name="Pad",
+    face_names=["Face12"],
+    distance=2.0,
+    operation="auto",  # auto, add, remove
+    result_name=None,
+    hide_source=True,
+    doc_name=None,
+) -> dict
+```
+
+This is a direct B-rep edit, not a native dimensional PartDesign feature. The
+result records its source, faces, distance, and operation, and the parametric
+validator reports it as a static `PartDesign::Feature` snapshot. Prefer native
+Sketcher/PartDesign history when future dimensional edits are required.
 
 ---
 
@@ -1702,7 +1733,12 @@ accepted; use 0 only when the view is already stable or in controlled tests.
 | Left / Right | YZ (ZOY) | X |
 | Isometric | no true-shape plane | verification only |
 
-**View angles:** `Isometric`, `Front`, `Back`, `Top`, `Bottom`, `Left`, `Right`, `FitAll`
+**View angles:** `Isometric`, `Front`, `Back`, `Top`, `Bottom`, `Left`, `Right`, `Current`, `FitAll`
+
+`Current` preserves both orientation and framing. `FitAll` preserves the current
+orientation and changes only framing. With `get_screenshot`, combine
+`view_angle="Current"` and `fit_all=False` to capture an existing custom camera
+exactly; use `fit_all=True` only when reframing is intended.
 
 #### open_image
 
@@ -1799,7 +1835,8 @@ The decision is `continue`, `rework`. The tool does not inspect pixels; it enfor
 
 #### set_view_angle
 
-Set a standard camera view.
+Set a standard camera view, preserve the `Current` view, or apply framing-only
+`FitAll`.
 
 ```python
 set_view_angle(view_angle: str, doc_name: str | None = None) -> dict
@@ -1837,6 +1874,27 @@ height, and focal distance. `fit_all` and `orthographic_height` are mutually
 exclusive.
 
 ### Object Appearance
+
+#### highlight_faces
+
+Temporarily color and optionally select individual faces without adding objects
+to the document tree.
+
+```python
+highlight_faces(
+    action="show",  # show or clear
+    object_name="Pad",
+    face_names=["Face12", "Face13"],
+    color=[1.0, 0.75, 0.0],
+    select_faces=True,
+    clear_existing_selection=True,
+    doc_name=None,
+) -> dict
+```
+
+`show` saves the current per-face `DiffuseColor`; `clear` restores it (omit
+`object_name` to clear all MCP highlights in the document). Highlight state is
+session-only and creates no temporary `Part::Feature` geometry.
 
 #### set_visual_properties
 
@@ -1962,6 +2020,9 @@ The report includes:
 
 - document metadata and counts;
 - each `PartDesign::Body`, shape validity, current Tip, and ordered history;
+- every exact `PartDesign::Feature` solid inside a Body classified as a static
+  Shape snapshot (including an explicit direct-edit marker when present), so a
+  chain of generic snapshots cannot be mistaken for native parametric history;
 - status strings serialized as complete entries (for example `["Valid"]`, not one character per entry);
 - datum planes/lines/points marked as reference geometry, with non-applicable volume and bounding-box metrics omitted;
 - sketches with solver state (`fully_constrained`, `under_constrained`,

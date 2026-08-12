@@ -916,6 +916,13 @@ def _history_item(obj, index):
     shape_is_problem = shape["present"] and (
         shape["valid"] is False or shape["is_null"] is True
     )
+    is_static_shape_snapshot = bool(
+        getattr(obj, "TypeId", None) == "PartDesign::Feature"
+        and shape["present"]
+        and shape["is_null"] is not True
+        and (shape["solid_count"] or 0) > 0
+    )
+    direct_edit_operation = getattr(obj, "DirectEditOperation", None)
     return {
         "index": index,
         "name": getattr(obj, "Name", None),
@@ -927,6 +934,10 @@ def _history_item(obj, index):
         "visibility": _visibility(obj),
         "shape": shape,
         "expressions": _expression_summary(obj),
+        "static_shape_snapshot": is_static_shape_snapshot,
+        "direct_edit_operation": (
+            str(direct_edit_operation) if direct_edit_operation else None
+        ),
         "in_list": [
             _object_ref(value)
             for value in (getattr(obj, "InList", []) or [])
@@ -977,6 +988,9 @@ def _body_summary(body):
     body_states = _state_values(body)
     body_shape = _shape_summary(body)
     invalid_history_items = [item for item in history if not item.get("valid")]
+    static_shape_features = [
+        item for item in history if item.get("static_shape_snapshot")
+    ]
     tip_valid = tip_summary is not None and bool(tip_summary.get("valid"))
     reference_only = last_shape_feature is None
     tip_requirement_satisfied = bool(
@@ -1031,6 +1045,8 @@ def _body_summary(body):
         "tip": tip_summary,
         "reference_only": reference_only,
         "invalid_history_item_count": len(invalid_history_items),
+        "static_shape_feature_count": len(static_shape_features),
+        "static_shape_features": static_shape_features,
         "tip_is_latest_shape_feature": bool(
             tip is not None and last_shape_feature is not None and tip is last_shape_feature
         ),
@@ -1451,6 +1467,25 @@ else:
                     "message": warning,
                 }
             )
+        for item in body.get("static_shape_features", []):
+            direct_edit = item.get("direct_edit_operation")
+            findings.append(
+                {
+                    "severity": "warning",
+                    "category": "static_partdesign_shape_snapshot",
+                    "object": item.get("name"),
+                    "message": (
+                        f"Generic PartDesign::Feature stores a static Shape snapshot"
+                        f" inside Body {body['name']!r}."
+                        + (
+                            f" It is marked as local direct edit {direct_edit!r}."
+                            if direct_edit
+                            else " It has no native parametric feature type."
+                        )
+                        + " Confirm that loss of upstream editability is intentional."
+                    ),
+                }
+            )
 
     for sketch in scoped_sketches:
         solver = sketch.get("analysis", {}).get("solver", {})
@@ -1632,6 +1667,9 @@ else:
         "counts": {
             "bodies": len(bodies),
             "body_history_items": sum(body["history_count"] for body in bodies),
+            "static_partdesign_shape_snapshots": sum(
+                body.get("static_shape_feature_count", 0) for body in bodies
+            ),
             "sketches": len(all_sketches),
             "sketches_in_scope": len(scoped_sketches),
             "standalone_sketches": len(standalone_sketches),

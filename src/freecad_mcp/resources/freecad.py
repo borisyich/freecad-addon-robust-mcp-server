@@ -550,6 +550,16 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                             "key_params": ["object_name", "thickness", "faces"],
                         },
                         {
+                            "name": "move_faces",
+                            "description": "Locally move selected planar faces as an auditable static direct edit",
+                            "key_params": [
+                                "object_name",
+                                "face_names",
+                                "distance",
+                                "operation",
+                            ],
+                        },
+                        {
                             "name": "offset_3d",
                             "description": "Offset object surface by distance",
                             "key_params": ["object_name", "offset"],
@@ -1133,6 +1143,16 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                             "name": "get_camera_state",
                             "description": "Read projection, position, orientation, and orthographic scale",
                             "key_params": ["doc_name"],
+                        },
+                        {
+                            "name": "highlight_faces",
+                            "description": "Temporarily highlight and select individual faces without document geometry",
+                            "key_params": [
+                                "action",
+                                "object_name",
+                                "face_names",
+                                "color",
+                            ],
                         },
                         {
                             "name": "set_visual_properties",

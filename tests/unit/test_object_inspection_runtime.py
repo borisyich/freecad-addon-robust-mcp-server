@@ -272,3 +272,36 @@ def test_shape_topology_is_paged_and_omitted_by_default() -> None:
     }
     assert paged["topology_pages"]["vertices"]["returned"] == 2
     assert paged["topology_pages"]["vertices"]["next_offset"] == 4
+
+
+def test_shape_topology_can_skip_unrequested_kinds_and_expensive_fields() -> None:
+    """Semantic selectors should not build unrelated topology payloads."""
+    runtime = _load_runtime()
+    result = runtime["_shape_topology_value"](
+        _TopologicalShape(),
+        face_limit=None,
+        topology_kinds=("faces",),
+        topology_fields=("surface_type", "area"),
+    )
+
+    assert set(result) == {"faces", "topology_pages"}
+    assert set(result["topology_pages"]) == {"faces"}
+    assert set(result["faces"][0]) == {"name", "index", "surface_type", "area"}
+    assert "edges" not in result
+    assert "vertices" not in result
+
+
+def test_generated_inspection_code_carries_selective_topology_contract() -> None:
+    code = build_object_inspection_code(
+        "Imported",
+        None,
+        include_topology=True,
+        face_limit=None,
+        edge_limit=0,
+        vertex_limit=0,
+        topology_kinds=("faces",),
+        topology_fields=("normal", "area"),
+    )
+
+    assert "topology_kinds=('faces',)" in code
+    assert "topology_fields=('normal', 'area')" in code

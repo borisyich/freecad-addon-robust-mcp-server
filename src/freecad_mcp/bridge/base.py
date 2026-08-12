@@ -26,6 +26,7 @@ class ViewAngle(StrEnum):
     BOTTOM = "Bottom"
     LEFT = "Left"
     RIGHT = "Right"
+    CURRENT = "Current"
     FIT_ALL = "FitAll"
 
 
@@ -418,6 +419,8 @@ class FreecadBridge(ABC):
         edge_limit: int | None = 20,
         vertex_offset: int = 0,
         vertex_limit: int | None = 20,
+        topology_kinds: tuple[str, ...] | None = None,
+        topology_fields: tuple[str, ...] | None = None,
     ) -> ObjectInfo:
         """Get detailed object information.
 
@@ -433,6 +436,11 @@ class FreecadBridge(ABC):
             edge_limit: Edge-page size, or all remaining edges when None.
             vertex_offset: Zero-based vertex-page offset.
             vertex_limit: Vertex-page size, or all remaining vertices when None.
+            topology_kinds: Optional subset of ``faces``, ``edges``, and
+                ``vertices`` to serialize. ``None`` preserves the complete
+                topology response.
+            topology_fields: Optional subset of enriched topology fields to
+                calculate. ``None`` preserves the complete topology response.
 
         Returns:
             ObjectInfo with the requested detail level. Topology pages are

@@ -379,7 +379,7 @@ The server currently registers **131 MCP tools**. The tables below list common t
 | `create_object`    | Create a generic FreeCAD object by type ID                      | All  |
 | `create_primitive` | Create a Box, Cylinder, Sphere, Cone, Torus, Wedge, or Helix    | All  |
 
-#### Object Management (12 common tools)
+#### Object Management (13 common tools)
 
 | Tool                | Description                                        | Mode |
 | ------------------- | -------------------------------------------------- | ---- |
@@ -394,7 +394,8 @@ The server currently registers **131 MCP tools**. The tables below list common t
 | `copy_object`       | Create a copy of an object                         | All  |
 | `mirror_object`     | Mirror an object across a plane (XY, XZ, YZ)       | All  |
 | `boolean_operation` | Fuse, cut, or intersect objects                    | All  |
-| `selection`         | Get, set, or clear the GUI selection               | GUI  |
+| `selection`         | Get/set/clear object or qualified subelement selection | GUI  |
+| `move_faces`        | Locally move planar faces as an auditable static direct edit | All  |
 
 #### PartDesign - Sketching and Core Features (14 common tools)
 
@@ -441,7 +442,7 @@ SheetMetal GUI ViewProvider, so the result remains visible and inspectable.
 | `unfold_sheet_metal` | Create or transactionally verify an unfold using explicit neutral-axis data | All |
 | `inspect_sheet_metal` | Inspect thickness, classified bends, full active history, and unfold readiness | All |
 
-#### View & Display (10 common tools)
+#### View & Display (12 common tools)
 
 | Tool                        | Description                                                   | Mode |
 | --------------------------- | ------------------------------------------------------------- | ---- |
@@ -455,6 +456,7 @@ SheetMetal GUI ViewProvider, so the result remains visible and inspectable.
 | `set_camera_position`       | Set position, target, screen-up, projection, scale, and roll  | GUI  |
 | `get_camera_state`          | Read reproducible camera projection and orientation state     | GUI  |
 | `set_visual_properties`     | Set visibility, RGB color, and/or display mode                | GUI  |
+| `highlight_faces`           | Temporarily highlight `FaceN` references without model objects | GUI  |
 | `workbench`                 | List or activate a FreeCAD workbench                          | All  |
 
 ### Agent engineering guidance

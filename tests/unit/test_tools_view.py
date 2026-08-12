@@ -257,6 +257,17 @@ class TestViewTools:
         mock_bridge.set_view.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_current_view_preserves_camera_orientation(
+        self, register_tools, mock_bridge
+    ):
+        mock_bridge.set_view = AsyncMock(return_value=None)
+
+        result = await register_tools["set_view_angle"]("Current")
+
+        assert result["success"] is True
+        mock_bridge.set_view.assert_awaited_once_with(ViewAngle.CURRENT, None)
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize(
         ("view_angle", "projection_plane", "normal_axis"),
         [
@@ -393,6 +404,49 @@ class TestViewTools:
         assert "ViewObject.Visibility" in generated_code
         assert "ViewObject.ShapeColor" in generated_code
         assert "ViewObject.DisplayMode" in generated_code
+
+    @pytest.mark.asyncio
+    async def test_highlight_faces_is_transient_and_restorable(
+        self, register_tools, mock_bridge
+    ):
+        mock_bridge.execute_python = AsyncMock(
+            return_value=ExecutionResult(
+                success=True,
+                result={
+                    "success": True,
+                    "action": "show",
+                    "object_name": "Pad",
+                    "highlighted_faces": ["Face12"],
+                    "transient": True,
+                },
+                stdout="",
+                stderr="",
+                execution_time_ms=10.0,
+            )
+        )
+
+        result = await register_tools["highlight_faces"](
+            "show", object_name="Pad", face_names=["Face12"]
+        )
+
+        assert result["transient"] is True
+        generated_code = mock_bridge.execute_python.await_args.args[0]
+        assert "_freecad_mcp_face_highlights" in generated_code
+        assert "obj.ViewObject.DiffuseColor = display" in generated_code
+        assert "FreeCADGui.Selection.addSelection(obj, face_name)" in generated_code
+        assert "doc.addObject" not in generated_code
+
+    @pytest.mark.asyncio
+    async def test_highlight_faces_validates_references_before_freecad(
+        self, register_tools, mock_bridge
+    ):
+        with pytest.raises(ValueError, match="required for action='show'"):
+            await register_tools["highlight_faces"]("show")
+        with pytest.raises(ValueError, match="Invalid face reference"):
+            await register_tools["highlight_faces"](
+                "show", object_name="Pad", face_names=["Edge1"]
+            )
+        mock_bridge.execute_python.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_set_visual_properties_validates_request_before_freecad(

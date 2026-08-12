@@ -690,3 +690,100 @@ def test_missing_tip_with_shape_history_remains_invalid(monkeypatch) -> None:
     assert body_report["valid"] is False
     assert body_report["reference_only"] is False
     assert any("despite shape-bearing" in issue for issue in body_report["issues"])
+
+
+def test_generic_partdesign_features_are_reported_as_static_snapshots(
+    monkeypatch,
+) -> None:
+    """A generic Shape container inside Body must not look natively parametric."""
+    import sys
+    from types import SimpleNamespace
+
+    class BoundBox:
+        XMin = YMin = ZMin = 0.0
+        XMax = YMax = ZMax = 1.0
+        XLength = YLength = ZLength = 1.0
+
+    class SolidShape:
+        ShapeType = "Solid"
+        Solids = [object()]
+        Shells = [object()]
+        Faces = [object()]
+        Edges = [object()]
+        Vertexes = [object()]
+        Volume = 1.0
+        Area = 6.0
+
+        def isNull(self):  # noqa: N802
+            return False
+
+        def isValid(self):  # noqa: N802
+            return True
+
+    SolidShape.BoundBox = BoundBox()
+
+    placement = SimpleNamespace(
+        Base=SimpleNamespace(x=0.0, y=0.0, z=0.0),
+        Rotation=SimpleNamespace(Axis=SimpleNamespace(x=0.0, y=0.0, z=1.0), Angle=0.0),
+    )
+    snapshots = []
+    for index in range(4):
+        snapshots.append(
+            SimpleNamespace(
+                Name=f"Snapshot{index + 1}",
+                Label=f"Snapshot {index + 1}",
+                TypeId="PartDesign::Feature",
+                State=[],
+                ViewObject=SimpleNamespace(Visibility=index == 3),
+                Placement=placement,
+                Shape=SolidShape(),
+                ExpressionEngine=[],
+                InList=[],
+                OutList=[],
+            )
+        )
+    body = SimpleNamespace(
+        Name="Body",
+        Label="Body",
+        TypeId="PartDesign::Body",
+        State=[],
+        ViewObject=SimpleNamespace(Visibility=True),
+        Placement=placement,
+        Shape=SolidShape(),
+        Group=snapshots,
+        Tip=snapshots[-1],
+    )
+    doc = SimpleNamespace(
+        Name="Snapshots",
+        Label="Snapshots",
+        FileName="",
+        Objects=[body, *snapshots],
+        recompute=lambda: None,
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "FreeCAD",
+        SimpleNamespace(ActiveDocument=doc, listDocuments=lambda: {"Snapshots": doc}),
+    )
+
+    namespace: dict[str, object] = {}
+    exec(
+        build_parametric_validation_code(
+            doc_name="Snapshots",
+            recompute=True,
+            include_sketch_constraints=False,
+        ),
+        namespace,
+    )
+    report = namespace["_result_"]
+
+    assert report["counts"]["static_partdesign_shape_snapshots"] == 4
+    assert report["bodies"][0]["static_shape_feature_count"] == 4
+    findings = [
+        item
+        for item in report["findings"]
+        if item["category"] == "static_partdesign_shape_snapshot"
+    ]
+    assert len(findings) == 4
+    assert all(item["severity"] == "warning" for item in findings)
+    assert report["assessment"] == "review_recommended"

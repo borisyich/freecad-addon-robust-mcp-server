@@ -108,6 +108,43 @@ OBJECT_INSPECTION_RUNTIME = dedent(
         return None
 
 
+    def _shape_hash(value):
+        method = getattr(value, "hashCode", None)
+        if not callable(method):
+            return None
+        try:
+            return int(method())
+        except TypeError:
+            try:
+                return int(method(2147483647))
+            except Exception:
+                return None
+        except Exception:
+            return None
+
+
+    def _shape_index(values, target, index_by_hash):
+        # Resolve wrapped TopoShapes without an O(N) scan in the normal case.
+        key = _shape_hash(target)
+        if key is not None:
+            for index in index_by_hash.get(key, []):
+                if _shape_is_same(values[index], target):
+                    return index
+        for index, value in enumerate(values or []):
+            if _shape_is_same(value, target):
+                return index
+        return None
+
+
+    def _shape_index_map(values):
+        result = {}
+        for index, value in enumerate(values or []):
+            key = _shape_hash(value)
+            if key is not None:
+                result.setdefault(key, []).append(index)
+        return result
+
+
     def _normalized_vector_between(start, end):
         if start is None or end is None:
             return None
@@ -233,137 +270,180 @@ OBJECT_INSPECTION_RUNTIME = dedent(
         edge_limit=20,
         vertex_offset=0,
         vertex_limit=20,
+        topology_kinds=None,
+        topology_fields=None,
     ):
         faces = list(_safe_attr(shape, "Faces", []) or [])
         edges = list(_safe_attr(shape, "Edges", []) or [])
         vertexes = list(_safe_attr(shape, "Vertexes", []) or [])
 
-        edge_faces = {}
-        for edge_index, edge in enumerate(edges):
-            names = []
+        requested_kinds = set(topology_kinds or ("faces", "edges", "vertices"))
+        requested_fields = (
+            None if topology_fields is None else set(topology_fields)
+        )
+
+        def wants(field):
+            return requested_fields is None or field in requested_fields
+
+        needs_edge_faces = any(
+            wants(field)
+            for field in ("adjacent_faces", "adjacent_surface_types")
+        ) and bool(requested_kinds & {"faces", "edges"})
+        needs_face_edges = "faces" in requested_kinds and wants("edges")
+        needs_vertex_edges = "vertices" in requested_kinds and wants("adjacent_edges")
+        needs_vertex_faces = "vertices" in requested_kinds and wants("adjacent_faces")
+
+        edge_faces = {index: [] for index in range(len(edges))}
+        face_edges = {index: [] for index in range(len(faces))}
+        if needs_edge_faces or needs_face_edges:
+            edge_index_by_hash = _shape_index_map(edges)
             for face_index, face in enumerate(faces):
-                if any(
-                    _shape_is_same(edge, face_edge)
-                    for face_edge in list(_safe_attr(face, "Edges", []) or [])
-                ):
-                    names.append(f"Face{face_index + 1}")
-            edge_faces[edge_index] = names
+                for face_edge in list(_safe_attr(face, "Edges", []) or []):
+                    edge_index = _shape_index(edges, face_edge, edge_index_by_hash)
+                    if edge_index is None:
+                        continue
+                    edge_name = f"Edge{edge_index + 1}"
+                    if edge_name not in face_edges[face_index]:
+                        face_edges[face_index].append(edge_name)
+                    face_name = f"Face{face_index + 1}"
+                    if face_name not in edge_faces[edge_index]:
+                        edge_faces[edge_index].append(face_name)
+
+        vertex_edges = {index: [] for index in range(len(vertexes))}
+        if needs_vertex_edges:
+            vertex_index_by_hash = _shape_index_map(vertexes)
+            for edge_index, edge in enumerate(edges):
+                for edge_vertex in list(_safe_attr(edge, "Vertexes", []) or []):
+                    vertex_index = _shape_index(
+                        vertexes, edge_vertex, vertex_index_by_hash
+                    )
+                    if vertex_index is not None:
+                        vertex_edges[vertex_index].append(f"Edge{edge_index + 1}")
+
+        vertex_faces = {index: [] for index in range(len(vertexes))}
+        if needs_vertex_faces:
+            vertex_index_by_hash = _shape_index_map(vertexes)
+            for face_index, face in enumerate(faces):
+                for face_vertex in list(_safe_attr(face, "Vertexes", []) or []):
+                    vertex_index = _shape_index(
+                        vertexes, face_vertex, vertex_index_by_hash
+                    )
+                    if vertex_index is not None:
+                        vertex_faces[vertex_index].append(f"Face{face_index + 1}")
+
+        face_page, face_paging = _page_value(faces, face_offset, face_limit)
+        edge_page, edge_paging = _page_value(edges, edge_offset, edge_limit)
+        vertex_page, vertex_paging = _page_value(
+            vertexes, vertex_offset, vertex_limit
+        )
 
         face_values = []
-        for face_index, face in enumerate(faces):
+        for page_index, face in enumerate(face_page):
+            face_index = face_paging["offset"] + page_index
             u, v = _representative_face_parameters(face)
             normal = None
-            try:
-                normal = _vector_value(face.normalAt(u, v))
-            except Exception:
-                pass
-
-            face_edge_names = []
-            adjacent_faces = set()
-            for face_edge in list(_safe_attr(face, "Edges", []) or []):
-                edge_name = _shape_name(edges, face_edge, "Edge")
-                if edge_name is None:
-                    continue
-                if edge_name not in face_edge_names:
-                    face_edge_names.append(edge_name)
-                edge_index = int(edge_name[4:]) - 1
-                adjacent_faces.update(edge_faces.get(edge_index, []))
-            adjacent_faces.discard(f"Face{face_index + 1}")
-
+            if wants("normal"):
+                try:
+                    normal = _vector_value(face.normalAt(u, v))
+                except Exception:
+                    pass
             surface = _safe_attr(face, "Surface")
-            curvature = _face_curvature_value(face, u, v)
-            face_values.append(
-                {
-                    "name": f"Face{face_index + 1}",
-                    "index": face_index + 1,
-                    "surface_type": (
-                        type(surface).__name__ if surface is not None else None
-                    ),
-                    "normal": normal,
-                    "area": _finite_number(_safe_attr(face, "Area")),
-                    "centroid": (
-                        _vector_value(_safe_attr(face, "CenterOfMass"))
-                        if _safe_attr(face, "CenterOfMass") is not None
-                        else None
-                    ),
-                    "centroid_kind": "surface_area_centroid",
-                    "adjacent_faces": sorted(adjacent_faces),
-                    "edges": face_edge_names,
-                    "convexity": curvature["classification"],
-                    "curvature": curvature,
-                    "bounding_box": _bounding_box_value(_safe_attr(face, "BoundBox")),
-                }
-            )
+            value = {"name": f"Face{face_index + 1}", "index": face_index + 1}
+            if wants("surface_type"):
+                value["surface_type"] = (
+                    type(surface).__name__ if surface is not None else None
+                )
+            if wants("normal"):
+                value["normal"] = normal
+            if wants("area"):
+                value["area"] = _finite_number(_safe_attr(face, "Area"))
+            if wants("centroid"):
+                center = _safe_attr(face, "CenterOfMass")
+                value["centroid"] = _vector_value(center) if center is not None else None
+                value["centroid_kind"] = "surface_area_centroid"
+            if wants("adjacent_faces"):
+                adjacent = set()
+                for edge_name in face_edges.get(face_index, []):
+                    adjacent.update(edge_faces.get(int(edge_name[4:]) - 1, []))
+                adjacent.discard(value["name"])
+                value["adjacent_faces"] = sorted(adjacent)
+            if wants("edges"):
+                value["edges"] = face_edges.get(face_index, [])
+            if wants("convexity") or wants("curvature"):
+                curvature = _face_curvature_value(face, u, v)
+                if wants("convexity"):
+                    value["convexity"] = curvature["classification"]
+                if wants("curvature"):
+                    value["curvature"] = curvature
+            if wants("bounding_box"):
+                value["bounding_box"] = _bounding_box_value(
+                    _safe_attr(face, "BoundBox")
+                )
+            face_values.append(value)
 
         edge_values = []
-        for edge_index, edge in enumerate(edges):
-            start, end = _edge_endpoints(edge)
+        for page_index, edge in enumerate(edge_page):
+            edge_index = edge_paging["offset"] + page_index
+            start = end = None
+            if wants("start_point") or wants("end_point") or wants("direction"):
+                start, end = _edge_endpoints(edge)
             curve = _safe_attr(edge, "Curve")
-            radius = _finite_number(_safe_attr(curve, "Radius"))
-            edge_values.append(
-                {
-                    "name": f"Edge{edge_index + 1}",
-                    "index": edge_index + 1,
-                    "curve_type": type(curve).__name__ if curve is not None else None,
-                    "start_point": _vector_value(start) if start is not None else None,
-                    "end_point": _vector_value(end) if end is not None else None,
-                    "direction": _normalized_vector_between(start, end),
-                    "length": _finite_number(_safe_attr(edge, "Length")),
-                    "radius": radius,
-                    "centroid": (
-                        _vector_value(_safe_attr(edge, "CenterOfMass"))
-                        if _safe_attr(edge, "CenterOfMass") is not None
-                        else None
-                    ),
-                    "centroid_kind": "curve_length_centroid",
-                    "adjacent_faces": edge_faces.get(edge_index, []),
-                    "bounding_box": _bounding_box_value(_safe_attr(edge, "BoundBox")),
-                }
-            )
+            value = {"name": f"Edge{edge_index + 1}", "index": edge_index + 1}
+            if wants("curve_type"):
+                value["curve_type"] = type(curve).__name__ if curve is not None else None
+            if wants("start_point"):
+                value["start_point"] = _vector_value(start) if start is not None else None
+            if wants("end_point"):
+                value["end_point"] = _vector_value(end) if end is not None else None
+            if wants("direction"):
+                value["direction"] = _normalized_vector_between(start, end)
+            if wants("length"):
+                value["length"] = _finite_number(_safe_attr(edge, "Length"))
+            if wants("radius"):
+                value["radius"] = _finite_number(_safe_attr(curve, "Radius"))
+            if wants("centroid"):
+                center = _safe_attr(edge, "CenterOfMass")
+                value["centroid"] = _vector_value(center) if center is not None else None
+                value["centroid_kind"] = "curve_length_centroid"
+            if wants("adjacent_faces"):
+                value["adjacent_faces"] = edge_faces.get(edge_index, [])
+            if wants("adjacent_surface_types"):
+                value["adjacent_surface_types"] = [
+                    type(_safe_attr(faces[int(name[4:]) - 1], "Surface")).__name__
+                    for name in edge_faces.get(edge_index, [])
+                    if _safe_attr(faces[int(name[4:]) - 1], "Surface") is not None
+                ]
+            if wants("bounding_box"):
+                value["bounding_box"] = _bounding_box_value(
+                    _safe_attr(edge, "BoundBox")
+                )
+            edge_values.append(value)
 
         vertex_values = []
-        for vertex_index, vertex in enumerate(vertexes):
+        for page_index, vertex in enumerate(vertex_page):
+            vertex_index = vertex_paging["offset"] + page_index
             point = _safe_attr(vertex, "Point")
-            adjacent_edges = []
-            adjacent_faces = []
-            for edge_index, edge in enumerate(edges):
-                if any(
-                    _shape_is_same(vertex, edge_vertex)
-                    for edge_vertex in list(_safe_attr(edge, "Vertexes", []) or [])
-                ):
-                    adjacent_edges.append(f"Edge{edge_index + 1}")
-            for face_index, face in enumerate(faces):
-                if any(
-                    _shape_is_same(vertex, face_vertex)
-                    for face_vertex in list(_safe_attr(face, "Vertexes", []) or [])
-                ):
-                    adjacent_faces.append(f"Face{face_index + 1}")
-            vertex_values.append(
-                {
-                    "name": f"Vertex{vertex_index + 1}",
-                    "index": vertex_index + 1,
-                    "point": _vector_value(point) if point is not None else None,
-                    "adjacent_edges": adjacent_edges,
-                    "adjacent_faces": adjacent_faces,
-                    "tolerance": _finite_number(_safe_attr(vertex, "Tolerance")),
-                }
-            )
+            value = {"name": f"Vertex{vertex_index + 1}", "index": vertex_index + 1}
+            if wants("point"):
+                value["point"] = _vector_value(point) if point is not None else None
+            if wants("adjacent_edges"):
+                value["adjacent_edges"] = vertex_edges.get(vertex_index, [])
+            if wants("adjacent_faces"):
+                value["adjacent_faces"] = vertex_faces.get(vertex_index, [])
+            if wants("tolerance"):
+                value["tolerance"] = _finite_number(_safe_attr(vertex, "Tolerance"))
+            vertex_values.append(value)
 
-        face_page, face_paging = _page_value(face_values, face_offset, face_limit)
-        edge_page, edge_paging = _page_value(edge_values, edge_offset, edge_limit)
-        vertex_page, vertex_paging = _page_value(
-            vertex_values, vertex_offset, vertex_limit
-        )
-        return {
-            "faces": face_page,
-            "edges": edge_page,
-            "vertices": vertex_page,
-            "topology_pages": {
-                "faces": face_paging,
-                "edges": edge_paging,
-                "vertices": vertex_paging,
-            },
-        }
+        result = {"topology_pages": {}}
+        for kind, values, paging in (
+            ("faces", face_values, face_paging),
+            ("edges", edge_values, edge_paging),
+            ("vertices", vertex_values, vertex_paging),
+        ):
+            if kind in requested_kinds:
+                result[kind] = values
+                result["topology_pages"][kind] = paging
+        return result
 
 
     def _shape_value(
@@ -375,6 +455,8 @@ OBJECT_INSPECTION_RUNTIME = dedent(
         edge_limit=20,
         vertex_offset=0,
         vertex_limit=20,
+        topology_kinds=None,
+        topology_fields=None,
     ):
         try:
             is_null = bool(shape.isNull())
@@ -425,6 +507,8 @@ OBJECT_INSPECTION_RUNTIME = dedent(
                     edge_limit=edge_limit,
                     vertex_offset=vertex_offset,
                     vertex_limit=vertex_limit,
+                    topology_kinds=topology_kinds,
+                    topology_fields=topology_fields,
                 )
             )
         return summary
@@ -644,6 +728,8 @@ OBJECT_INSPECTION_RUNTIME = dedent(
         edge_limit=20,
         vertex_offset=0,
         vertex_limit=20,
+        topology_kinds=None,
+        topology_fields=None,
     ):
         properties = {}
         if include_properties:
@@ -663,6 +749,8 @@ OBJECT_INSPECTION_RUNTIME = dedent(
                     edge_limit=edge_limit,
                     vertex_offset=vertex_offset,
                     vertex_limit=vertex_limit,
+                    topology_kinds=topology_kinds,
+                    topology_fields=topology_fields,
                 )
             except Exception as exc:
                 shape_info = {"error": str(exc)}
@@ -698,6 +786,8 @@ def build_object_inspection_code(
     edge_limit: int | None = 20,
     vertex_offset: int = 0,
     vertex_limit: int | None = 20,
+    topology_kinds: tuple[str, ...] | None = None,
+    topology_fields: tuple[str, ...] | None = None,
 ) -> str:
     """Build the FreeCAD-side script used by all bridge implementations."""
     document_expression = (
@@ -727,5 +817,7 @@ _result_ = _inspect_object_value(
     edge_limit={edge_limit!r},
     vertex_offset={vertex_offset!r},
     vertex_limit={vertex_limit!r},
+    topology_kinds={topology_kinds!r},
+    topology_fields={topology_fields!r},
 )
 """

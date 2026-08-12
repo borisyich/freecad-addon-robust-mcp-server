@@ -252,6 +252,8 @@ else:
         edge_limit: int | None = 20,
         vertex_offset: int = 0,
         vertex_limit: int | None = 20,
+        topology_kinds: tuple[str, ...] | None = None,
+        topology_fields: tuple[str, ...] | None = None,
     ) -> ObjectInfo:
         """Get detailed object information with structured FreeCAD values."""
         result = await self.execute_python(
@@ -267,6 +269,8 @@ else:
                 edge_limit=edge_limit,
                 vertex_offset=vertex_offset,
                 vertex_limit=vertex_limit,
+                topology_kinds=topology_kinds,
+                topology_fields=topology_fields,
             )
         )
 
@@ -772,6 +776,8 @@ if view is None:
 view_type = {view_angle_str!r}
 if view_type == "FitAll":
     view.fitAll()
+elif view_type == "Current":
+    pass
 elif view_type == "Isometric":
     view.viewIsometric()
 elif view_type == "Front":

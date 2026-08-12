@@ -279,7 +279,7 @@ elif view_type == "Left":
     view.viewLeft()
 elif view_type == "Right":
     view.viewRight()
-elif view_type != "FitAll":
+elif view_type not in ("Current", "FitAll"):
     raise ValueError(f"Unsupported screenshot view: {{view_type}}")
 
 if {fit_all!r} or view_type == "FitAll":

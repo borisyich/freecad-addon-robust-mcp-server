@@ -10,7 +10,6 @@ from typing import Any, Literal
 
 from mcp.types import CallToolResult
 
-
 VIEW_PROJECTION_CONTEXT: dict[str, dict[str, str | None]] = {
     "Front": {"projection_plane": "XZ", "normal_axis": "Y"},
     "Back": {"projection_plane": "XZ", "normal_axis": "Y"},
@@ -19,6 +18,7 @@ VIEW_PROJECTION_CONTEXT: dict[str, dict[str, str | None]] = {
     "Left": {"projection_plane": "YZ", "normal_axis": "X"},
     "Right": {"projection_plane": "YZ", "normal_axis": "X"},
     "Isometric": {"projection_plane": None, "normal_axis": None},
+    "Current": {"projection_plane": None, "normal_axis": None},
     "FitAll": {"projection_plane": None, "normal_axis": None},
 }
 
@@ -34,7 +34,15 @@ def register_view_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> N
     @mcp.tool()
     async def get_screenshot(
         view_angle: Literal[
-            "Isometric", "Front", "Back", "Top", "Bottom", "Left", "Right", "FitAll"
+            "Isometric",
+            "Front",
+            "Back",
+            "Top",
+            "Bottom",
+            "Left",
+            "Right",
+            "Current",
+            "FitAll",
         ] = "Isometric",
         width: int = 800,
         height: int = 600,
@@ -58,7 +66,8 @@ def register_view_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> N
         explicitly need the base64 string in metadata.
 
         Args:
-            view_angle: Isometric, Front, Back, Top, Bottom, Left, Right, or FitAll.
+            view_angle: Standard orientation, ``Current`` to preserve orientation,
+                or ``FitAll`` to change framing only.
             width: Image width in pixels.
             height: Image height in pixels.
             doc_name: Document to activate and capture. Uses active document if None.
@@ -93,6 +102,7 @@ def register_view_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> N
             "Bottom": ViewAngle.BOTTOM,
             "Left": ViewAngle.LEFT,
             "Right": ViewAngle.RIGHT,
+            "Current": ViewAngle.CURRENT,
             "FitAll": ViewAngle.FIT_ALL,
         }
 
@@ -165,7 +175,15 @@ def register_view_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> N
     @mcp.tool()
     async def set_view_angle(
         view_angle: Literal[
-            "Isometric", "Front", "Back", "Top", "Bottom", "Left", "Right", "FitAll"
+            "Isometric",
+            "Front",
+            "Back",
+            "Top",
+            "Bottom",
+            "Left",
+            "Right",
+            "Current",
+            "FitAll",
         ],
         doc_name: str | None = None,
     ) -> dict[str, Any]:
@@ -180,7 +198,8 @@ def register_view_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> N
                 - "Bottom" - Bottom projection on XY; camera normal is Z
                 - "Left" - Left-side projection on YZ (ZOY); camera normal is X
                 - "Right" - Right-side projection on YZ (ZOY); camera normal is X
-                - "FitAll" - Fit all objects in view
+                - "Current" - Preserve the current orientation and framing
+                - "FitAll" - Preserve orientation and fit all visible objects
             doc_name: Document to set view for. Uses active document if None.
 
         Returns:
@@ -197,6 +216,7 @@ def register_view_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> N
             "Bottom": ViewAngle.BOTTOM,
             "Left": ViewAngle.LEFT,
             "Right": ViewAngle.RIGHT,
+            "Current": ViewAngle.CURRENT,
             "FitAll": ViewAngle.FIT_ALL,
         }
 
@@ -251,6 +271,153 @@ def register_view_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> N
             "success": True,
             "action": action,
             "workbench_name": workbench_name,
+        }
+
+    @mcp.tool()
+    async def highlight_faces(
+        action: Literal["show", "clear"],
+        object_name: str | None = None,
+        face_names: list[str] | None = None,
+        color: list[float] | None = None,
+        select_faces: bool = True,
+        clear_existing_selection: bool = True,
+        doc_name: str | None = None,
+    ) -> dict[str, Any]:
+        """Temporarily highlight individual faces without creating document objects.
+
+        ``show`` stores the object's current per-face colors, applies the requested
+        highlight through ``DiffuseColor``, and optionally selects the same faces
+        for a strong outline. ``clear`` restores the exact prior colors. Highlights
+        are session-only and do not add geometry to the model tree.
+
+        Args:
+            action: ``show`` or ``clear``.
+            object_name: Object to highlight; optional for ``clear`` to clear all.
+            face_names: ``FaceN`` references required for ``show``.
+            color: Highlight RGB values in the range 0.0 to 1.0.
+            select_faces: Also add the faces to GUI selection.
+            clear_existing_selection: Clear selection before applying/clearing.
+            doc_name: Document containing the object.
+
+        Returns:
+            Highlighted/restored references and session-only status.
+        """
+        if action == "show" and (not object_name or not face_names):
+            raise ValueError(
+                "object_name and face_names are required for action='show'"
+            )
+        highlight_color = color if color is not None else [1.0, 0.75, 0.0]
+        if len(highlight_color) != 3 or any(
+            component < 0 or component > 1 for component in highlight_color
+        ):
+            raise ValueError("color must contain three values between 0.0 and 1.0")
+        for face_name in face_names or []:
+            if not (
+                face_name.startswith("Face")
+                and face_name[4:].isdigit()
+                and int(face_name[4:]) > 0
+            ):
+                raise ValueError(f"Invalid face reference: {face_name!r}")
+
+        bridge = await get_bridge()
+        code = f"""
+import builtins
+
+if not FreeCAD.GuiUp:
+    _result_ = {{"success": False, "error": "GUI not available - face highlighting requires GUI mode"}}
+else:
+    doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
+    if doc is None:
+        _result_ = {{"success": False, "error": "No document found"}}
+    else:
+        registry_name = "_freecad_mcp_face_highlights"
+        registry = getattr(builtins, registry_name, None)
+        if not isinstance(registry, dict):
+            registry = {{}}
+            setattr(builtins, registry_name, registry)
+
+        if {clear_existing_selection!r}:
+            FreeCADGui.Selection.clearSelection()
+
+        if {action!r} == "clear":
+            restored = []
+            target_name = {object_name!r}
+            for key in list(registry):
+                stored_doc_name, stored_object_name = key
+                if stored_doc_name != doc.Name:
+                    continue
+                if target_name is not None and stored_object_name != target_name:
+                    continue
+                obj = doc.getObject(stored_object_name)
+                if obj is not None and hasattr(obj, "ViewObject") and obj.ViewObject:
+                    obj.ViewObject.DiffuseColor = registry[key]
+                    restored.append(obj.Name)
+                del registry[key]
+            FreeCADGui.updateGui()
+            _result_ = {{
+                "success": True,
+                "action": "clear",
+                "restored_objects": restored,
+                "transient": True,
+            }}
+        else:
+            obj = doc.getObject({object_name!r})
+            if obj is None:
+                _result_ = {{"success": False, "error": f"Object not found: {object_name!r}"}}
+            elif not hasattr(obj, "Shape") or not hasattr(obj, "ViewObject") or not obj.ViewObject:
+                _result_ = {{"success": False, "error": "Object has no highlightable Shape/ViewObject"}}
+            else:
+                face_count = len(obj.Shape.Faces)
+                indices = []
+                missing = []
+                for face_name in {face_names!r}:
+                    index = int(face_name[4:]) - 1
+                    if index < 0 or index >= face_count:
+                        missing.append(face_name)
+                    else:
+                        indices.append(index)
+                if missing:
+                    _result_ = {{
+                        "success": False,
+                        "error": f"Subelements not found: {{missing}}",
+                        "missing_faces": missing,
+                    }}
+                else:
+                    key = (doc.Name, obj.Name)
+                    current = [tuple(item) for item in list(obj.ViewObject.DiffuseColor)]
+                    if key not in registry:
+                        registry[key] = current
+                    base = registry[key]
+                    if len(base) == face_count:
+                        display = list(base)
+                    else:
+                        fallback = base[0] if base else tuple(obj.ViewObject.ShapeColor)
+                        display = [fallback for _ in range(face_count)]
+                    highlight_color = tuple({highlight_color!r})
+                    for index in indices:
+                        display[index] = highlight_color
+                    obj.ViewObject.DiffuseColor = display
+                    if {select_faces!r}:
+                        for face_name in {face_names!r}:
+                            FreeCADGui.Selection.addSelection(obj, face_name)
+                    FreeCADGui.updateGui()
+                    _result_ = {{
+                        "success": True,
+                        "action": "show",
+                        "object_name": obj.Name,
+                        "highlighted_faces": list({face_names!r}),
+                        "color": list(highlight_color),
+                        "selected": bool({select_faces!r}),
+                        "transient": True,
+                    }}
+"""
+        result = await bridge.execute_python(code)
+        if result.success and result.result:
+            return result.result
+        return {
+            "success": False,
+            "action": action,
+            "error": result.error_traceback or "Face highlighting failed",
         }
 
     @mcp.tool()

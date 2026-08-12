@@ -265,6 +265,11 @@ class TestObjectTools:
 
         assert result["references"] == ["Face2"]
         assert result["matches"][0]["centroid"]["z"] == 10.0
+        request = mock_bridge.get_object.await_args.kwargs
+        assert request["topology_kinds"] == ("faces",)
+        assert request["edge_limit"] == 0
+        assert request["vertex_limit"] == 0
+        assert "bounding_box" not in request["topology_fields"]
 
     @pytest.mark.asyncio
     async def test_select_subshapes_filters_vertices_by_point_and_adjacency(
@@ -661,9 +666,10 @@ class TestObjectTools:
             "HelixPrimitive": ("angle",),
         }.items():
             for field in fields:
-                assert "degrees" in schema["$defs"][definition]["properties"][field][
-                    "description"
-                ]
+                assert (
+                    "degrees"
+                    in schema["$defs"][definition]["properties"][field]["description"]
+                )
 
     @pytest.mark.asyncio
     async def test_create_primitive_rejects_fields_from_another_kind(
@@ -927,6 +933,38 @@ class TestObjectTools:
         assert "if False:" in generated_code
 
     @pytest.mark.asyncio
+    async def test_selection_set_accepts_qualified_subelements(
+        self, register_tools, mock_bridge
+    ):
+        """Object.FaceN references should map to addSelection(obj, FaceN)."""
+        mock_bridge.execute_python = AsyncMock(
+            return_value=ExecutionResult(
+                success=True,
+                result={
+                    "success": True,
+                    "action": "set",
+                    "selected_count": 1,
+                    "selected_names": ["hf_201"],
+                    "selected_references": ["hf_201.Face357"],
+                    "missing_names": [],
+                },
+                stdout="",
+                stderr="",
+                execution_time_ms=10.0,
+            )
+        )
+
+        result = await register_tools["selection"](
+            "set", object_names=["hf_201.Face357"]
+        )
+
+        assert result["selected_references"] == ["hf_201.Face357"]
+        generated_code = mock_bridge.execute_python.await_args.args[0]
+        assert "selection_reference.rpartition" in generated_code
+        assert "obj.Shape.getElement(subelement)" in generated_code
+        assert "FreeCADGui.Selection.addSelection(obj, subelement)" in generated_code
+
+    @pytest.mark.asyncio
     async def test_selection_clear_uses_same_entry_point(
         self, register_tools, mock_bridge
     ):
@@ -1116,6 +1154,54 @@ class TestObjectTools:
 
         assert result["name"] == "Offset"
         mock_bridge.execute_python.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_move_faces_creates_auditable_local_direct_edit(
+        self, register_tools, mock_bridge
+    ):
+        mock_bridge.execute_python = AsyncMock(
+            return_value=ExecutionResult(
+                success=True,
+                result={
+                    "name": "MovedFaces",
+                    "type_id": "PartDesign::Feature",
+                    "face_names": ["Face3"],
+                    "distance": 2.0,
+                    "operation": "add",
+                    "static_snapshot": True,
+                    "direct_edit": True,
+                },
+                stdout="",
+                stderr="",
+                execution_time_ms=15.0,
+            )
+        )
+
+        result = await register_tools["move_faces"](
+            object_name="Pad", face_names=["Face3"], distance=2.0
+        )
+
+        assert result["direct_edit"] is True
+        generated_code = mock_bridge.execute_python.await_args.args[0]
+        assert "face.extrude(normal * 2.0)" in generated_code
+        assert (
+            'result.addProperty("App::PropertyLink", "SourceObject"' in generated_code
+        )
+        assert 'result.DirectEditOperation = f"move_faces:{mode}"' in generated_code
+
+    @pytest.mark.asyncio
+    async def test_move_faces_rejects_invalid_input_before_freecad(
+        self, register_tools, mock_bridge
+    ):
+        with pytest.raises(ValueError, match="Invalid face reference"):
+            await register_tools["move_faces"](
+                object_name="Pad", face_names=["Edge1"], distance=2.0
+            )
+        with pytest.raises(ValueError, match="finite non-zero"):
+            await register_tools["move_faces"](
+                object_name="Pad", face_names=["Face1"], distance=0.0
+            )
+        mock_bridge.execute_python.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_slice_shape(self, register_tools, mock_bridge):

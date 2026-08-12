@@ -1,6 +1,6 @@
 # Tools Reference
 
-The server currently registers **131 MCP tools**. This page is generated from the actual `@mcp.tool()` definitions in `src/freecad_mcp/tools` and is the exact inventory.
+The server currently registers **133 MCP tools**. This page is generated from the actual `@mcp.tool()` definitions in `src/freecad_mcp/tools` and is the exact inventory.
 
 Geometry-changing operations are transaction-backed where applicable. Use `history(action="undo")` for explicit recovery, `get_console_output` for console diagnostics, and `recompute_document` for document recomputation.
 
@@ -10,7 +10,7 @@ Geometry-changing operations are transaction-backed where applicable. Use `histo
 |---|---|---:|
 | [Execution](#execution) | `src/freecad_mcp/tools/execution.py` | 5 |
 | [Documents](#documents) | `src/freecad_mcp/tools/documents.py` | 7 |
-| [Objects / Part](#objects-part) | `src/freecad_mcp/tools/objects.py` | 33 |
+| [Objects / Part](#objects-part) | `src/freecad_mcp/tools/objects.py` | 34 |
 | [Measurements](#measurements) | `src/freecad_mcp/tools/measurements.py` | 9 |
 | [PartDesign / Sketcher](#partdesign-sketcher) | `src/freecad_mcp/tools/partdesign.py` | 28 |
 | [Sheet Metal](#sheet-metal) | `src/freecad_mcp/tools/sheetmetal.py` | 5 |
@@ -18,11 +18,11 @@ Geometry-changing operations are transaction-backed where applicable. Use `histo
 | [Draft](#draft) | `src/freecad_mcp/tools/draft.py` | 6 |
 | [Images](#images) | `src/freecad_mcp/tools/images.py` | 3 |
 | [Checkpoints](#checkpoints) | `src/freecad_mcp/tools/checkpoints.py` | 1 |
-| [View / GUI / History](#view-gui-history) | `src/freecad_mcp/tools/view.py` | 10 |
+| [View / GUI / History](#view-gui-history) | `src/freecad_mcp/tools/view.py` | 11 |
 | [Validation](#validation) | `src/freecad_mcp/tools/validation.py` | 5 |
 | [Export / Import](#export-import) | `src/freecad_mcp/tools/export.py` | 2 |
 | [Macros](#macros) | `src/freecad_mcp/tools/macros.py` | 6 |
-| **Total** |  | **131** |
+| **Total** |  | **133** |
 
 ## Execution
 
@@ -63,13 +63,14 @@ Geometry-changing operations are transaction-backed where applicable. Use `histo
 | `rotate_object` | Rotate an object around an axis. |
 | `copy_object` | Create a copy of an object. |
 | `mirror_object` | Mirror an object across a plane. |
-| `selection` | Get, set, or clear the FreeCAD GUI selection. |
+| `selection` | Get, set, or clear object and `Object.FaceN`/`EdgeN`/`VertexN` GUI selection. |
 | `create_line` | Create a Part Line (edge) between two points. |
 | `create_plane` | Create a Part Plane (flat rectangular face). |
 | `create_ellipse` | Create a Part Ellipse curve. |
 | `create_prism` | Create a Part Prism (extruded regular polygon). |
 | `create_regular_polygon` | Create a Part Regular Polygon (2D wire). |
 | `shell_object` | Create a shell (hollow) version of a solid by removing faces. |
+| `move_faces` | Locally move selected planar faces and record an auditable static direct edit. |
 | `offset_3d` | Create a 3D offset of a shape. |
 | `slice_shape` | Slice a shape with a plane, returning the cross-section. |
 | `section_shape` | Create a cross-section of a shape at a standard plane. |
@@ -314,6 +315,7 @@ path without removing earlier valid bindings.
 | `set_view_angle` | Set the 3D view angle. |
 | `workbench` | List FreeCAD workbenches or activate one workbench. |
 | `set_visual_properties` | Set one or more GUI display properties for a FreeCAD object. |
+| `highlight_faces` | Temporarily color/select individual faces and restore prior colors without creating objects. |
 | `history` | Undo, redo, or inspect document history. |
 | `fit_all` | Fit all objects in the current view. |
 | `set_camera_position` | Set the camera position and orientation. |
