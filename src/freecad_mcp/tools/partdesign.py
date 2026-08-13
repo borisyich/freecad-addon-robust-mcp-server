@@ -12,6 +12,7 @@ from typing import Annotated, Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
+from freecad_mcp.bridge._document_runtime import DOCUMENT_RESOLUTION_RUNTIME
 from freecad_mcp.tools._freecad_runtime_helpers import (
     BODY_RUNTIME_HELPERS,
     FEATURE_VALIDATION_RUNTIME_HELPERS,
@@ -824,10 +825,8 @@ _result_ = {{
         code = f"""
 {BODY_RUNTIME_HELPERS}
 
-doc = (
-    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None
-    else FreeCAD.ActiveDocument
-) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
+{DOCUMENT_RESOLUTION_RUNTIME}
+doc = _resolve_document({doc_name!r})
 
 # Wrap in transaction for undo support
 doc.openTransaction("Create Sketch")
@@ -1021,10 +1020,8 @@ import Part
 import Sketcher
 
 operations = {normalized_operations!r}
-doc = (
-    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None
-    else FreeCAD.ActiveDocument
-) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
+{DOCUMENT_RESOLUTION_RUNTIME}
+doc = _resolve_document({doc_name!r})
 sketch = doc.getObject({sketch_name!r})
 if sketch is None:
     raise ValueError(f"Sketch not found: {sketch_name!r}")
@@ -1471,10 +1468,8 @@ import math
 import Sketcher
 
 operations = {normalized_operations!r}
-doc = (
-    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None
-    else FreeCAD.ActiveDocument
-) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
+{DOCUMENT_RESOLUTION_RUNTIME}
+doc = _resolve_document({doc_name!r})
 sketch = doc.getObject({sketch_name!r})
 if sketch is None:
     raise ValueError(f"Sketch not found: {sketch_name!r}")
@@ -1722,10 +1717,8 @@ _result_ = {{
 
 {FEATURE_VALIDATION_RUNTIME_HELPERS}
 
-doc = (
-    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
-    else FreeCAD.ActiveDocument
-) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
+{DOCUMENT_RESOLUTION_RUNTIME}
+doc = _resolve_document({doc_name!r})
 sketch = doc.getObject({sketch_name!r})
 if sketch is None:
     raise ValueError(f"Sketch not found: {sketch_name!r}")
@@ -1890,10 +1883,8 @@ _result_ = {{
 
 {FEATURE_VALIDATION_RUNTIME_HELPERS}
 
-doc = (
-    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
-    else FreeCAD.ActiveDocument
-) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
+{DOCUMENT_RESOLUTION_RUNTIME}
+doc = _resolve_document({doc_name!r})
 sketch = doc.getObject({sketch_name!r})
 if sketch is None:
     raise ValueError(f"Sketch not found: {sketch_name!r}")
@@ -2083,10 +2074,8 @@ _result_ = {{
 
 {FEATURE_VALIDATION_RUNTIME_HELPERS}
 
-doc = (
-    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None
-    else FreeCAD.ActiveDocument
-) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
+{DOCUMENT_RESOLUTION_RUNTIME}
+doc = _resolve_document({doc_name!r})
 obj = doc.getObject({object_name!r})
 if obj is None:
     raise ValueError(f"Object not found: {object_name!r}")
@@ -2169,10 +2158,8 @@ _result_ = {{
 
 {FEATURE_VALIDATION_RUNTIME_HELPERS}
 
-doc = (
-    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None
-    else FreeCAD.ActiveDocument
-) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
+{DOCUMENT_RESOLUTION_RUNTIME}
+doc = _resolve_document({doc_name!r})
 obj = doc.getObject({object_name!r})
 if obj is None:
     raise ValueError(f"Object not found: {object_name!r}")
@@ -2278,10 +2265,8 @@ _result_ = {{
 
 {FEATURE_VALIDATION_RUNTIME_HELPERS}
 
-doc = (
-    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
-    else FreeCAD.ActiveDocument
-) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
+{DOCUMENT_RESOLUTION_RUNTIME}
+doc = _resolve_document({doc_name!r})
 sketch = doc.getObject({sketch_name!r})
 if sketch is None:
     raise ValueError(f"Sketch not found: {sketch_name!r}")
@@ -2404,10 +2389,8 @@ _result_ = {{
 
 {FEATURE_VALIDATION_RUNTIME_HELPERS}
 
-doc = (
-    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
-    else FreeCAD.ActiveDocument
-) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
+{DOCUMENT_RESOLUTION_RUNTIME}
+doc = _resolve_document({doc_name!r})
 sketch = doc.getObject({sketch_name!r})
 if sketch is None:
     raise ValueError(f"Sketch not found: {sketch_name!r}")
@@ -3463,10 +3446,8 @@ _result_ = {{
 
 {FEATURE_VALIDATION_RUNTIME_HELPERS}
 
-doc = (
-    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None
-    else FreeCAD.ActiveDocument
-) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
+{DOCUMENT_RESOLUTION_RUNTIME}
+doc = _resolve_document({doc_name!r})
 feature = doc.getObject({feature_name!r})
 if feature is None:
     raise ValueError(f"Feature not found: {feature_name!r}")
@@ -3600,10 +3581,8 @@ _result_ = {{
 
 {FEATURE_VALIDATION_RUNTIME_HELPERS}
 
-doc = (
-    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
-    else FreeCAD.ActiveDocument
-) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
+{DOCUMENT_RESOLUTION_RUNTIME}
+doc = _resolve_document({doc_name!r})
 feature = doc.getObject({feature_name!r})
 if feature is None:
     raise ValueError(f"Feature not found: {feature_name!r}")
@@ -3905,10 +3884,8 @@ _result_ = {{
 
 {FEATURE_VALIDATION_RUNTIME_HELPERS}
 
-doc = (
-    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None
-    else FreeCAD.ActiveDocument
-) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
+{DOCUMENT_RESOLUTION_RUNTIME}
+doc = _resolve_document({doc_name!r})
 feature = doc.getObject({feature_name!r})
 if feature is None:
     raise ValueError(f"Feature not found: {feature_name!r}")
@@ -4013,10 +3990,8 @@ _result_ = {{
 
 {FEATURE_VALIDATION_RUNTIME_HELPERS}
 
-doc = (
-    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
-    else FreeCAD.ActiveDocument
-) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
+{DOCUMENT_RESOLUTION_RUNTIME}
+doc = _resolve_document({doc_name!r})
 
 sketches = []
 for sname in {sketch_names!r}:
@@ -4127,10 +4102,8 @@ _result_ = {{
 
 {FEATURE_VALIDATION_RUNTIME_HELPERS}
 
-doc = (
-    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None
-    else FreeCAD.ActiveDocument
-) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
+{DOCUMENT_RESOLUTION_RUNTIME}
+doc = _resolve_document({doc_name!r})
 
 profile = doc.getObject({profile_sketch!r})
 if profile is None:
@@ -4235,10 +4208,8 @@ _result_ = {{
 
 {FEATURE_VALIDATION_RUNTIME_HELPERS}
 
-doc = (
-    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None
-    else FreeCAD.ActiveDocument
-) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
+{DOCUMENT_RESOLUTION_RUNTIME}
+doc = _resolve_document({doc_name!r})
 body = doc.getObject({body_name!r})
 if body is None or getattr(body, "TypeId", "") != "PartDesign::Body":
     raise ValueError(f"PartDesign Body not found: {body_name!r}")
@@ -4352,10 +4323,8 @@ _result_ = {{
 
 {FEATURE_VALIDATION_RUNTIME_HELPERS}
 
-doc = (
-    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None
-    else FreeCAD.ActiveDocument
-) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
+{DOCUMENT_RESOLUTION_RUNTIME}
+doc = _resolve_document({doc_name!r})
 body = doc.getObject({body_name!r})
 if body is None or getattr(body, "TypeId", "") != "PartDesign::Body":
     raise ValueError(f"PartDesign Body not found: {body_name!r}")
@@ -4455,10 +4424,8 @@ _result_ = {{
 
 {FEATURE_VALIDATION_RUNTIME_HELPERS}
 
-doc = (
-    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None
-    else FreeCAD.ActiveDocument
-) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
+{DOCUMENT_RESOLUTION_RUNTIME}
+doc = _resolve_document({doc_name!r})
 body = doc.getObject({body_name!r})
 if body is None or getattr(body, "TypeId", "") != "PartDesign::Body":
     raise ValueError(f"PartDesign Body not found: {body_name!r}")
@@ -4579,10 +4546,8 @@ _result_ = {{
 
 {FEATURE_VALIDATION_RUNTIME_HELPERS}
 
-doc = (
-    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None
-    else FreeCAD.ActiveDocument
-) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
+{DOCUMENT_RESOLUTION_RUNTIME}
+doc = _resolve_document({doc_name!r})
 obj = doc.getObject({object_name!r})
 if obj is None:
     raise ValueError(f"Object not found: {object_name!r}")
@@ -4671,10 +4636,8 @@ _result_ = {{
 
 {FEATURE_VALIDATION_RUNTIME_HELPERS}
 
-doc = (
-    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None
-    else FreeCAD.ActiveDocument
-) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
+{DOCUMENT_RESOLUTION_RUNTIME}
+doc = _resolve_document({doc_name!r})
 obj = doc.getObject({object_name!r})
 if obj is None:
     raise ValueError(f"Object not found: {object_name!r}")
@@ -4768,10 +4731,8 @@ _result_ = {{
 
 {FEATURE_VALIDATION_RUNTIME_HELPERS}
 
-doc = (
-    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None
-    else FreeCAD.ActiveDocument
-) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
+{DOCUMENT_RESOLUTION_RUNTIME}
+doc = _resolve_document({doc_name!r})
 sketches = []
 for sketch_name in {sketch_names!r}:
     sketch = doc.getObject(sketch_name)
@@ -4879,10 +4840,8 @@ _result_ = {{
 
 {FEATURE_VALIDATION_RUNTIME_HELPERS}
 
-doc = (
-    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None
-    else FreeCAD.ActiveDocument
-) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
+{DOCUMENT_RESOLUTION_RUNTIME}
+doc = _resolve_document({doc_name!r})
 profile = doc.getObject({profile_sketch!r})
 if profile is None:
     raise ValueError(f"Profile sketch not found: {profile_sketch!r}")
@@ -4998,10 +4957,8 @@ _result_ = {{
         code = f"""
 {SKETCH_ANALYSIS_RUNTIME_HELPERS}
 
-doc = (
-    FreeCAD.listDocuments().get({doc_name!r}) if {doc_name!r} is not None 
-    else FreeCAD.ActiveDocument
-) or FreeCAD.newDocument({doc_name!r} or "Unnamed")
+{DOCUMENT_RESOLUTION_RUNTIME}
+doc = _resolve_document({doc_name!r})
 sketch = doc.getObject({sketch_name!r})
 if sketch is None:
     raise ValueError(f"Sketch not found: {sketch_name!r}")

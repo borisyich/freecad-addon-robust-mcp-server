@@ -130,6 +130,19 @@ async def test_pair_measurements_accept_selector_references(
 
 
 @pytest.mark.asyncio
+async def test_distance_threshold_flag_has_unambiguous_name(registered_tools):
+    tools, bridge = registered_tools
+    await tools["measure_distance"](
+        first={"object_name": "A"},
+        second={"object_name": "B"},
+        tolerance_mm=0.25,
+    )
+    code = bridge.execute_python.await_args.args[0]
+    assert '"within_distance_threshold": value <= tolerance_mm' in code
+    assert "within_tolerance" not in code
+
+
+@pytest.mark.asyncio
 async def test_specialized_measurements_keep_runtime_validation(registered_tools):
     tools, bridge = registered_tools
     await tools["measure_wall_thickness"](

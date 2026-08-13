@@ -7,6 +7,8 @@ The public MCP surface intentionally exposes one ``export`` tool and one
 from collections.abc import Awaitable, Callable
 from typing import Any, Literal
 
+from freecad_mcp.bridge._document_runtime import DOCUMENT_RESOLUTION_RUNTIME
+
 ExportFormat = Literal["step", "stl", "3mf", "obj", "iges"]
 ImportFormat = Literal["step", "stl"]
 
@@ -132,14 +134,18 @@ if not os.path.exists({file_path!r}):
     raise FileNotFoundError(f"File not found: {file_path!r}")
 
 requested_doc_name = {doc_name!r}
-doc = (
+existing_doc = (
     FreeCAD.ActiveDocument
     if requested_doc_name is None
     else FreeCAD.listDocuments().get(requested_doc_name)
 )
-document_created = doc is None
-if doc is None:
-    doc = FreeCAD.newDocument(requested_doc_name or "Imported")
+document_created = existing_doc is None
+{DOCUMENT_RESOLUTION_RUNTIME}
+doc = _resolve_document(
+    requested_doc_name,
+    create_if_missing=True,
+    default_name="Imported",
+)
 
 before_count = len(doc.Objects)
 {module_name}.insert({file_path!r}, doc.Name)

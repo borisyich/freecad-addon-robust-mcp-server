@@ -11,6 +11,8 @@ from typing import Annotated, Any, Literal
 from mcp.types import CallToolResult
 from pydantic import Field
 
+from freecad_mcp.bridge._document_runtime import DOCUMENT_RESOLUTION_RUNTIME
+
 RGBColor = Annotated[
     list[Annotated[float, Field(ge=0, le=255)]],
     Field(
@@ -880,13 +882,8 @@ import Part
 
 requested_doc_name = {doc_name!r}
 documents = FreeCAD.listDocuments()
-doc = (
-    FreeCAD.ActiveDocument
-    if requested_doc_name is None
-    else documents.get(requested_doc_name)
-)
-if doc is None:
-    doc = FreeCAD.newDocument(requested_doc_name or "Unnamed")
+{DOCUMENT_RESOLUTION_RUNTIME}
+doc = _resolve_document(requested_doc_name)
 
 target_doc_name = doc.Name
 part_path = {part_path!r}

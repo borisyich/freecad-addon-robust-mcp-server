@@ -87,8 +87,8 @@ def test_hole_thread_profile_change_requires_size_and_applies_it_after_type() ->
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("bridge_class", [EmbeddedBridge, XmlRpcBridge, SocketBridge])
-async def test_create_object_creates_missing_named_document(bridge_class) -> None:
-    """Root creation tools should honor a new explicit document name."""
+async def test_create_object_requires_existing_named_document(bridge_class) -> None:
+    """Object creation must not turn a misspelled name into a new document."""
     bridge = bridge_class()
     bridge.execute_python = AsyncMock(
         return_value=ExecutionResult(
@@ -110,8 +110,9 @@ async def test_create_object_creates_missing_named_document(bridge_class) -> Non
     await bridge.create_object("Part::Box", "Box", doc_name="NewModel")
 
     code = bridge.execute_python.await_args.args[0]
-    assert "FreeCAD.listDocuments().get(requested_doc_name)" in code
-    assert 'FreeCAD.newDocument(requested_doc_name or "Unnamed")' in code
+    assert "def _resolve_document(" in code
+    assert "doc = _resolve_document('NewModel')" in code
+    assert "create_if_missing=True" not in code
 
 
 @pytest.mark.asyncio

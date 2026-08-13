@@ -535,6 +535,10 @@ endpoints, radius, arc side, datum, and the dimension chain are rechecked.
 | `export` | Export to STEP, IGES, STL, 3MF, or OBJ          | All  |
 | `import` | Import STEP/STL; create a missing named target document | All  |
 
+All other modeling, Spreadsheet, Draft, PartDesign, and library-insertion tools
+require an existing named or active document. A misspelled `doc_name` never
+creates an unintended document as a side effect.
+
 #### Macro Management (6 tools)
 
 | Tool                         | Description                                    | Mode |

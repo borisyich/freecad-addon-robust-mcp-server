@@ -367,8 +367,6 @@ bbox_changed = any(
 geometric_change = None if boolean_error else bool(
     removed_volume > {volume_tolerance!r}
     or added_volume > {volume_tolerance!r}
-    or removed_regions
-    or added_regions
 )
 _result_ = {{
     "success": True,

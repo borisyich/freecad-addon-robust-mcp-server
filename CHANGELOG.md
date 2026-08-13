@@ -272,6 +272,17 @@
 - Added short working examples to the public schemas/descriptions of nested and
   commonly miscalled tools so clients need not inspect Python source to form
   requests.
+- Kept missing-target document creation only for `import`; object, Spreadsheet,
+  Draft, PartDesign, and library tools now use one strict centralized resolver
+  so a misspelled `doc_name` cannot create a side-effect document.
+- Made Shape checkpoint tolerance authoritative even when OCCT returns
+  sub-threshold sliver regions, and added exact two-added/two-removed-cylinder
+  integration coverage.
+- Treated provenance-marked direct edits inside PartDesign Bodies as
+  `intentional_direct_edit` information under `imported_brep_edit`.
+- Preserved shared `$defs` after direct schema-property inlining, added drift
+  coverage for the flattened subshape criteria contract, and renamed distance
+  evidence to `within_distance_threshold`.
 
 This project uses **component-specific versioning**. Each component has its own
 release notes and version history.

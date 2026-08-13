@@ -609,6 +609,8 @@ assert bounds["mode"] == "optimal"
 Measure the OCCT minimum distance between complete Shapes or any supported
 subshape pair. The response includes all closest-point solutions up to a safe
 limit, OCCT support tuples, the method, tolerance, and contact classification.
+`within_distance_threshold` is true when `distance_mm <= tolerance_mm`; the
+longer name distinguishes this distance threshold from general model tolerance.
 
 ```python
 distance = await measure_distance(
@@ -2051,7 +2053,9 @@ solid is reported with its own bounds and topology. Thus four isolated drilled
 regions normally appear as four removed regions, with surface-type evidence
 such as `Cylinder` on their faces. If the boolean operation
 fails, `difference.available` is false and the error is explicit; metric deltas
-remain available. Checkpoints live only for the current MCP server session (up
+remain available. `volume_tolerance` controls `geometric_change`; sub-threshold
+sliver regions remain visible in the detailed region list but do not force that
+flag to true. Checkpoints live only for the current MCP server session (up
 to 32 named baselines) and can be intentionally replaced with `overwrite=True`.
 
 ### validate_parametric_model
@@ -2096,7 +2100,8 @@ For an intentional STEP/BRep editing task, set
 `workflow="imported_brep_edit"`. A source marked by the import tool, a source
 referenced through `SourceObject`, and a result marked by
 `DirectEditOperation` become `info` findings rather than generic static-shape
-warnings. Unrelated snapshots still warn, and an invalid Shape or object error
+warnings, including `PartDesign::Feature` results stored inside a Body.
+Unrelated snapshots still warn, and an invalid Shape or object error
 state remains an `error`. The default `native_parametric` workflow preserves the
 strict warning behavior used for models expected to have native editable history.
 

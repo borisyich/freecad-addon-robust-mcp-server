@@ -105,6 +105,19 @@ class TestValidationTools:
         assert "before.importBrepFromString" in compare_code
         assert "before.cut(after)" in compare_code
         assert "after.cut(before)" in compare_code
+        assert (
+            compare_code.count(
+                'removed_volume = sum(region["volume"] for region in removed_regions)'
+            )
+            == 1
+        )
+        change_expression = compare_code.split("geometric_change =", 1)[1].split(
+            "_result_ =", 1
+        )[0]
+        assert "removed_volume >" in change_expression
+        assert "added_volume >" in change_expression
+        assert "or removed_regions" not in change_expression
+        assert "or added_regions" not in change_expression
 
     @pytest.mark.asyncio
     async def test_shape_checkpoint_rejects_missing_and_duplicate_names(

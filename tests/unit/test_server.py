@@ -679,6 +679,37 @@ class TestMcpInstructions:
         assert len(description) > 360
         assert "Verbose workflow details" not in description
 
+    def test_inline_direct_refs_preserves_definitions_used_elsewhere(self):
+        """Inlining one property must never leave nested dangling references."""
+        from freecad_mcp.server import _inline_direct_property_refs
+
+        schema = {
+            "$defs": {
+                "Foo": {
+                    "type": "object",
+                    "properties": {"value": {"type": "number"}},
+                },
+                "Bar": {
+                    "type": "object",
+                    "properties": {"nested": {"$ref": "#/$defs/Foo"}},
+                },
+            },
+            "type": "object",
+            "properties": {
+                "direct": {"$ref": "#/$defs/Foo"},
+                "indirect": {"$ref": "#/$defs/Bar"},
+            },
+        }
+
+        result = _inline_direct_property_refs(schema)
+
+        assert result["properties"]["direct"]["type"] == "object"
+        assert result["properties"]["indirect"]["type"] == "object"
+        assert result["properties"]["indirect"]["properties"]["nested"][
+            "$ref"
+        ] == ("#/$defs/Foo")
+        assert "Foo" in result["$defs"]
+
     @pytest.mark.asyncio
     async def test_nested_tool_contracts_include_working_examples(self):
         """Common nested requests should be formable without reading source."""

@@ -466,6 +466,35 @@ class TestObjectTools:
         assert vertex.point_bounds is not None
         assert vertex.point_bounds.x_min == 1.0
 
+    def test_flat_subshape_contract_tracks_kind_specific_models(self):
+        """Shared wire fields must retain branch defaults and constraints."""
+        from freecad_mcp.tools.objects import (
+            EdgeSelectionCriteria,
+            FaceSelectionCriteria,
+            SubshapeSelectionCriteriaInput,
+            VertexSelectionCriteria,
+        )
+
+        outer_fields = SubshapeSelectionCriteriaInput.model_fields
+        for branch in (
+            FaceSelectionCriteria,
+            EdgeSelectionCriteria,
+            VertexSelectionCriteria,
+        ):
+            for name, branch_field in branch.model_fields.items():
+                if name == "kind":
+                    continue
+                assert name in outer_fields, (
+                    f"{branch.__name__}.{name} missing from wire model"
+                )
+                outer_field = outer_fields[name]
+                assert outer_field.default == branch_field.default, (
+                    f"{branch.__name__}.{name} default drifted"
+                )
+                assert [repr(item) for item in outer_field.metadata] == [
+                    repr(item) for item in branch_field.metadata
+                ], f"{branch.__name__}.{name} constraints drifted"
+
     @pytest.mark.asyncio
     async def test_select_subshapes_rejects_zero_direction(
         self, register_tools, mock_bridge

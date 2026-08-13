@@ -163,7 +163,27 @@ def _inline_direct_property_refs(schema: dict[str, Any]) -> dict[str, Any]:
         property_schema.update(definition)
         property_schema.update(siblings)
         inlined_names.add(definition_name)
-    for definition_name in inlined_names:
+
+    def referenced_names(value: Any) -> set[str]:
+        if isinstance(value, dict):
+            names = set()
+            reference = value.get("$ref")
+            if isinstance(reference, str) and reference.startswith("#/$defs/"):
+                names.add(reference.removeprefix("#/$defs/"))
+            for item in value.values():
+                names.update(referenced_names(item))
+            return names
+        if isinstance(value, list):
+            names = set()
+            for item in value:
+                names.update(referenced_names(item))
+            return names
+        return set()
+
+    # Delete only definitions that became genuinely unreferenced. Another
+    # property or nested definition may still point to an inlined model.
+    still_referenced = referenced_names(schema)
+    for definition_name in inlined_names - still_referenced:
         definitions.pop(definition_name, None)
     if not definitions:
         schema.pop("$defs", None)

@@ -174,7 +174,9 @@ class TestExportTools:
         assert f"{expected_module}.insert" in code
         assert "before_count = len(doc.Objects)" in code
         assert "FreeCAD.listDocuments().get(requested_doc_name)" in code
-        assert 'FreeCAD.newDocument(requested_doc_name or "Imported")' in code
+        assert "def _resolve_document(" in code
+        assert "create_if_missing=True" in code
+        assert 'default_name="Imported"' in code
         assert "ImportSourcePath" in code
         assert result["objects"] == ["Imported001", "Imported002"]
         assert result["document"] == "Target"

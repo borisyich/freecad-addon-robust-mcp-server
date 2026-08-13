@@ -7,6 +7,7 @@ ShapeString for creating 3D text geometry that can be used with PartDesign.
 from collections.abc import Awaitable, Callable
 from typing import Any, Literal
 
+from freecad_mcp.bridge._document_runtime import DOCUMENT_RESOLUTION_RUNTIME
 from freecad_mcp.tools._freecad_runtime_helpers import BODY_RUNTIME_HELPERS
 
 
@@ -147,14 +148,9 @@ def register_draft_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> 
 import Draft
 import os
 
-requested_doc_name = {doc_name!r}
-doc = (
-    FreeCAD.ActiveDocument
-    if requested_doc_name is None
-    else FreeCAD.listDocuments().get(requested_doc_name)
-)
-if doc is None:
-    doc = FreeCAD.newDocument(requested_doc_name or "Unnamed")
+{DOCUMENT_RESOLUTION_RUNTIME}
+
+doc = _resolve_document({doc_name!r})
 
 previous_active_name = (
     FreeCAD.ActiveDocument.Name if FreeCAD.ActiveDocument is not None else None

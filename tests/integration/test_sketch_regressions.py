@@ -128,7 +128,7 @@ async def test_sketch_target_validation_accepts_spreadsheet_driven_sketch_withou
         tools,
         "spreadsheet_apply_batch",
         spreadsheet_name="Dimensions",
-        cells=[{"cell": "A1", "value": "40 mm"}],
+        cells=[{"cell": "A1", "value": {"value": 40, "unit": "mm"}}],
         aliases=[{"cell": "A1", "alias": "Width"}],
         doc_name=doc_name,
     )
@@ -208,7 +208,7 @@ async def test_sketch_target_validation_rejects_construction_only_required_dimen
         tools,
         "spreadsheet_apply_batch",
         spreadsheet_name="Dimensions",
-        cells=[{"cell": "A1", "value": "12 mm"}],
+        cells=[{"cell": "A1", "value": {"value": 12, "unit": "mm"}}],
         aliases=[{"cell": "A1", "alias": "HelperLength"}],
         doc_name=doc_name,
     )

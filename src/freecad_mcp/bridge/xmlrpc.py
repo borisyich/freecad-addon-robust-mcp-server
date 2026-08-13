@@ -23,6 +23,7 @@ import time
 import xmlrpc.client
 from typing import Any
 
+from freecad_mcp.bridge._document_runtime import DOCUMENT_RESOLUTION_RUNTIME
 from freecad_mcp.bridge._object_inspection_runtime import (
     build_object_inspection_code,
 )
@@ -700,14 +701,9 @@ _result_ = objects
         """Create a new object."""
         properties = properties or {}
         code = f"""
-requested_doc_name = {doc_name!r}
-doc = (
-    FreeCAD.ActiveDocument
-    if requested_doc_name is None
-    else FreeCAD.listDocuments().get(requested_doc_name)
-)
-if doc is None:
-    doc = FreeCAD.newDocument(requested_doc_name or "Unnamed")
+{DOCUMENT_RESOLUTION_RUNTIME}
+
+doc = _resolve_document({doc_name!r})
 
 # Wrap in transaction for undo support
 doc.openTransaction("Create Object")

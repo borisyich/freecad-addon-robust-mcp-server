@@ -17,6 +17,8 @@ from pydantic import (
     model_validator,
 )
 
+from freecad_mcp.bridge._document_runtime import DOCUMENT_RESOLUTION_RUNTIME
+
 
 class _PrimitiveBase(BaseModel):
     """Strict base model for one concrete primitive contract."""
@@ -1956,14 +1958,9 @@ else:
         code = f"""
 import Part
 
-requested_doc_name = {doc_name!r}
-doc = (
-    FreeCAD.ActiveDocument
-    if requested_doc_name is None
-    else FreeCAD.listDocuments().get(requested_doc_name)
-)
-if doc is None:
-    doc = FreeCAD.newDocument(requested_doc_name or "Unnamed")
+{DOCUMENT_RESOLUTION_RUNTIME}
+
+doc = _resolve_document({doc_name!r})
 
 # Wrap in transaction for undo support
 doc.openTransaction("Create Line")
@@ -2879,14 +2876,9 @@ except Exception:
         code = f"""
 import Part
 
-requested_doc_name = {doc_name!r}
-doc = (
-    FreeCAD.ActiveDocument
-    if requested_doc_name is None
-    else FreeCAD.listDocuments().get(requested_doc_name)
-)
-if doc is None:
-    doc = FreeCAD.newDocument(requested_doc_name or "Unnamed")
+{DOCUMENT_RESOLUTION_RUNTIME}
+
+doc = _resolve_document({doc_name!r})
 
 points = {points!r}
 if len(points) < 2:

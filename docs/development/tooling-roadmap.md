@@ -92,7 +92,7 @@ OCCT exposes both ordinary and optimal bounding-box algorithms; the tool should 
 
 ## Inspection and agent feedback
 
-- [ ] Require an existing explicit `doc_name` for every non-document operation; never create `Unnamed` as a side effect.
+- [x] Require an existing explicit/active document for document-targeted modeling and mutation operations except import; never create `Unnamed` as a side effect.
 - [ ] Add `create_document(on_exists="error|reuse|replace|suffix")` so duplicate-document behavior is intentional.
 - [ ] Add a compact model audit: document count, active Body, Tip, feature order, errors, suppressed objects, solids, bounds, and parameter expressions.
 - [ ] Add feature provenance: source sketch, support selector, parameter aliases, direction, validation evidence, and screenshots.

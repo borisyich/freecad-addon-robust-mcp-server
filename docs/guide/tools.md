@@ -4,6 +4,10 @@ The server currently registers **135 MCP tools**. This page is generated from th
 
 Geometry-changing operations are transaction-backed where applicable. Use `history(action="undo")` for explicit recovery, `get_console_output` for console diagnostics, and `recompute_document` for document recomputation.
 
+Document-targeted modeling and mutation tools require an existing named or active
+document. Only `create_document` and `import` may create one; import opts into
+that behavior so a missing target can receive imported STEP/STL data.
+
 ## Category summary
 
 | Category | Source | Count |

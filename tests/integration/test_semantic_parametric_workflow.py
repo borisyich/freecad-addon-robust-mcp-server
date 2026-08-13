@@ -20,16 +20,16 @@ if TYPE_CHECKING:
 pytestmark = [pytest.mark.integration, pytest.mark.slow]
 
 
-_PARAMETERS: tuple[tuple[str, str, str], ...] = (
-    ("A1", "BaseCenterX", "2 mm"),
-    ("A2", "BaseCenterY", "3 mm"),
-    ("A3", "BaseRadius", "20 mm"),
-    ("A4", "Height", "30 mm"),
-    ("A5", "HoleOffsetX", "8 mm"),
-    ("A6", "HoleOffsetY", "4 mm"),
-    ("A7", "HoleRadius", "5 mm"),
-    ("A8", "FilletRadius", "2 mm"),
-    ("A9", "ChamferSize", "1 mm"),
+_PARAMETERS: tuple[tuple[str, str, float], ...] = (
+    ("A1", "BaseCenterX", 2.0),
+    ("A2", "BaseCenterY", 3.0),
+    ("A3", "BaseRadius", 20.0),
+    ("A4", "Height", 30.0),
+    ("A5", "HoleOffsetX", 8.0),
+    ("A6", "HoleOffsetY", 4.0),
+    ("A7", "HoleRadius", 5.0),
+    ("A8", "FilletRadius", 2.0),
+    ("A9", "ChamferSize", 1.0),
 )
 
 
@@ -204,6 +204,74 @@ _result_ = source.Shape.isValid()
 
 
 @pytest.mark.asyncio
+async def test_imported_brep_direct_edit_inside_body_is_informational(
+    live_tools: dict[str, Any],  # noqa: F811 - imported pytest fixture
+) -> None:
+    """A provenance-marked static result has the same meaning inside a Body."""
+    tools = live_tools
+    doc_name = "McpImportedBodyDirectEdit"
+    await _fresh(tools, doc_name)
+    await _call(
+        tools,
+        "execute_python",
+        code="""
+import Part
+doc = FreeCAD.ActiveDocument
+body = doc.addObject("PartDesign::Body", "Body")
+source = body.newObject("PartDesign::Feature", "ImportedBodySource")
+source.Shape = Part.makeBox(20, 10, 5)
+source.addProperty("App::PropertyString", "ImportSourcePath", "MCP Import")
+source.ImportSourcePath = "fixture.step"
+source.addProperty("App::PropertyString", "ImportSourceFormat", "MCP Import")
+source.ImportSourceFormat = "step"
+body.Tip = source
+doc.recompute()
+_result_ = source.Shape.isValid()
+""",
+    )
+    top = await _call(
+        tools,
+        "select_subshapes",
+        object_name="ImportedBodySource",
+        doc_name=doc_name,
+        criteria={
+            "kind": "face",
+            "surface_types": ["Plane"],
+            "normal": [0, 0, 1],
+            "sort_by": "area",
+            "sort_order": "desc",
+            "limit": 1,
+        },
+    )
+    edited = await _call(
+        tools,
+        "move_faces",
+        object_name="ImportedBodySource",
+        face_names=top["references"],
+        distance=2.0,
+        operation="add",
+        result_name="MovedBodyFaces",
+        doc_name=doc_name,
+    )
+    assert edited["type_id"] == "PartDesign::Feature"
+
+    report = await _call(
+        tools,
+        "validate_parametric_model",
+        doc_name=doc_name,
+        workflow="imported_brep_edit",
+        detail_level="full",
+    )
+    moved_findings = [
+        item for item in report["findings"] if item.get("object") == "MovedBodyFaces"
+    ]
+    assert {(item["severity"], item["category"]) for item in moved_findings} == {
+        ("info", "intentional_direct_edit")
+    }
+    assert moved_findings[0]["message"].endswith("of source 'ImportedBodySource'.")
+
+
+@pytest.mark.asyncio
 async def test_import_creates_missing_named_document(
     live_tools: dict[str, Any],  # noqa: F811 - imported pytest fixture
     tmp_path: Path,
@@ -274,6 +342,46 @@ _result_ = True
 
 
 @pytest.mark.asyncio
+async def test_non_import_creation_tools_reject_missing_document_names(
+    live_tools: dict[str, Any],  # noqa: F811 - imported pytest fixture
+) -> None:
+    """A misspelled ordinary target must not create a side-effect document."""
+    tools = live_tools
+    cases = (
+        (
+            "create_primitive",
+            {
+                "primitive": {"kind": "box", "length": 1, "width": 1, "height": 1},
+                "doc_name": "TypoObjectDocument",
+            },
+        ),
+        (
+            "spreadsheet_create",
+            {"name": "Params", "doc_name": "TypoSpreadsheetDocument"},
+        ),
+        (
+            "create_partdesign_body",
+            {"name": "Body", "doc_name": "TypoPartDesignDocument"},
+        ),
+    )
+    for tool_name, arguments in cases:
+        with pytest.raises(ValueError, match="Document not found"):
+            await tools[tool_name](**arguments)
+
+    documents = await _call(tools, "list_documents")
+    names = {
+        item["name"] if isinstance(item, dict) else item.name for item in documents
+    }
+    assert not names.intersection(
+        {
+            "TypoObjectDocument",
+            "TypoSpreadsheetDocument",
+            "TypoPartDesignDocument",
+        }
+    )
+
+
+@pytest.mark.asyncio
 async def test_semantic_selector_and_sketch_expressions_survive_parameter_update(
     live_tools: dict[str, Any],  # noqa: F811 - imported pytest fixture
 ) -> None:
@@ -300,7 +408,10 @@ async def test_semantic_selector_and_sketch_expressions_survive_parameter_update
         tools,
         "spreadsheet_apply_batch",
         spreadsheet_name="Dimensions",
-        cells=[{"cell": cell, "value": value} for cell, _alias, value in _PARAMETERS],
+        cells=[
+            {"cell": cell, "value": {"value": value, "unit": "mm"}}
+            for cell, _alias, value in _PARAMETERS
+        ],
         aliases=[{"cell": cell, "alias": alias} for cell, alias, _value in _PARAMETERS],
         doc_name=doc_name,
     )
@@ -660,12 +771,12 @@ async def test_semantic_selector_and_sketch_expressions_survive_parameter_update
         "spreadsheet_apply_batch",
         spreadsheet_name="Dimensions",
         cells=[
-            {"cell": "A3", "value": "24 mm"},
-            {"cell": "A4", "value": "36 mm"},
-            {"cell": "A5", "value": "10 mm"},
-            {"cell": "A7", "value": "6 mm"},
-            {"cell": "A8", "value": "3 mm"},
-            {"cell": "A9", "value": "1.5 mm"},
+            {"cell": "A3", "value": {"value": 24, "unit": "mm"}},
+            {"cell": "A4", "value": {"value": 36, "unit": "mm"}},
+            {"cell": "A5", "value": {"value": 10, "unit": "mm"}},
+            {"cell": "A7", "value": {"value": 6, "unit": "mm"}},
+            {"cell": "A8", "value": {"value": 3, "unit": "mm"}},
+            {"cell": "A9", "value": {"value": 1.5, "unit": "mm"}},
         ],
         doc_name=doc_name,
     )

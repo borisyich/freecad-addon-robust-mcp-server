@@ -973,6 +973,7 @@ def _history_item(obj, index):
         "direct_edit_operation": (
             str(direct_edit_operation) if direct_edit_operation else None
         ),
+        "source_object": _object_ref(getattr(obj, "SourceObject", None)),
         "in_list": [
             _object_ref(value)
             for value in (getattr(obj, "InList", []) or [])
@@ -1531,23 +1532,42 @@ else:
             )
         for item in body.get("static_shape_features", []):
             direct_edit = item.get("direct_edit_operation")
-            findings.append(
-                {
-                    "severity": "warning",
-                    "category": "static_partdesign_shape_snapshot",
-                    "object": item.get("name"),
-                    "message": (
-                        f"Generic PartDesign::Feature stores a static Shape snapshot"
-                        f" inside Body {body['name']!r}."
-                        + (
-                            f" It is marked as local direct edit {direct_edit!r}."
-                            if direct_edit
-                            else " It has no native parametric feature type."
-                        )
-                        + " Confirm that loss of upstream editability is intentional."
-                    ),
-                }
-            )
+            if validation_workflow == "imported_brep_edit" and direct_edit:
+                source_name = (item.get("source_object") or {}).get("name")
+                findings.append(
+                    {
+                        "severity": "info",
+                        "category": "intentional_direct_edit",
+                        "object": item.get("name"),
+                        "message": (
+                            f"PartDesign::Feature inside Body {body['name']!r} "
+                            f"is marked as intentional direct edit {direct_edit!r}"
+                            + (
+                                f" of source {source_name!r}."
+                                if source_name
+                                else "."
+                            )
+                        ),
+                    }
+                )
+            else:
+                findings.append(
+                    {
+                        "severity": "warning",
+                        "category": "static_partdesign_shape_snapshot",
+                        "object": item.get("name"),
+                        "message": (
+                            f"Generic PartDesign::Feature stores a static Shape snapshot"
+                            f" inside Body {body['name']!r}."
+                            + (
+                                f" It is marked as local direct edit {direct_edit!r}."
+                                if direct_edit
+                                else " It has no native parametric feature type."
+                            )
+                            + " Confirm that loss of upstream editability is intentional."
+                        ),
+                    }
+                )
 
     for sketch in scoped_sketches:
         solver = sketch.get("analysis", {}).get("solver", {})

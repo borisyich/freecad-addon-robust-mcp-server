@@ -18,6 +18,8 @@ from pydantic import (
     model_validator,
 )
 
+from freecad_mcp.bridge._document_runtime import DOCUMENT_RESOLUTION_RUNTIME
+
 SPREADSHEET_RUNTIME_HELPERS = dedent(
     r'''
     def _spreadsheet_cell_content(sheet, cell):
@@ -348,14 +350,9 @@ def register_spreadsheet_tools(
         bridge = await get_bridge()
 
         code = f"""
-requested_doc_name = {doc_name!r}
-doc = (
-    FreeCAD.ActiveDocument
-    if requested_doc_name is None
-    else FreeCAD.listDocuments().get(requested_doc_name)
-)
-if doc is None:
-    doc = FreeCAD.newDocument(requested_doc_name or "Unnamed")
+{DOCUMENT_RESOLUTION_RUNTIME}
+
+doc = _resolve_document({doc_name!r})
 
 # Wrap in transaction for undo support
 doc.openTransaction("Create Spreadsheet")

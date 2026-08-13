@@ -432,6 +432,7 @@ metric; use formal checkpoints only when the task benefits from them.
 - `spreadsheet_apply_batch` stages numeric/structured-Quantity values, aliases, alias-dependent formulas, and property bindings in one transaction. Use `{"value":40,"unit":"mm"}` for a Quantity, `formula="=..."` for a formula, and `text="..."` for literal text; ambiguous raw string values such as `"40 mm"` are rejected. After recompute it evaluates every non-empty formula cell on the sheet, including unchanged formulas that depend on a modified cell or alias. Any formula failure restores affected cells, aliases, and expressions. Report View formula errors are surfaced as `FreeCADReportError` rather than success.
 - A unitless spreadsheet number bound to an angle property is interpreted in degrees, so `360` can safely drive `PolarPattern.Angle`. Supply an explicit angle to batch as `{"value":360,"unit":"deg"}`.
 - Around direct edits, call `capture_shape_checkpoint` before mutation and `compare_shape_checkpoint` after it. The comparison reports solid/topology counts, validity, bounding-box/volume/area deltas, and localized OCCT added/removed regions without adding checkpoint objects to the document.
+- `compare_shape_checkpoint.volume_tolerance` governs the summary `geometric_change` flag. Smaller OCCT sliver regions are still returned for diagnosis but do not override the threshold.
 - Change a Hole thread profile and size together, for example `edit_object("Hole", {"ThreadType": "ISO_FINE", "ThreadSize": "M12x1.25"})`; this prevents FreeCAD from silently resetting the size.
 
 ## Tips and Best Practices
@@ -601,6 +602,7 @@ Use `measure_distance` for a scalar minimum with closest-point evidence;
 and `measure_minimum_gap` to find the closest pair within a bounded reference
 set. `kind="wall_thickness"` validates opposing planar/cylindrical faces before
 accepting their distance as thickness.
+Distance responses call the threshold flag `within_distance_threshold`.
 
 ### Spreadsheet expressions for sketch constraints
 

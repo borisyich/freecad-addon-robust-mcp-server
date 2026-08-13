@@ -412,7 +412,7 @@ MEASUREMENT_RUNTIME = dedent(
             "first": _m_reference_value(first),
             "second": _m_reference_value(second),
             "distance_mm": value,
-            "within_tolerance": value <= tolerance_mm,
+            "within_distance_threshold": value <= tolerance_mm,
             "tolerance_mm": tolerance_mm,
             "solution_count": len(point_pairs),
             "solutions": solutions,
@@ -646,7 +646,7 @@ MEASUREMENT_RUNTIME = dedent(
             "face": _m_reference_value(face),
             "point": point_value,
             "distance_mm": value,
-            "within_tolerance": value <= tolerance_mm,
+            "within_distance_threshold": value <= tolerance_mm,
             "tolerance_mm": tolerance_mm,
             "nearest_point_on_face": _m_vector(nearest[1]) if nearest else None,
             "support": _m_serialize(support_info[0]) if support_info else None,
@@ -767,7 +767,7 @@ def register_measurement_tools(
                 f"(lambda _specs: (lambda _pairs: {{'measurement': 'minimum_gap', "
                 f"'minimum_gap_mm': _pairs[0]['distance_mm'], 'closest_pair': "
                 f"_m_public_distance(_pairs[0]), 'pair_count': len(_pairs), "
-                f"'tolerance_mm': {request.tolerance_mm!r}, 'within_tolerance': "
+                f"'tolerance_mm': {request.tolerance_mm!r}, 'within_distance_threshold': "
                 f"_pairs[0]['distance_mm'] <= {request.tolerance_mm!r}}})(sorted("
                 f"[_m_distance(doc, _specs[_i], _specs[_j], {request.tolerance_mm!r}) "
                 "for _i in range(len(_specs)) for _j in range(_i + 1, len(_specs))], "
