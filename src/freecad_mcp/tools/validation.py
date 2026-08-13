@@ -245,13 +245,16 @@ _result_ = {{
         recompute: bool = True,
         volume_tolerance: float = 1e-7,
         linear_tolerance: float = 1e-7,
+        difference_mode: Literal["auto", "exact", "metrics"] = "auto",
+        exact_face_product_limit: int = 10000,
+        timeout_ms: int = 30000,
     ) -> dict[str, Any]:
         """Compare current geometry with a captured B-rep; example: checkpoint_name="before_holes", object_name="Body". Reports added/removed regions and metric deltas.
 
-        This is a read-only invariant check for direct edits. Exact OCCT cuts
-        localize the symmetric Shape difference; metric deltas include bounds,
-        volume, area, validity, and topology counts. A boolean failure is
-        reported explicitly rather than replaced by a misleading heuristic.
+        This is a read-only invariant check for direct edits. ``auto`` avoids
+        whole-shape OCCT cuts when the product of before/after face counts exceeds
+        ``exact_face_product_limit``. Use ``exact`` to force localized symmetric
+        Shape differences or ``metrics`` to avoid booleans entirely.
         """
         normalized_name = checkpoint_name.strip()
         snapshot = shape_checkpoints.get(normalized_name)
@@ -263,6 +266,10 @@ _result_ = {{
             )
         if volume_tolerance < 0 or linear_tolerance < 0:
             raise ValueError("comparison tolerances must be non-negative")
+        if exact_face_product_limit < 0:
+            raise ValueError("exact_face_product_limit must be non-negative")
+        if not 1 <= timeout_ms <= 600000:
+            raise ValueError("timeout_ms must be between 1 and 600000")
         target_object = object_name or str(snapshot["object_name"])
         target_doc = doc_name or str(snapshot["document"])
         bridge = await get_bridge()
@@ -331,22 +338,36 @@ before = Part.Shape()
 before.importBrepFromString({snapshot["brep"]!r})
 before_metrics = _metrics(before)
 after_metrics = _metrics(after)
+face_product = before_metrics["face_count"] * after_metrics["face_count"]
+requested_mode = {difference_mode!r}
+run_exact = requested_mode == "exact" or (
+    requested_mode == "auto" and face_product <= {exact_face_product_limit!r}
+)
 
 boolean_error = None
-try:
-    removed = before.cut(after)
-    added = after.cut(before)
+skip_reason = None
+if run_exact:
     try:
-        removed = removed.removeSplitter()
-        added = added.removeSplitter()
-    except Exception:
-        pass
-    removed_regions = _difference_regions(removed)
-    added_regions = _difference_regions(added)
-except Exception as exc:
-    boolean_error = str(exc)
+        removed = before.cut(after)
+        added = after.cut(before)
+        try:
+            removed = removed.removeSplitter()
+            added = added.removeSplitter()
+        except Exception:
+            pass
+        removed_regions = _difference_regions(removed)
+        added_regions = _difference_regions(added)
+    except Exception as exc:
+        boolean_error = str(exc)
+        removed_regions = []
+        added_regions = []
+else:
     removed_regions = []
     added_regions = []
+    if requested_mode == "metrics":
+        skip_reason = "difference_mode_metrics"
+    else:
+        skip_reason = "face_product %s exceeds exact_face_product_limit {exact_face_product_limit!r}" % face_product
 
 metric_names = ("solid_count", "shell_count", "face_count", "edge_count", "vertex_count", "volume", "area")
 deltas = {{name: after_metrics[name] - before_metrics[name] for name in metric_names}}
@@ -364,9 +385,15 @@ bbox_changed = any(
     for values in bbox_delta.values()
     for value in values
 )
-geometric_change = None if boolean_error else bool(
+geometric_change = None if boolean_error or not run_exact else bool(
     removed_volume > {volume_tolerance!r}
     or added_volume > {volume_tolerance!r}
+)
+metric_change_detected = bool(
+    bbox_changed
+    or abs(deltas["volume"]) > {volume_tolerance!r}
+    or before_metrics["valid"] != after_metrics["valid"]
+    or any(deltas[name] != 0 for name in metric_names[:5])
 )
 _result_ = {{
     "success": True,
@@ -382,9 +409,19 @@ _result_ = {{
         "bounding_box_unchanged": not bbox_changed,
     }},
     "difference": {{
-        "method": "occt_before_cut_after_and_after_cut_before",
-        "available": boolean_error is None,
+        "method": (
+            "occt_before_cut_after_and_after_cut_before"
+            if run_exact
+            else "metrics_only"
+        ),
+        "requested_mode": requested_mode,
+        "performed_mode": "exact" if run_exact else "metrics",
+        "available": run_exact and boolean_error is None,
         "error": boolean_error,
+        "skip_reason": skip_reason,
+        "face_product": face_product,
+        "exact_face_product_limit": {exact_face_product_limit!r},
+        "metric_change_detected": metric_change_detected,
         "geometric_change": geometric_change,
         "removed_volume": removed_volume,
         "added_volume": added_volume,
@@ -395,7 +432,7 @@ _result_ = {{
     }},
 }}
 """
-        execution = await bridge.execute_python(code)
+        execution = await bridge.execute_python(code, timeout_ms=timeout_ms)
         if not execution.success or not isinstance(execution.result, dict):
             raise ValueError(
                 execution.error_traceback or "Failed to compare shape checkpoint"

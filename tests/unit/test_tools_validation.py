@@ -105,6 +105,11 @@ class TestValidationTools:
         assert "before.importBrepFromString" in compare_code
         assert "before.cut(after)" in compare_code
         assert "after.cut(before)" in compare_code
+        assert "face_product" in compare_code
+        assert 'requested_mode == "auto"' in compare_code
+        assert mock_bridge.execute_python.await_args_list[1].kwargs == {
+            "timeout_ms": 30000
+        }
         assert (
             compare_code.count(
                 'removed_volume = sum(region["volume"] for region in removed_regions)'
@@ -118,6 +123,47 @@ class TestValidationTools:
         assert "added_volume >" in change_expression
         assert "or removed_regions" not in change_expression
         assert "or added_regions" not in change_expression
+
+    @pytest.mark.asyncio
+    async def test_shape_checkpoint_supports_metrics_mode_and_custom_timeout(
+        self, register_tools, mock_bridge
+    ):
+        mock_bridge.execute_python = AsyncMock(
+            side_effect=[
+                ExecutionResult(
+                    success=True,
+                    result={
+                        "success": True,
+                        "document": "Model",
+                        "object_name": "Imported",
+                        "metrics": {},
+                        "_brep": "brep",
+                    },
+                    stdout="",
+                    stderr="",
+                    execution_time_ms=1.0,
+                ),
+                ExecutionResult(
+                    success=True,
+                    result={"success": True, "difference": {"available": False}},
+                    stdout="",
+                    stderr="",
+                    execution_time_ms=1.0,
+                ),
+            ]
+        )
+        await register_tools["capture_shape_checkpoint"]("baseline", "Imported")
+        await register_tools["compare_shape_checkpoint"](
+            "baseline",
+            difference_mode="metrics",
+            exact_face_product_limit=0,
+            timeout_ms=45000,
+        )
+
+        code = mock_bridge.execute_python.await_args.args[0]
+        assert "requested_mode = 'metrics'" in code
+        assert 'skip_reason = "difference_mode_metrics"' in code
+        assert mock_bridge.execute_python.await_args.kwargs == {"timeout_ms": 45000}
 
     @pytest.mark.asyncio
     async def test_shape_checkpoint_rejects_missing_and_duplicate_names(

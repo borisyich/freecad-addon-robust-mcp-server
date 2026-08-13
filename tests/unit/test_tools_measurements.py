@@ -152,6 +152,8 @@ async def test_specialized_measurements_keep_runtime_validation(registered_tools
     wall_code = bridge.execute_python.await_args.args[0]
     assert '_m_resolve(doc, first_spec, "Face")' in wall_code
     assert "coaxial_cylinders" in wall_code
+    assert "nominal_coaxial_radius_difference" in wall_code
+    assert 'first["shape"].Surface.Radius' in wall_code
 
     await tools["measure_radius"](
         reference={"object_name": "Cylinder", "subshape": "Face1"},

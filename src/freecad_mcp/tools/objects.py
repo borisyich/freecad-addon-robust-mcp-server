@@ -26,6 +26,12 @@ class _PrimitiveBase(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
 
+FiniteVector3 = Annotated[
+    list[Annotated[float, Field(allow_inf_nan=False)]],
+    Field(min_length=3, max_length=3),
+]
+
+
 class BoxPrimitive(_PrimitiveBase):
     kind: Literal["box"]
     length: float = Field(default=10.0, gt=0)
@@ -520,7 +526,8 @@ def _validate_direction(value: list[float] | None, field_name: str) -> None:
     """Reject zero vectors before semantic selection reaches FreeCAD."""
     if value is None:
         return
-    if math.sqrt(sum(float(item) ** 2 for item in value)) <= 1e-12:
+    length = math.sqrt(sum(float(item) ** 2 for item in value))
+    if not math.isfinite(length) or length <= 1e-12:
         raise ValueError(f"{field_name} must be a non-zero vector")
 
 
@@ -636,7 +643,7 @@ def _selection_topology_request(  # noqa: PLR0912, PLR0915
     detail_level: Literal["references", "summary", "full"],
 ) -> tuple[tuple[str, ...], tuple[str, ...] | None]:
     """Request only the topology records and evidence needed by a selector."""
-    kind = f"{criteria.kind}s"
+    kind = "vertices" if criteria.kind == "vertex" else f"{criteria.kind}s"
     if detail_level == "full":
         return (kind,), None
 
@@ -1000,6 +1007,58 @@ def _primitive_definition(spec: PrimitiveSpec) -> tuple[str, dict[str, Any]]:
     raise TypeError(f"Unsupported primitive specification: {type(spec).__name__}")
 
 
+def _primitive_axis_placement(
+    axis_origin: list[float] | None,
+    axis_direction: list[float] | None,
+) -> tuple[list[float], list[float]] | None:
+    """Return an explicit normalized world-axis placement when requested."""
+    if axis_origin is None and axis_direction is None:
+        return None
+    origin = [float(value) for value in (axis_origin or [0.0, 0.0, 0.0])]
+    direction = [float(value) for value in (axis_direction or [0.0, 0.0, 1.0])]
+    length = math.sqrt(sum(value * value for value in direction))
+    return origin, [value / length for value in direction]
+
+
+def _oriented_primitive_creation_code(
+    type_id: str,
+    name: str | None,
+    properties: dict[str, Any],
+    doc_name: str | None,
+    axis_origin: list[float],
+    axis_direction: list[float],
+) -> str:
+    """Build one transactional primitive creation with an axis-based placement."""
+    return f"""
+{DOCUMENT_RESOLUTION_RUNTIME}
+
+doc = _resolve_document({doc_name!r})
+doc.openTransaction("Create Oriented Primitive")
+try:
+    obj = doc.addObject({type_id!r}, {name!r} or "")
+    for prop_name, prop_val in {properties!r}.items():
+        if hasattr(obj, prop_name):
+            setattr(obj, prop_name, prop_val)
+    axis_origin = FreeCAD.Vector(*{axis_origin!r})
+    axis_direction = FreeCAD.Vector(*{axis_direction!r})
+    obj.Placement = FreeCAD.Placement(
+        axis_origin,
+        FreeCAD.Rotation(FreeCAD.Vector(0, 0, 1), axis_direction),
+    )
+    doc.recompute()
+    doc.commitTransaction()
+except Exception:
+    doc.abortTransaction()
+    raise
+
+_result_ = {{
+    "name": obj.Name,
+    "label": obj.Label,
+    "type_id": obj.TypeId,
+}}
+"""
+
+
 def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> None:
     """Register object-related tools with the Robust MCP Server.
 
@@ -1059,11 +1118,11 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
                 ``full`` also serializes every property. Request ``full`` only
                 after compact modes show that exact properties are necessary.
             face_offset: Zero-based face-page offset for topology/full.
-            face_limit: Face-page size, from 1 to 100.
+            face_limit: Face-page size, from 0 to 100; zero omits faces.
             edge_offset: Zero-based edge-page offset for topology/full.
-            edge_limit: Edge-page size, from 1 to 100.
+            edge_limit: Edge-page size, from 0 to 100; zero omits edges.
             vertex_offset: Zero-based vertex-page offset for topology/full.
-            vertex_limit: Vertex-page size, from 1 to 100.
+            vertex_limit: Vertex-page size, from 0 to 100; zero omits vertices.
             include_properties: Deprecated switch that selects full detail.
             include_shape: Deprecated switch that can omit shape metrics.
 
@@ -1076,9 +1135,9 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
         if min(face_offset, edge_offset, vertex_offset) < 0:
             raise ValueError("topology offsets must be non-negative")
         if not all(
-            1 <= value <= 100 for value in (face_limit, edge_limit, vertex_limit)
+            0 <= value <= 100 for value in (face_limit, edge_limit, vertex_limit)
         ):
-            raise ValueError("topology page limits must be between 1 and 100")
+            raise ValueError("topology page limits must be between 0 and 100")
 
         effective_detail = detail_level
         if include_properties is True:
@@ -1087,6 +1146,17 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
         include_topology = effective_detail in {"topology", "full"}
         try:
             bridge = await get_bridge()
+            topology_options: dict[str, Any] = {}
+            if include_topology and 0 in (face_limit, edge_limit, vertex_limit):
+                topology_options["topology_kinds"] = tuple(
+                    kind
+                    for kind, limit in (
+                        ("faces", face_limit),
+                        ("edges", edge_limit),
+                        ("vertices", vertex_limit),
+                    )
+                    if limit > 0
+                )
             obj = await bridge.get_object(
                 object_name,
                 doc_name,
@@ -1099,6 +1169,7 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
                 edge_limit=edge_limit,
                 vertex_offset=vertex_offset,
                 vertex_limit=vertex_limit,
+                **topology_options,
             )
         except Exception as e:
             return {
@@ -1290,14 +1361,21 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
         primitive: PrimitiveSpec,
         name: str | None = None,
         doc_name: str | None = None,
+        axis_origin: FiniteVector3 | None = None,
+        axis_direction: FiniteVector3 | None = None,
     ) -> dict[str, Any]:
         """Create a Box, Cylinder, Sphere, Cone, Torus, Wedge, or Helix.
 
         Args:
             primitive: Primitive kind and its dimensions. The selected kind uses
-                its own strict schema; unrelated fields and invalid dimensions are rejected.
+                its own strict schema; unrelated fields and invalid dimensions are
+                rejected.
             name: Object name. Auto-generated if omitted.
             doc_name: Target document. Uses the active document if omitted.
+            axis_origin: Optional world-space axis start/center ``[x, y, z]``.
+                Supported by cylinder, cone, torus, and helix.
+            axis_direction: Optional world-space axis direction ``[dx, dy, dz]``.
+                It is normalized internally and supported by the same axial kinds.
 
         Returns:
             Created object identity, selected primitive kind, and box volume when
@@ -1305,16 +1383,56 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
         """
         if isinstance(primitive, dict):
             primitive = _PRIMITIVE_ADAPTER.validate_python(primitive)
+        if (
+            axis_origin is not None or axis_direction is not None
+        ) and primitive.kind not in {
+            "cylinder",
+            "cone",
+            "torus",
+            "helix",
+        }:
+            raise ValueError(
+                "axis_origin and axis_direction are supported only for cylinder, "
+                "cone, torus, and helix"
+            )
+        _validate_direction(axis_direction, "axis_direction")
         type_id, properties = _primitive_definition(primitive)
+        axis_placement = _primitive_axis_placement(axis_origin, axis_direction)
 
         bridge = await get_bridge()
-        obj = await bridge.create_object(type_id, name, properties, doc_name)
+        if axis_placement is None:
+            obj = await bridge.create_object(type_id, name, properties, doc_name)
+            object_name = obj.name
+            object_label = obj.label
+            object_type_id = obj.type_id
+        else:
+            axis_origin, axis_direction = axis_placement
+            execution = await bridge.execute_python(
+                _oriented_primitive_creation_code(
+                    type_id,
+                    name,
+                    properties,
+                    doc_name,
+                    axis_origin,
+                    axis_direction,
+                )
+            )
+            if not execution.success or not isinstance(execution.result, dict):
+                raise ValueError(
+                    execution.error_traceback or "Failed to create oriented primitive"
+                )
+            object_name = str(execution.result["name"])
+            object_label = str(execution.result["label"])
+            object_type_id = str(execution.result["type_id"])
         result: dict[str, Any] = {
-            "name": obj.name,
-            "label": obj.label,
-            "type_id": obj.type_id,
+            "name": object_name,
+            "label": object_label,
+            "type_id": object_type_id,
             "kind": primitive.kind,
         }
+        if axis_placement is not None:
+            result["axis_origin"] = axis_placement[0]
+            result["axis_direction"] = axis_placement[1]
         if primitive.kind == "box":
             result["volume"] = primitive.length * primitive.width * primitive.height
         return result

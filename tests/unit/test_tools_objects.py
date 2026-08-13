@@ -211,6 +211,32 @@ class TestObjectTools:
         )
 
     @pytest.mark.asyncio
+    async def test_inspect_object_zero_limit_omits_topology_kind(
+        self, register_tools, mock_bridge
+    ):
+        mock_bridge.get_object = AsyncMock(
+            return_value=ObjectInfo(
+                name="Body",
+                label="Body",
+                type_id="PartDesign::Body",
+                shape_info={"faces": [], "topology_pages": {"faces": {}}},
+            )
+        )
+
+        await register_tools["inspect_object"](
+            "Body",
+            detail_level="topology",
+            face_limit=5,
+            edge_limit=0,
+            vertex_limit=0,
+        )
+
+        request = mock_bridge.get_object.await_args.kwargs
+        assert request["topology_kinds"] == ("faces",)
+        assert request["edge_limit"] == 0
+        assert request["vertex_limit"] == 0
+
+    @pytest.mark.asyncio
     async def test_select_subshapes_filters_and_sorts_faces(
         self, register_tools, mock_bridge
     ):
@@ -326,6 +352,8 @@ class TestObjectTools:
             "Edge3",
             "Edge4",
         ]
+        request = mock_bridge.get_object.await_args.kwargs
+        assert request["topology_kinds"] == ("vertices",)
 
     @pytest.mark.asyncio
     async def test_select_subshapes_filters_cylindrical_faces_by_radius_and_axis(
@@ -739,6 +767,56 @@ class TestObjectTools:
         mock_bridge.create_object.assert_awaited_once_with(
             expected_type, None, expected_properties, None
         )
+
+    @pytest.mark.asyncio
+    async def test_create_primitive_accepts_geometric_axis(
+        self, register_tools, mock_bridge
+    ):
+        mock_bridge.execute_python = AsyncMock(
+            return_value=ExecutionResult(
+                success=True,
+                result={
+                    "name": "CrossPin",
+                    "label": "CrossPin",
+                    "type_id": "Part::Cylinder",
+                },
+                stdout="",
+                stderr="",
+                execution_time_ms=1.0,
+            )
+        )
+
+        result = await register_tools["create_primitive"](
+            primitive={
+                "kind": "cylinder",
+                "radius": 7.5,
+                "height": 20,
+            },
+            name="CrossPin",
+            doc_name="PartDoc",
+            axis_origin=[10, 20, 30],
+            axis_direction=[0, 2, 0],
+        )
+
+        assert result["axis_origin"] == [10.0, 20.0, 30.0]
+        assert result["axis_direction"] == [0.0, 1.0, 0.0]
+        code = mock_bridge.execute_python.await_args.args[0]
+        assert "FreeCAD.Rotation(FreeCAD.Vector(0, 0, 1), axis_direction)" in code
+        assert "axis_origin = FreeCAD.Vector(*[10.0, 20.0, 30.0])" in code
+        mock_bridge.create_object.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_create_primitive_rejects_zero_axis(
+        self, register_tools, mock_bridge
+    ):
+        with pytest.raises(
+            ValueError, match="axis_direction must be a non-zero vector"
+        ):
+            await register_tools["create_primitive"](
+                primitive={"kind": "cylinder"}, axis_direction=[0, 0, 0]
+            )
+        mock_bridge.create_object.assert_not_awaited()
+        mock_bridge.execute_python.assert_not_awaited()
 
     def test_primitive_schema_is_discriminated_by_kind(self):
         """The tool schema should expose one strict parameter shape per primitive."""

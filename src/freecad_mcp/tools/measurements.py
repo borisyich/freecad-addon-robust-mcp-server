@@ -572,6 +572,8 @@ MEASUREMENT_RUNTIME = dedent(
             math.acos(max(-1.0, min(1.0, abs(direction1.dot(direction2)))))
         )
         supported = False
+        thickness_mm = None
+        measurement_method = None
         evidence = {"direction_alignment_deg": alignment}
         if type1 == type2 == "Plane":
             supported = alignment <= 1e-5
@@ -579,14 +581,30 @@ MEASUREMENT_RUNTIME = dedent(
         elif type1 == type2 == "Cylinder":
             center_offset = origin2 - origin1
             axis_offset = center_offset.cross(direction1).Length
+            radius1 = _m_finite(first["shape"].Surface.Radius)
+            radius2 = _m_finite(second["shape"].Surface.Radius)
             evidence.update(
-                {"relationship": "coaxial_cylinders", "axis_offset_mm": axis_offset}
+                {
+                    "relationship": "coaxial_cylinders",
+                    "axis_offset_mm": axis_offset,
+                    "first_radius_mm": radius1,
+                    "second_radius_mm": radius2,
+                }
             )
             supported = alignment <= 1e-5 and axis_offset <= tolerance_mm
+            if supported:
+                thickness_mm = abs(radius1 - radius2)
+                measurement_method = "nominal_coaxial_radius_difference"
         else:
             evidence["relationship"] = "unsupported_surface_pair"
         distance = _m_distance(doc, first_spec, second_spec, tolerance_mm)
-        if supported and distance["solutions"] and distance["distance_mm"] > tolerance_mm:
+        evidence["minimum_patch_distance_mm"] = distance["distance_mm"]
+        if (
+            supported
+            and type1 == type2 == "Plane"
+            and distance["solutions"]
+            and distance["distance_mm"] > tolerance_mm
+        ):
             first_point = distance["solutions"][0]["point_on_first"]
             second_point = distance["solutions"][0]["point_on_second"]
             separation = FreeCAD.Vector(
@@ -596,24 +614,25 @@ MEASUREMENT_RUNTIME = dedent(
             )
             separation.normalize()
             axial_component = abs(separation.dot(direction1))
-            if type1 == type2 == "Plane":
-                lateral_component = math.sqrt(max(0.0, 1.0 - axial_component ** 2))
-                lateral_mm = lateral_component * distance["distance_mm"]
-                evidence["lateral_separation_mm"] = lateral_mm
-                supported = lateral_mm <= max(tolerance_mm, 1e-7)
-            elif type1 == type2 == "Cylinder":
-                axial_mm = axial_component * distance["distance_mm"]
-                evidence["axial_separation_mm"] = axial_mm
-                supported = axial_mm <= max(tolerance_mm, 1e-7)
+            lateral_component = math.sqrt(max(0.0, 1.0 - axial_component ** 2))
+            lateral_mm = lateral_component * distance["distance_mm"]
+            evidence["lateral_separation_mm"] = lateral_mm
+            supported = lateral_mm <= max(tolerance_mm, 1e-7)
+        if supported and type1 == type2 == "Plane":
+            thickness_mm = distance["distance_mm"]
+            measurement_method = "minimum_distance_between_overlapping_parallel_faces"
         if strict and not supported:
             raise ValueError(
                 "Wall thickness requires overlapping parallel planar faces or "
-                "overlapping coaxial cylindrical faces; "
+                "coaxial cylindrical faces; "
                 f"received {type1}/{type2} with evidence {evidence!r}"
             )
+        if thickness_mm is None:
+            thickness_mm = distance["distance_mm"]
+            measurement_method = "minimum_face_patch_distance"
         return {
             "measurement": "wall_thickness",
-            "thickness_mm": distance["distance_mm"],
+            "thickness_mm": thickness_mm,
             "first": distance["first"],
             "second": distance["second"],
             "surface_types": [type1, type2],
@@ -621,7 +640,8 @@ MEASUREMENT_RUNTIME = dedent(
             "validated_opposing_surfaces": supported,
             "evidence": evidence,
             "solutions": distance["solutions"],
-            "method": distance["method"],
+            "method": measurement_method,
+            "distance_method": distance["method"],
         }
 
 

@@ -80,6 +80,10 @@ box_b.Placement.Base = FreeCAD.Vector(115, 0, 0)
 cylinder = doc.addObject("Part::Feature", "Cylinder")
 cylinder.Shape = Part.makeCylinder(4, 12)
 cylinder.Placement.Base = FreeCAD.Vector(0, 50, 0)
+outer_patch = doc.addObject("Part::Feature", "OuterCylinderPatch")
+outer_patch.Shape = Part.makeCylinder(7.5, 8, FreeCAD.Vector(0, 0, 0))
+inner_patch = doc.addObject("Part::Feature", "InnerCylinderPatch")
+inner_patch.Shape = Part.makeCylinder(6.0, 8, FreeCAD.Vector(0, 0, 12))
 doc.recompute()
 _result_ = {{"document": doc.Name}}
 """,
@@ -200,6 +204,24 @@ def test_wall_thickness_and_point_to_face_reject_topology_guessing(
     assert point_distance["nearest_point_on_face"] == pytest.approx(
         {"x": 105.0, "y": 5.0, "z": 30.0}
     )
+
+
+def test_wall_thickness_uses_nominal_radius_for_coaxial_cylinder_patches(
+    xmlrpc_proxy: xmlrpc.client.ServerProxy, measurement_document: str
+) -> None:
+    thickness = _measure(
+        xmlrpc_proxy,
+        measurement_document,
+        ["OuterCylinderPatch", "InnerCylinderPatch"],
+        "_m_wall_thickness(doc, "
+        "{'object_name':'OuterCylinderPatch','subshape':'Face1'}, "
+        "{'object_name':'InnerCylinderPatch','subshape':'Face1'}, 1e-7, True)",
+    )
+
+    assert thickness["validated_opposing_surfaces"] is True
+    assert thickness["thickness_mm"] == pytest.approx(1.5)
+    assert thickness["method"] == "nominal_coaxial_radius_difference"
+    assert thickness["evidence"]["minimum_patch_distance_mm"] > 1.5
 
 
 @pytest.mark.asyncio

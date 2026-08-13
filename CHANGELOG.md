@@ -283,6 +283,9 @@
 - Preserved shared `$defs` after direct schema-property inlining, added drift
   coverage for the flattened subshape criteria contract, and renamed distance
   evidence to `within_distance_threshold`.
+- Made shape-checkpoint comparison complexity-aware, separated nominal coaxial
+  cylinder thickness from finite-patch distance, added world-axis placement for
+  axial primitives, and allowed zero topology page limits in `inspect_object`.
 
 This project uses **component-specific versioning**. Each component has its own
 release notes and version history.

@@ -290,7 +290,11 @@ OBJECT_INSPECTION_RUNTIME = dedent(
         edges = list(_safe_attr(shape, "Edges", []) or [])
         vertexes = list(_safe_attr(shape, "Vertexes", []) or [])
 
-        requested_kinds = set(topology_kinds or ("faces", "edges", "vertices"))
+        requested_kinds = set(
+            ("faces", "edges", "vertices")
+            if topology_kinds is None
+            else topology_kinds
+        )
         requested_fields = (
             None if topology_fields is None else set(topology_fields)
         )

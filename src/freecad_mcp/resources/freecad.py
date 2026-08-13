@@ -1262,12 +1262,23 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                         {
                             "name": "capture_shape_checkpoint",
                             "description": "Capture an in-memory B-rep baseline without modifying the document",
-                            "key_params": ["checkpoint_name", "object_name", "doc_name"],
+                            "key_params": [
+                                "checkpoint_name",
+                                "object_name",
+                                "doc_name",
+                            ],
                         },
                         {
                             "name": "compare_shape_checkpoint",
-                            "description": "Report before/after metrics and exact added/removed Shape regions",
-                            "key_params": ["checkpoint_name", "object_name", "doc_name"],
+                            "description": "Report before/after metrics and complexity-bounded added/removed Shape regions",
+                            "key_params": [
+                                "checkpoint_name",
+                                "object_name",
+                                "doc_name",
+                                "difference_mode",
+                                "exact_face_product_limit",
+                                "timeout_ms",
+                            ],
                         },
                         {
                             "name": "validate_parametric_model",

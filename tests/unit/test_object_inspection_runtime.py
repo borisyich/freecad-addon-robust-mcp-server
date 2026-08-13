@@ -332,6 +332,19 @@ def test_shape_topology_can_skip_unrequested_kinds_and_expensive_fields() -> Non
     assert "vertices" not in result
 
 
+def test_shape_topology_empty_kind_request_returns_no_topology_records() -> None:
+    runtime = _load_runtime()
+    result = runtime["_shape_topology_value"](
+        _TopologicalShape(),
+        face_limit=0,
+        edge_limit=0,
+        vertex_limit=0,
+        topology_kinds=(),
+    )
+
+    assert result == {"topology_pages": {}}
+
+
 def test_generated_inspection_code_carries_selective_topology_contract() -> None:
     code = build_object_inspection_code(
         "Imported",

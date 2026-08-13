@@ -198,7 +198,9 @@ Create one supported Part primitive through a single typed entry point.
 create_primitive(
     primitive: PrimitiveSpec,
     name: str | None = None,
-    doc_name: str | None = None
+    doc_name: str | None = None,
+    axis_origin: list[float] | None = None,
+    axis_direction: list[float] | None = None,
 ) -> dict
 ```
 
@@ -219,6 +221,11 @@ create_primitive(
 ```
 
 The tool validates relevant dimensions before creating the FreeCAD object.
+For axial primitives (`cylinder`, `cone`, `torus`, and `helix`), optional
+`axis_origin=[x,y,z]` and `axis_direction=[dx,dy,dz]` place the native +Z axis
+directly in world coordinates. The direction is normalized internally, avoiding
+an additional Euler-angle `set_placement` call. For cylinder, cone, and helix the
+origin is the axis start; for torus it is the center.
 
 ### Object Management
 
@@ -268,6 +275,9 @@ The location field is named `centroid`: for faces it is the surface-area
 centroid and for edges it is the curve-length centroid, in global coordinates.
 `shape_info.vertices` contains the exact point, adjacent edges/faces, and vertex
 tolerance. Each topology kind has its own page metadata under `topology_pages`.
+Set a page limit to `0` to omit that topology kind entirely, for example
+`edge_limit=0, vertex_limit=0` when only face records are needed. Positive limits
+remain capped at 100.
 
 #### select_subshapes
 
@@ -652,9 +662,12 @@ diameter = await measure_radius(
 ### measure_wall_thickness
 
 Requires two explicit `FaceN` references. Strict mode (the default) validates
-parallel planar faces or coaxial cylindrical faces before accepting their
-minimum distance as thickness. This avoids the common failure where adjacent
-faces share an edge and produce a misleading zero distance.
+parallel planar faces or coaxial cylindrical faces. Planar thickness is the
+minimum distance between overlapping patches. Cylindrical thickness is the
+nominal absolute radius difference; the minimum physical distance between the
+finite face patches is reported separately as
+`evidence.minimum_patch_distance_mm`. This remains reliable for axially split or
+trimmed cylindrical faces whose closest points are not radially aligned.
 
 ```python
 outer = await select_subshapes(
@@ -2043,20 +2056,27 @@ compare_shape_checkpoint(
     doc_name="Bracket",  # optional; defaults to captured document
     volume_tolerance=1e-7,
     linear_tolerance=1e-7,
+    difference_mode="auto",       # auto | exact | metrics
+    exact_face_product_limit=10000,
+    timeout_ms=30000,
 )
 ```
 
-The report includes before/after validity, solid/shell/face/edge/vertex counts,
-volume, surface area, bounding boxes and their deltas. OCCT computes both
-`before.cut(after)` and `after.cut(before)`; each removed or added connected
-solid is reported with its own bounds and topology. Thus four isolated drilled
-regions normally appear as four removed regions, with surface-type evidence
-such as `Cylinder` on their faces. If the boolean operation
-fails, `difference.available` is false and the error is explicit; metric deltas
-remain available. `volume_tolerance` controls `geometric_change`; sub-threshold
-sliver regions remain visible in the detailed region list but do not force that
-flag to true. Checkpoints live only for the current MCP server session (up
-to 32 named baselines) and can be intentionally replaced with `overwrite=True`.
+The report always includes before/after validity, solid/shell/face/edge/vertex
+counts, volume, surface area, bounding boxes and their deltas. In `auto` mode,
+OCCT computes both `before.cut(after)` and `after.cut(before)` only when the
+product of the two face counts does not exceed `exact_face_product_limit`.
+Larger imported B-reps automatically use metric-only comparison, avoiding two
+unbounded whole-shape booleans; `difference.skip_reason` makes this explicit.
+Use `difference_mode="exact"` (and raise `timeout_ms` if appropriate) when exact
+localized regions are required, or `metrics` to prohibit boolean work. Exact
+mode reports each added/removed connected solid with bounds and topology. If a
+boolean fails, `difference.available` is false and the error is explicit;
+metric deltas remain available. `volume_tolerance` controls exact
+`geometric_change`; `metric_change_detected` is a cheaper summary and is not a
+substitute for exact localization. Checkpoints live only for the current MCP
+server session (up to 32 named baselines) and may be replaced with
+`overwrite=True`.
 
 ### validate_parametric_model
 
