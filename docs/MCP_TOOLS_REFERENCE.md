@@ -343,6 +343,12 @@ plus pagination metadata. Use `summary` for compact selection evidence and
 `centroid_bounds`; the old input key `center` and `center_x/y/z` sort names are
 accepted for compatibility.
 
+The MCP input schema deliberately exposes `criteria` as one flat object rather
+than a `$ref`-only union. Every face, edge, and vertex filter is therefore visible
+in generated tool declarations; each field description identifies the applicable
+topology kind. Supplying a field that is not valid for the selected `kind` is
+rejected before FreeCAD is called.
+
 Face radius uses `radius_min`/`radius_max`. Cylinder axes are geometrically
 undirected, so either sign of `axis_direction` matches. `axis_point` may be any
 point on the expected infinite axis: comparison uses perpendicular distance and
@@ -1693,7 +1699,11 @@ Arguments:
 ```
 
 Both formats return a consistent `objects` list containing every newly imported
-object.
+object. If `doc_name` names an open document it is reused; otherwise that named
+document is created automatically. With no `doc_name`, the active document is
+used or a new `Imported` document is created. The result includes
+`document_created`, and imported objects receive best-effort
+`ImportSourcePath`/`ImportSourceFormat` provenance properties.
 
 ---
 
@@ -1934,8 +1944,10 @@ set_visual_properties(
 ) -> dict
 ```
 
-At least one visual property must be provided. RGB components must be between
-`0.0` and `1.0`.
+At least one visual property must be provided. RGB accepts either normalized
+components from `0.0` to `1.0` or integer byte components from `0` to `255`;
+byte input such as `[255, 0, 0]` is normalized to `[1.0, 0.0, 0.0]`. The JSON
+Schema exposes exactly three items and component bounds `0..255`.
 
 ### Workbenches
 
@@ -2016,6 +2028,7 @@ validate_parametric_model(
     include_sketch_constraints: bool = False,
     required_dimension_names: list[str] | None = None,
     target: dict | None = None,  # {"kind":"sketch", "name":"SketchName"}
+    workflow: str = "native_parametric",  # or imported_brep_edit
     detail_level: str = "summary",  # summary | structure | full
     finding_offset: int = 0,
     finding_limit: int = 20,
@@ -2039,6 +2052,14 @@ deliverable is a sketch, pass for example
 uses only that sketch: Body, solid, Tip, standalone-solid, and unused global
 Spreadsheet findings are outside scope. Required dimensions must influence
 non-construction geometry of the named sketch.
+
+For an intentional STEP/BRep editing task, set
+`workflow="imported_brep_edit"`. A source marked by the import tool, a source
+referenced through `SourceObject`, and a result marked by
+`DirectEditOperation` become `info` findings rather than generic static-shape
+warnings. Unrelated snapshots still warn, and an invalid Shape or object error
+state remains an `error`. The default `native_parametric` workflow preserves the
+strict warning behavior used for models expected to have native editable history.
 
 The report includes:
 
@@ -2065,7 +2086,7 @@ The report includes:
 - each Spreadsheet alias, its direct and transitive dependencies, whether it is
   connected to a feature-tree expression, and an error finding for aliases that
   remain unused;
-- findings with `error` or `warning` severity;
+- findings with `error`, `warning`, or workflow-context `info` severity;
 - limitations: it does not prove drawing correspondence, manufacturing process,
   tolerances, design intent, or that a valid feature changed the expected amount
   of material. Use feature-level before/after volume diagnostics and visual checks.

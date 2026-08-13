@@ -154,6 +154,7 @@ class TestExportTools:
                     "success": True,
                     "format": file_format,
                     "document": "Target",
+                    "document_created": True,
                     "objects": ["Imported001", "Imported002"],
                 },
                 stdout="",
@@ -172,8 +173,12 @@ class TestExportTools:
         assert f"import {expected_module}" in code
         assert f"{expected_module}.insert" in code
         assert "before_count = len(doc.Objects)" in code
+        assert "FreeCAD.listDocuments().get(requested_doc_name)" in code
+        assert 'FreeCAD.newDocument(requested_doc_name or "Imported")' in code
+        assert "ImportSourcePath" in code
         assert result["objects"] == ["Imported001", "Imported002"]
         assert result["document"] == "Target"
+        assert result["document_created"] is True
 
     @pytest.mark.asyncio
     async def test_import_rejects_unknown_format_before_bridge(

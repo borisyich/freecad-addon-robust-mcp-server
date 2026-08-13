@@ -292,6 +292,228 @@ _SUBSHAPE_CRITERIA_ADAPTER: TypeAdapter[SubshapeSelectionCriteria] = TypeAdapter
 )
 
 
+class SubshapeSelectionCriteriaInput(_PrimitiveBase):
+    """Flat MCP input contract for semantic face, edge, or vertex selection.
+
+    Some MCP clients render a discriminated union whose branches are local
+    ``$ref`` values as ``unknown | unknown | unknown``.  Keeping one flat input
+    object makes every selector field visible in generated tool declarations;
+    the existing discriminated models still perform the kind-specific runtime
+    validation below.
+    """
+
+    kind: Literal["face", "edge", "vertex"] = Field(
+        description="Topology kind to select: face, edge, or vertex."
+    )
+    surface_types: list[str] | None = Field(
+        default=None,
+        description="Face only: accepted surface types, such as Plane or Cylinder.",
+    )
+    normal: list[float] | None = Field(
+        default=None,
+        min_length=3,
+        max_length=3,
+        description="Face only: oriented representative normal [x, y, z].",
+    )
+    normal_tolerance_deg: float = Field(
+        default=10.0,
+        ge=0,
+        le=180,
+        description="Face only: maximum angular difference from normal, in degrees.",
+    )
+    area_min: float | None = Field(
+        default=None, ge=0, description="Face only: minimum surface area."
+    )
+    area_max: float | None = Field(
+        default=None, ge=0, description="Face only: maximum surface area."
+    )
+    radius_min: float | None = Field(
+        default=None,
+        ge=0,
+        description="Face/edge: minimum cylindrical or circular radius.",
+    )
+    radius_max: float | None = Field(
+        default=None,
+        ge=0,
+        description="Face/edge: maximum cylindrical or circular radius.",
+    )
+    axis_direction: list[float] | None = Field(
+        default=None,
+        min_length=3,
+        max_length=3,
+        description="Face only: undirected cylinder/cone axis [x, y, z].",
+    )
+    axis_direction_tolerance_deg: float = Field(
+        default=10.0,
+        ge=0,
+        le=90,
+        description="Face only: maximum axis angular difference, in degrees.",
+    )
+    axis_point: list[float] | None = Field(
+        default=None,
+        min_length=3,
+        max_length=3,
+        description="Face only: any point on the expected infinite axis.",
+    )
+    axis_point_tolerance: float = Field(
+        default=1e-6,
+        ge=0,
+        description="Face only: maximum perpendicular distance to axis_point.",
+    )
+    convexity: Literal["flat", "convex", "concave", "saddle", "unknown"] | None = Field(
+        default=None, description="Face only: local surface convexity."
+    )
+    curve_types: list[str] | None = Field(
+        default=None,
+        description="Edge only: accepted curve types, such as Line or Circle.",
+    )
+    direction: list[float] | None = Field(
+        default=None,
+        min_length=3,
+        max_length=3,
+        description="Edge only: undirected straight-edge direction [x, y, z].",
+    )
+    direction_tolerance_deg: float = Field(
+        default=10.0,
+        ge=0,
+        le=90,
+        description="Edge only: maximum direction angular difference, in degrees.",
+    )
+    length_min: float | None = Field(
+        default=None, ge=0, description="Edge only: minimum curve length."
+    )
+    length_max: float | None = Field(
+        default=None, ge=0, description="Edge only: maximum curve length."
+    )
+    adjacent_surface_types: list[str] | None = Field(
+        default=None,
+        description="Edge only: every listed adjacent face surface type must occur.",
+    )
+    adjacent_edge_count_min: int | None = Field(
+        default=None, ge=0, description="Vertex only: minimum adjacent edge count."
+    )
+    adjacent_edge_count_max: int | None = Field(
+        default=None, ge=0, description="Vertex only: maximum adjacent edge count."
+    )
+    adjacent_face_count_min: int | None = Field(
+        default=None,
+        ge=0,
+        description="Face/edge/vertex: minimum adjacent face count.",
+    )
+    adjacent_face_count_max: int | None = Field(
+        default=None,
+        ge=0,
+        description="Face/edge/vertex: maximum adjacent face count.",
+    )
+    centroid_bounds: CoordinateRange | None = Field(
+        default=None,
+        validation_alias=AliasChoices("centroid_bounds", "center"),
+        description="Face/edge: global centroid coordinate bounds.",
+    )
+    point_bounds: CoordinateRange | None = Field(
+        default=None,
+        validation_alias=AliasChoices("point_bounds", "point"),
+        description="Vertex only: global point coordinate bounds.",
+    )
+    sort_by: Literal[
+        "index",
+        "area",
+        "length",
+        "radius",
+        "centroid_x",
+        "centroid_y",
+        "centroid_z",
+        "center_x",
+        "center_y",
+        "center_z",
+        "axis_point_x",
+        "axis_point_y",
+        "axis_point_z",
+        "point_x",
+        "point_y",
+        "point_z",
+    ] = Field(default="index", description="Sort key supported by the selected kind.")
+    sort_order: Literal["asc", "desc"] = Field(
+        default="asc", description="Ascending or descending result order."
+    )
+    limit: int | None = Field(
+        default=None,
+        ge=1,
+        le=200,
+        description="Maximum total matches before output pagination.",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def route_legacy_center_alias(cls, value: Any) -> Any:
+        """Keep legacy ``center`` bounds unambiguous for vertex criteria."""
+        if (
+            isinstance(value, dict)
+            and value.get("kind") == "vertex"
+            and "center" in value
+            and "point_bounds" not in value
+            and "point" not in value
+        ):
+            value = dict(value)
+            value["point_bounds"] = value.pop("center")
+        return value
+
+    def to_internal(self) -> SubshapeSelectionCriteria:
+        """Validate and convert the flat wire contract to a kind-specific model."""
+        common = {
+            "kind",
+            "adjacent_face_count_min",
+            "adjacent_face_count_max",
+            "sort_by",
+            "sort_order",
+            "limit",
+        }
+        allowed = {
+            "face": common
+            | {
+                "surface_types",
+                "normal",
+                "normal_tolerance_deg",
+                "area_min",
+                "area_max",
+                "radius_min",
+                "radius_max",
+                "axis_direction",
+                "axis_direction_tolerance_deg",
+                "axis_point",
+                "axis_point_tolerance",
+                "convexity",
+                "centroid_bounds",
+            },
+            "edge": common
+            | {
+                "curve_types",
+                "direction",
+                "direction_tolerance_deg",
+                "length_min",
+                "length_max",
+                "radius_min",
+                "radius_max",
+                "adjacent_surface_types",
+                "centroid_bounds",
+            },
+            "vertex": common
+            | {
+                "point_bounds",
+                "adjacent_edge_count_min",
+                "adjacent_edge_count_max",
+            },
+        }[self.kind]
+        supplied = set(self.model_fields_set)
+        unsupported = sorted(supplied - allowed)
+        if unsupported:
+            raise ValueError(
+                f"criteria.kind={self.kind!r} does not support fields: {unsupported}"
+            )
+        payload = self.model_dump(include=allowed, exclude_none=True)
+        return _SUBSHAPE_CRITERIA_ADAPTER.validate_python(payload)
+
+
 def _validate_direction(value: list[float] | None, field_name: str) -> None:
     """Reject zero vectors before semantic selection reaches FreeCAD."""
     if value is None:
@@ -929,7 +1151,7 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
     @mcp.tool()
     async def select_subshapes(
         object_name: str,
-        criteria: SubshapeSelectionCriteria,
+        criteria: SubshapeSelectionCriteriaInput,
         doc_name: str | None = None,
         detail_level: Literal["references", "summary", "full"] = "references",
         offset: int = 0,
@@ -955,7 +1177,9 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
 
         Args:
             object_name: Object whose Shape contains the target subshapes.
-            criteria: Typed face or edge selection criteria.
+            criteria: Flat typed criteria. Set ``kind`` to ``face``, ``edge``, or
+                ``vertex``; the schema exposes every supported filter and marks
+                its applicable topology kind in each field description.
             doc_name: Document containing the object. Uses active document if None.
             detail_level: ``references`` (default) returns only FaceN/EdgeN names;
                 ``summary`` adds compact evidence; ``full`` adds complete topology
@@ -970,14 +1194,12 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
             raise ValueError("offset must be non-negative")
         if not 1 <= page_size <= 200:
             raise ValueError("page_size must be between 1 and 200")
-        normalized = (
+        normalized_input = (
             criteria
-            if isinstance(
-                criteria,
-                (FaceSelectionCriteria, EdgeSelectionCriteria, VertexSelectionCriteria),
-            )
-            else _SUBSHAPE_CRITERIA_ADAPTER.validate_python(criteria)
+            if isinstance(criteria, SubshapeSelectionCriteriaInput)
+            else SubshapeSelectionCriteriaInput.model_validate(criteria)
         )
+        normalized = normalized_input.to_internal()
         bridge = await get_bridge()
         topology_kinds, topology_fields = _selection_topology_request(
             normalized, detail_level
@@ -1734,9 +1956,14 @@ else:
         code = f"""
 import Part
 
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
+requested_doc_name = {doc_name!r}
+doc = (
+    FreeCAD.ActiveDocument
+    if requested_doc_name is None
+    else FreeCAD.listDocuments().get(requested_doc_name)
+)
 if doc is None:
-    doc = FreeCAD.newDocument("Unnamed")
+    doc = FreeCAD.newDocument(requested_doc_name or "Unnamed")
 
 # Wrap in transaction for undo support
 doc.openTransaction("Create Line")
@@ -2652,9 +2879,14 @@ except Exception:
         code = f"""
 import Part
 
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
+requested_doc_name = {doc_name!r}
+doc = (
+    FreeCAD.ActiveDocument
+    if requested_doc_name is None
+    else FreeCAD.listDocuments().get(requested_doc_name)
+)
 if doc is None:
-    doc = FreeCAD.newDocument("Unnamed")
+    doc = FreeCAD.newDocument(requested_doc_name or "Unnamed")
 
 points = {points!r}
 if len(points) < 2:

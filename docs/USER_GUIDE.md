@@ -439,6 +439,11 @@ The canonical engineering policy is `.agents/skills/freecad-engineering/SKILL.md
 (or MCP resource `freecad://skills/freecad-engineering`). It classifies stock and
 process, covers milling/turning/sheet-metal strategies, and requires
 `validate_parametric_model` before the final response after geometry changes.
+For intentional edits of imported STEP/BRep geometry, pass
+`workflow="imported_brep_edit"`; import sources and results carrying
+`DirectEditOperation` plus `SourceObject` are then informational, while broken
+shapes remain errors. Keep the default `native_parametric` workflow for models
+expected to have native editable history.
 For drawing/sketch input, save every non-starred dimension but classify it as
 driving, verification, or unresolved. Pass the complete driving list as
 `required_dimension_names`; retain deterministic measured evidence for every
@@ -557,6 +562,9 @@ select_subshapes(
 ```
 
 The selector narrows candidates but does not replace geometric verification.
+Its wire schema is a single flat `criteria` object so clients can display every
+filter instead of a ref-only `unknown` union; fields that do not apply to the
+selected `kind` are rejected before FreeCAD execution.
 `criteria.limit` and `page_size` both accept up to 200 results. Cylinder-axis
 direction is undirected, and `axis_point` may be any point on the expected
 infinite axis.

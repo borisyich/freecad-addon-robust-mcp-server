@@ -147,9 +147,14 @@ def register_draft_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> 
 import Draft
 import os
 
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
+requested_doc_name = {doc_name!r}
+doc = (
+    FreeCAD.ActiveDocument
+    if requested_doc_name is None
+    else FreeCAD.listDocuments().get(requested_doc_name)
+)
 if doc is None:
-    doc = FreeCAD.newDocument("Unnamed")
+    doc = FreeCAD.newDocument(requested_doc_name or "Unnamed")
 
 previous_active_name = (
     FreeCAD.ActiveDocument.Name if FreeCAD.ActiveDocument is not None else None

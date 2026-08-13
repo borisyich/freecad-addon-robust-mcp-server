@@ -6,9 +6,22 @@ has excellent screenshot handling with view type detection.
 """
 
 from collections.abc import Awaitable, Callable
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from mcp.types import CallToolResult
+from pydantic import Field
+
+RGBColor = Annotated[
+    list[Annotated[float, Field(ge=0, le=255)]],
+    Field(
+        min_length=3,
+        max_length=3,
+        description=(
+            "RGB triplet. Use normalized 0.0..1.0 values or integer byte "
+            "values 0..255; byte values are normalized automatically."
+        ),
+    ),
+]
 
 VIEW_PROJECTION_CONTEXT: dict[str, dict[str, str | None]] = {
     "Front": {"projection_plane": "XZ", "normal_axis": "Y"},
@@ -21,6 +34,25 @@ VIEW_PROJECTION_CONTEXT: dict[str, dict[str, str | None]] = {
     "Current": {"projection_plane": None, "normal_axis": None},
     "FitAll": {"projection_plane": None, "normal_axis": None},
 }
+
+
+def _normalize_rgb_color(color: list[float]) -> list[float]:
+    """Accept normalized RGB or integer byte RGB and return FreeCAD values."""
+    if len(color) != 3:
+        raise ValueError("color must contain exactly three RGB values")
+    try:
+        values = [float(component) for component in color]
+    except (TypeError, ValueError) as exc:
+        raise ValueError("color components must be numeric") from exc
+    if any(component < 0 or component > 255 for component in values):
+        raise ValueError("color components must be between 0 and 255")
+    if all(component <= 1 for component in values):
+        return values
+    if any(not component.is_integer() for component in values):
+        raise ValueError(
+            "RGB values above 1 use byte form and must be integers from 0 to 255"
+        )
+    return [component / 255.0 for component in values]
 
 
 def register_view_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> None:
@@ -278,7 +310,7 @@ def register_view_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> N
         action: Literal["show", "clear"],
         object_name: str | None = None,
         face_names: list[str] | None = None,
-        color: list[float] | None = None,
+        color: RGBColor | None = None,
         select_faces: bool = True,
         clear_existing_selection: bool = True,
         doc_name: str | None = None,
@@ -294,7 +326,8 @@ def register_view_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> N
             action: ``show`` or ``clear``.
             object_name: Object to highlight; optional for ``clear`` to clear all.
             face_names: ``FaceN`` references required for ``show``.
-            color: Highlight RGB values in the range 0.0 to 1.0.
+            color: Highlight RGB as normalized 0.0..1.0 values or integer
+                0..255 byte values, normalized automatically.
             select_faces: Also add the faces to GUI selection.
             clear_existing_selection: Clear selection before applying/clearing.
             doc_name: Document containing the object.
@@ -306,11 +339,9 @@ def register_view_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> N
             raise ValueError(
                 "object_name and face_names are required for action='show'"
             )
-        highlight_color = color if color is not None else [1.0, 0.75, 0.0]
-        if len(highlight_color) != 3 or any(
-            component < 0 or component > 1 for component in highlight_color
-        ):
-            raise ValueError("color must contain three values between 0.0 and 1.0")
+        highlight_color = _normalize_rgb_color(
+            color if color is not None else [1.0, 0.75, 0.0]
+        )
         for face_name in face_names or []:
             if not (
                 face_name.startswith("Face")
@@ -424,7 +455,7 @@ else:
     async def set_visual_properties(
         object_name: str,
         visible: bool | None = None,
-        color: list[float] | None = None,
+        color: RGBColor | None = None,
         display_mode: str | None = None,
         doc_name: str | None = None,
     ) -> dict[str, Any]:
@@ -433,7 +464,8 @@ else:
         Args:
             object_name: Name of the object.
             visible: Optional visibility state.
-            color: Optional RGB values in the inclusive range 0.0 to 1.0.
+            color: Optional RGB as normalized 0.0..1.0 values or integer
+                0..255 byte values, normalized automatically.
             display_mode: Optional FreeCAD display mode such as ``Flat Lines``.
             doc_name: Document containing the object. Uses active document if None.
 
@@ -442,11 +474,7 @@ else:
         """
         if visible is None and color is None and display_mode is None:
             raise ValueError("Provide visible, color, or display_mode")
-        if color is not None:
-            if len(color) != 3 or any(
-                component < 0 or component > 1 for component in color
-            ):
-                raise ValueError("color must contain three values between 0.0 and 1.0")
+        normalized_color = _normalize_rgb_color(color) if color is not None else None
 
         bridge = await get_bridge()
         code = f"""
@@ -467,8 +495,8 @@ else:
             if {visible!r} is not None:
                 obj.ViewObject.Visibility = {visible!r}
                 applied["visible"] = bool(obj.ViewObject.Visibility)
-            if {color!r} is not None:
-                obj.ViewObject.ShapeColor = tuple({color!r})
+            if {normalized_color!r} is not None:
+                obj.ViewObject.ShapeColor = tuple({normalized_color!r})
                 applied["color"] = list(obj.ViewObject.ShapeColor)
             if {display_mode!r} is not None:
                 obj.ViewObject.DisplayMode = {display_mode!r}
@@ -858,7 +886,7 @@ doc = (
     else documents.get(requested_doc_name)
 )
 if doc is None:
-    doc = FreeCAD.newDocument("Unnamed")
+    doc = FreeCAD.newDocument(requested_doc_name or "Unnamed")
 
 target_doc_name = doc.Name
 part_path = {part_path!r}

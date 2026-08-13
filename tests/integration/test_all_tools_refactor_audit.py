@@ -449,6 +449,37 @@ def test_sketch_batch_runtime_schemas_expose_discriminated_operations() -> None:
         assert len(items["oneOf"]) > 1
 
 
+def test_select_subshapes_runtime_schema_exposes_flat_criteria_fields() -> None:
+    """Clients must not have to resolve a ref-only union to discover filters."""
+
+    async def schema() -> dict[str, Any]:
+        tool = next(
+            tool
+            for tool in await production_mcp.list_tools()
+            if tool.name == "select_subshapes"
+        )
+        return tool.inputSchema["properties"]["criteria"]
+
+    criteria = asyncio.run(schema())
+    assert criteria["type"] == "object"
+    assert "$ref" not in criteria
+    assert "oneOf" not in criteria
+    assert {
+        "kind",
+        "surface_types",
+        "normal",
+        "radius_min",
+        "radius_max",
+        "axis_direction",
+        "curve_types",
+        "direction",
+        "point_bounds",
+        "sort_by",
+        "sort_order",
+        "limit",
+    }.issubset(criteria["properties"])
+
+
 def test_sheet_metal_runtime_schema_exposes_every_feature_variant() -> None:
     """The MCP tools/list schema must preserve the compact discriminated API."""
 

@@ -1165,9 +1165,12 @@ async def import_file(
     file_path: str,
     doc_name: str | None = None,
 ) -> dict:
-    """Route STEP and STL imports through one MCP tool."""
+    """Import into an open named document or create that document on demand."""
     pass
 ```
+
+The result reports `document_created`. Imported objects are tagged with
+best-effort source-path/format provenance for workflow-aware final validation.
 
 ### Debugging Tools
 

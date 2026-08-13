@@ -96,6 +96,7 @@ def _parametric_response(
 
     result = {
         "informational": report.get("informational", True),
+        "workflow": report.get("workflow", "native_parametric"),
         "assessment": report.get("assessment"),
         "summary": report.get("summary"),
         "detail_level": detail_level,
@@ -435,6 +436,9 @@ else:
         include_sketch_constraints: bool = False,
         required_dimension_names: list[str] | None = None,
         target: SketchValidationTarget | None = None,
+        workflow: Literal["native_parametric", "imported_brep_edit"] = (
+            "native_parametric"
+        ),
         detail_level: Literal["summary", "structure", "full"] = "summary",
         finding_offset: int = 0,
         finding_limit: int = 20,
@@ -448,9 +452,12 @@ else:
         Spreadsheet parameter connectivity, required drawing-dimension usage,
         and actionable findings. Set ``target={"kind":"sketch","name":"..."}``
         to validate a sketch deliverable without treating the absence or state of
-        a Body, solid, or Tip as an error. Call it before the final user-facing
-        response and summarize significant findings instead of merely saying
-        "done".
+        a Body, solid, or Tip as an error. Set
+        ``workflow="imported_brep_edit"`` when intentionally editing imported
+        STEP/BRep geometry so provenance-marked sources and direct edits are
+        informational while invalid shapes remain errors. Call it before the
+        final user-facing response and summarize significant findings instead of
+        merely saying "done".
 
         The tool does not verify that the model matches a drawing or that the
         chosen manufacturing process is correct. Those remain separate visual,
@@ -480,6 +487,9 @@ else:
             target: Optional sketch validation target. Omit it for the existing
                 whole-model/final-solid diagnostic. For a sketch-only deliverable,
                 pass ``{"kind":"sketch","name":"Sketch_FlatPattern"}``.
+            workflow: ``native_parametric`` keeps static BRep snapshots as
+                warnings. ``imported_brep_edit`` recognizes import provenance and
+                ``DirectEditOperation``/``SourceObject`` results as intentional.
             detail_level: ``summary`` (default) returns completion-critical counts,
                 dimension influence, and a page of findings. ``structure`` adds
                 Bodies, sketches, and Spreadsheet structure. ``full`` returns the
@@ -541,6 +551,7 @@ else:
             include_sketch_constraints=include_sketch_constraints,
             required_dimension_names=normalized_required_dimensions,
             validation_target=normalized_target,
+            workflow=workflow,
         )
         result = await bridge.execute_python(code)
         if result.success and result.result:
@@ -553,6 +564,7 @@ else:
         error = result.error_traceback or "Parametric model validation failed"
         return {
             "informational": True,
+            "workflow": workflow,
             "assessment": "unavailable",
             "summary": error,
             "validation_target": normalized_target or {"kind": "model"},

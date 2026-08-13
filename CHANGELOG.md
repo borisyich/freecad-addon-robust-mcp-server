@@ -253,6 +253,15 @@
   imported `Part::Feature` shapes.
 - Aligned `select_subshapes.page_size` with `criteria.limit`; both now allow up
   to 200 matches.
+- Flattened the public `select_subshapes.criteria` schema so MCP clients expose
+  all face/edge/vertex filters instead of rendering ref-only union branches as
+  `unknown`.
+- Added `validate_parametric_model(workflow="imported_brep_edit")`, import/direct-
+  edit provenance findings, and error-level invalid standalone-shape detection.
+- Made `import` and root object-creation tools create a missing explicitly named
+  target document, and added best-effort import provenance metadata.
+- Accepted both normalized and integer-byte RGB triplets with schema-level length
+  and range bounds.
 
 This project uses **component-specific versioning**. Each component has its own
 release notes and version history.

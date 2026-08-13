@@ -129,6 +129,44 @@ def _strip_schema_titles(value: Any) -> Any:
     return value
 
 
+def _inline_direct_property_refs(schema: dict[str, Any]) -> dict[str, Any]:
+    """Inline model-valued tool arguments that some MCP clients show as unknown.
+
+    Pydantic normally emits a direct ``$ref`` for a BaseModel parameter. Several
+    tool-declaration renderers do not resolve that reference. Moving the
+    referenced object schema into the property preserves validation semantics
+    and makes fields visible without expanding nested shared definitions.
+    """
+    definitions = schema.get("$defs")
+    properties = schema.get("properties")
+    if not isinstance(definitions, dict) or not isinstance(properties, dict):
+        return schema
+    inlined_names: set[str] = set()
+    for property_schema in properties.values():
+        if not isinstance(property_schema, dict):
+            continue
+        reference = property_schema.get("$ref")
+        prefix = "#/$defs/"
+        if not isinstance(reference, str) or not reference.startswith(prefix):
+            continue
+        definition_name = reference[len(prefix) :]
+        definition = definitions.get(definition_name)
+        if not isinstance(definition, dict):
+            continue
+        siblings = {
+            key: value for key, value in property_schema.items() if key != "$ref"
+        }
+        property_schema.clear()
+        property_schema.update(definition)
+        property_schema.update(siblings)
+        inlined_names.add(definition_name)
+    for definition_name in inlined_names:
+        definitions.pop(definition_name, None)
+    if not definitions:
+        schema.pop("$defs", None)
+    return schema
+
+
 # Global bridge instance (initialized on startup via lifespan)
 _bridge: Any = None
 
@@ -426,7 +464,9 @@ class FreecadFastMCP(FastMCP):
         """List tools after removing context-heavy cosmetic schema titles."""
         tools = await super().list_tools()
         for tool in tools:
-            tool.inputSchema = _strip_schema_titles(tool.inputSchema)
+            tool.inputSchema = _inline_direct_property_refs(
+                _strip_schema_titles(tool.inputSchema)
+            )
             if getattr(tool, "outputSchema", None) is not None:
                 tool.outputSchema = _strip_schema_titles(tool.outputSchema)
         logger.info("MCP tools/list completed: count=%d", len(tools))

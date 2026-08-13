@@ -8,11 +8,14 @@ PartDesign history rather than only checking one-shot tool responses.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
 from .test_all_tools_refactor_audit import _call, _fresh, live_tools  # noqa: F401
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 pytestmark = [pytest.mark.integration, pytest.mark.slow]
 
@@ -123,6 +126,151 @@ _result_ = {"cut_valid": cut.Shape.isValid(), "volume": cut.Shape.Volume}
     assert {item["classification"] for item in report["uncontained_shape_objects"]} == {
         "parametric_part_feature"
     }
+
+
+@pytest.mark.asyncio
+async def test_imported_brep_workflow_recognizes_move_faces_provenance(
+    live_tools: dict[str, Any],  # noqa: F811 - imported pytest fixture
+) -> None:
+    """Expected import/direct-edit snapshots should be info, not review noise."""
+    tools = live_tools
+    doc_name = "McpAuditImportedBrepValidation"
+    await _fresh(tools, doc_name)
+    await _call(
+        tools,
+        "execute_python",
+        code="""
+import FreeCAD
+import Part
+doc = FreeCAD.ActiveDocument
+source = doc.addObject("Part::Feature", "ImportedSource")
+source.Shape = Part.makeBox(20, 10, 5)
+source.addProperty("App::PropertyString", "ImportSourcePath", "MCP Import")
+source.ImportSourcePath = "fixture.step"
+source.addProperty("App::PropertyString", "ImportSourceFormat", "MCP Import")
+source.ImportSourceFormat = "step"
+doc.recompute()
+_result_ = source.Shape.isValid()
+""",
+    )
+    top = await _call(
+        tools,
+        "select_subshapes",
+        object_name="ImportedSource",
+        doc_name=doc_name,
+        criteria={
+            "kind": "face",
+            "surface_types": ["Plane"],
+            "normal": [0, 0, 1],
+            "sort_by": "area",
+            "sort_order": "desc",
+            "limit": 1,
+        },
+    )
+    edited = await _call(
+        tools,
+        "move_faces",
+        object_name="ImportedSource",
+        face_names=top["references"],
+        distance=2.0,
+        operation="add",
+        result_name="MovedFaces",
+        doc_name=doc_name,
+    )
+    assert edited["direct_edit"] is True
+
+    native_report = await _call(
+        tools,
+        "validate_parametric_model",
+        doc_name=doc_name,
+        detail_level="full",
+    )
+    assert native_report["assessment"] == "review_recommended"
+
+    imported_report = await _call(
+        tools,
+        "validate_parametric_model",
+        doc_name=doc_name,
+        workflow="imported_brep_edit",
+        detail_level="full",
+    )
+    assert imported_report["assessment"] == "healthy", imported_report
+    assert {
+        (item["severity"], item["category"]) for item in imported_report["findings"]
+    } == {
+        ("info", "imported_brep_source"),
+        ("info", "intentional_direct_edit"),
+    }
+
+
+@pytest.mark.asyncio
+async def test_import_creates_missing_named_document(
+    live_tools: dict[str, Any],  # noqa: F811 - imported pytest fixture
+    tmp_path: Path,
+) -> None:
+    """An explicit import target name should not require create_document first."""
+    tools = live_tools
+    source_doc = "McpAuditImportSource"
+    target_doc = "McpAuditImportTarget"
+    step_path = tmp_path / "import_contract.step"
+    await _fresh(tools, source_doc)
+    await _call(
+        tools,
+        "execute_python",
+        code="""
+import FreeCAD
+doc = FreeCAD.ActiveDocument
+box = doc.addObject("Part::Box", "SourceBox")
+box.Length = 12
+box.Width = 8
+box.Height = 4
+doc.recompute()
+_result_ = box.Shape.isValid()
+""",
+    )
+    await _call(
+        tools,
+        "export",
+        file_format="step",
+        file_path=str(step_path),
+        object_names=["SourceBox"],
+        doc_name=source_doc,
+    )
+    await _call(tools, "close_document", doc_name=source_doc)
+    await _call(
+        tools,
+        "execute_python",
+        code=f"""
+import FreeCAD
+if {target_doc!r} in FreeCAD.listDocuments():
+    FreeCAD.closeDocument({target_doc!r})
+_result_ = True
+""",
+    )
+
+    imported = await _call(
+        tools,
+        "import",
+        file_format="step",
+        file_path=str(step_path),
+        doc_name=target_doc,
+    )
+
+    assert imported["document"] == target_doc
+    assert imported["document_created"] is True
+    assert imported["objects"]
+    report = await _call(
+        tools,
+        "validate_parametric_model",
+        doc_name=target_doc,
+        workflow="imported_brep_edit",
+        detail_level="full",
+    )
+    assert report["assessment"] == "healthy", report
+    assert any(
+        item["category"] == "imported_brep_source" and item["severity"] == "info"
+        for item in report["findings"]
+    )
 
 
 @pytest.mark.asyncio

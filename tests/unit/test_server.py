@@ -713,6 +713,6 @@ class TestMcpInstructions:
         assert '"title":' not in payload
         assert description_bytes < 10_000
         assert largest_tool_bytes < 8_000
-        # Eight dedicated measurement schemas trade a modest registry increase
-        # for substantially clearer agent calls. Keep the 133-tool payload bounded.
-        assert payload_bytes < 106_000
+        # Dedicated measurement schemas and the flattened semantic selector trade
+        # a modest registry increase for declarations that remain agent-readable.
+        assert payload_bytes < 107_000

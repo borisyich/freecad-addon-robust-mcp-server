@@ -445,7 +445,10 @@ class TestObjectTools:
         assert "matches" not in result
 
     def test_subshape_centroid_field_is_explicit_and_legacy_center_is_accepted(self):
-        from freecad_mcp.tools.objects import FaceSelectionCriteria
+        from freecad_mcp.tools.objects import (
+            FaceSelectionCriteria,
+            SubshapeSelectionCriteriaInput,
+        )
 
         criteria = FaceSelectionCriteria.model_validate(
             {"kind": "face", "center": {"z_min": 5.0}}
@@ -456,6 +459,12 @@ class TestObjectTools:
         dumped = criteria.model_dump(exclude_none=True)
         assert "centroid_bounds" in dumped
         assert "center" not in dumped
+
+        vertex = SubshapeSelectionCriteriaInput.model_validate(
+            {"kind": "vertex", "center": {"x_min": 1.0}}
+        ).to_internal()
+        assert vertex.point_bounds is not None
+        assert vertex.point_bounds.x_min == 1.0
 
     @pytest.mark.asyncio
     async def test_select_subshapes_rejects_zero_direction(

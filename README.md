@@ -531,7 +531,7 @@ endpoints, radius, arc side, datum, and the dimension chain are rechecked.
 | Tool     | Description                                      | Mode |
 | -------- | ------------------------------------------------ | ---- |
 | `export` | Export to STEP, IGES, STL, 3MF, or OBJ          | All  |
-| `import` | Import STEP or STL into a FreeCAD document      | All  |
+| `import` | Import STEP/STL; create a missing named target document | All  |
 
 #### Macro Management (6 tools)
 

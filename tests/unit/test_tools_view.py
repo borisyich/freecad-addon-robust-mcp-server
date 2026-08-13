@@ -455,9 +455,29 @@ class TestViewTools:
         """Empty requests and invalid RGB values should not touch FreeCAD."""
         with pytest.raises(ValueError, match="Provide visible"):
             await register_tools["set_visual_properties"]("Pad")
-        with pytest.raises(ValueError, match="three values"):
+        with pytest.raises(ValueError, match="must be integers"):
             await register_tools["set_visual_properties"]("Pad", color=[1.2, 0, 0])
         mock_bridge.execute_python.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_visual_colors_accept_and_normalize_byte_rgb(
+        self, register_tools, mock_bridge
+    ):
+        """Common 0..255 RGB input should reach FreeCAD as normalized floats."""
+        mock_bridge.execute_python = AsyncMock(
+            return_value=ExecutionResult(
+                success=True,
+                result={"success": True, "object_name": "Pad", "applied": {}},
+                stdout="",
+                stderr="",
+                execution_time_ms=1.0,
+            )
+        )
+
+        await register_tools["set_visual_properties"]("Pad", color=[255, 0, 128])
+
+        generated_code = mock_bridge.execute_python.await_args.args[0]
+        assert "[1.0, 0.0, 0.5019607843137255]" in generated_code
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("action", ["undo", "redo", "status"])

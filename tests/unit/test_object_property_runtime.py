@@ -22,9 +22,7 @@ def test_object_property_runtime_resolves_links_and_sublinks() -> None:
     exec(OBJECT_PROPERTY_COERCION_RUNTIME, namespace)
     coerce = namespace["_coerce_object_property_value"]
 
-    link_obj = SimpleNamespace(
-        getTypeIdOfProperty=lambda _name: "App::PropertyLink"
-    )
+    link_obj = SimpleNamespace(getTypeIdOfProperty=lambda _name: "App::PropertyLink")
     sublink_obj = SimpleNamespace(
         getTypeIdOfProperty=lambda _name: "App::PropertyLinkSub"
     )
@@ -85,6 +83,35 @@ def test_hole_thread_profile_change_requires_size_and_applies_it_after_type() ->
     )
     assert hole.ThreadType == "ISOMetricFineProfile"
     assert hole.ThreadSize == "M12x1.25"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bridge_class", [EmbeddedBridge, XmlRpcBridge, SocketBridge])
+async def test_create_object_creates_missing_named_document(bridge_class) -> None:
+    """Root creation tools should honor a new explicit document name."""
+    bridge = bridge_class()
+    bridge.execute_python = AsyncMock(
+        return_value=ExecutionResult(
+            success=True,
+            result={
+                "name": "Box",
+                "label": "Box",
+                "type_id": "Part::Box",
+                "visibility": True,
+                "children": [],
+                "parents": [],
+            },
+            stdout="",
+            stderr="",
+            execution_time_ms=1.0,
+        )
+    )
+
+    await bridge.create_object("Part::Box", "Box", doc_name="NewModel")
+
+    code = bridge.execute_python.await_args.args[0]
+    assert "FreeCAD.listDocuments().get(requested_doc_name)" in code
+    assert 'FreeCAD.newDocument(requested_doc_name or "Unnamed")' in code
 
 
 @pytest.mark.asyncio

@@ -375,6 +375,7 @@ class TestValidationTools:
             recompute=True,
             include_sketch_constraints=True,
             required_dimension_names=["Width", "HoleDiameter"],
+            workflow="imported_brep_edit",
             detail_level="full",
         )
 
@@ -385,6 +386,7 @@ class TestValidationTools:
         assert "Bracket" in generated_code
         assert "if True:" in generated_code
         assert "['Width', 'HoleDiameter']" in generated_code
+        assert "validation_workflow = 'imported_brep_edit'" in generated_code
 
     @pytest.mark.asyncio
     async def test_validate_parametric_model_accepts_sketch_target(

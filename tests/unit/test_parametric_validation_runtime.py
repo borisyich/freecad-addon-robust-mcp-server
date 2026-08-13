@@ -99,6 +99,7 @@ def test_generated_parametric_validation_code_compiles() -> None:
         recompute=True,
         include_sketch_constraints=False,
         required_dimension_names=["Width", "Height"],
+        workflow="imported_brep_edit",
     )
 
     compile(code, "<parametric-validation>", "exec")
@@ -112,6 +113,8 @@ def test_generated_parametric_validation_code_compiles() -> None:
     assert "_analyze_sketch" in code
     assert "__REQUIRED_DIMENSION_NAMES__" not in code
     assert "__VALIDATION_TARGET__" not in code
+    assert "__VALIDATION_WORKFLOW__" not in code
+    assert "validation_workflow = 'imported_brep_edit'" in code
     assert "required_dimension_missing" in code
     assert "unused_spreadsheet_parameter" in code
 
@@ -889,3 +892,67 @@ def test_native_part_boolean_chain_is_healthy_and_static_import_is_warned(
     assert [item["category"] for item in imported_report["findings"]] == [
         "direct_shape_feature"
     ]
+
+    edited = part_object("MovedFaces", "Part::Feature")
+    edited.DirectEditOperation = "move_faces:add"
+    edited.SourceObject = imported
+    doc.Objects = [imported, edited]
+    direct_edit_namespace: dict[str, object] = {}
+    exec(
+        build_parametric_validation_code(
+            doc_name=doc.Name,
+            recompute=True,
+            include_sketch_constraints=False,
+            workflow="imported_brep_edit",
+        ),
+        direct_edit_namespace,
+    )
+    direct_edit_report = direct_edit_namespace["_result_"]
+    assert direct_edit_report["workflow"] == "imported_brep_edit"
+    assert direct_edit_report["assessment"] == "healthy"
+    assert {
+        (item["severity"], item["category"]) for item in direct_edit_report["findings"]
+    } == {
+        ("info", "imported_brep_source"),
+        ("info", "intentional_direct_edit"),
+    }
+
+    edited.Shape.isValid = lambda: False  # noqa: N802
+    invalid_namespace: dict[str, object] = {}
+    exec(
+        build_parametric_validation_code(
+            doc_name=doc.Name,
+            recompute=True,
+            include_sketch_constraints=False,
+            workflow="imported_brep_edit",
+        ),
+        invalid_namespace,
+    )
+    invalid_report = invalid_namespace["_result_"]
+    assert invalid_report["assessment"] == "invalid_or_broken"
+    assert any(
+        item["severity"] == "error"
+        and item["category"] == "uncontained_shape_invalid"
+        and item["object"] == "MovedFaces"
+        for item in invalid_report["findings"]
+    )
+
+    edited.Shape.isValid = lambda: True  # noqa: N802
+    edited.Shape.Solids = []
+    empty_result_namespace: dict[str, object] = {}
+    exec(
+        build_parametric_validation_code(
+            doc_name=doc.Name,
+            recompute=True,
+            include_sketch_constraints=False,
+            workflow="imported_brep_edit",
+        ),
+        empty_result_namespace,
+    )
+    empty_result_report = empty_result_namespace["_result_"]
+    assert empty_result_report["assessment"] == "invalid_or_broken"
+    assert any(
+        item["category"] == "uncontained_shape_invalid"
+        and item["object"] == "MovedFaces"
+        for item in empty_result_report["findings"]
+    )

@@ -700,9 +700,14 @@ _result_ = objects
         """Create a new object."""
         properties = properties or {}
         code = f"""
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
+requested_doc_name = {doc_name!r}
+doc = (
+    FreeCAD.ActiveDocument
+    if requested_doc_name is None
+    else FreeCAD.listDocuments().get(requested_doc_name)
+)
 if doc is None:
-    raise ValueError("No document found")
+    doc = FreeCAD.newDocument(requested_doc_name or "Unnamed")
 
 # Wrap in transaction for undo support
 doc.openTransaction("Create Object")

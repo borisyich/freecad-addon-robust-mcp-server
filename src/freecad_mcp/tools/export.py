@@ -131,19 +131,40 @@ import os
 if not os.path.exists({file_path!r}):
     raise FileNotFoundError(f"File not found: {file_path!r}")
 
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
+requested_doc_name = {doc_name!r}
+doc = (
+    FreeCAD.ActiveDocument
+    if requested_doc_name is None
+    else FreeCAD.listDocuments().get(requested_doc_name)
+)
+document_created = doc is None
 if doc is None:
-    doc = FreeCAD.newDocument("Imported")
+    doc = FreeCAD.newDocument(requested_doc_name or "Imported")
 
 before_count = len(doc.Objects)
 {module_name}.insert({file_path!r}, doc.Name)
 doc.recompute()
-new_objects = [obj.Name for obj in doc.Objects[before_count:]]
+new_object_refs = list(doc.Objects[before_count:])
+for obj in new_object_refs:
+    if not hasattr(obj, "addProperty"):
+        continue
+    try:
+        if "ImportSourcePath" not in getattr(obj, "PropertiesList", []):
+            obj.addProperty("App::PropertyString", "ImportSourcePath", "MCP Import")
+        obj.ImportSourcePath = os.path.abspath({file_path!r})
+        if "ImportSourceFormat" not in getattr(obj, "PropertiesList", []):
+            obj.addProperty("App::PropertyString", "ImportSourceFormat", "MCP Import")
+        obj.ImportSourceFormat = {file_format!r}
+    except Exception:
+        # Import success must not depend on optional provenance metadata.
+        pass
+new_objects = [obj.Name for obj in new_object_refs]
 
 _result_ = {{
     "success": True,
     "format": {file_format!r},
     "document": doc.Name,
+    "document_created": document_created,
     "objects": new_objects,
 }}
 """
@@ -175,9 +196,7 @@ def register_export_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
         Returns:
             Export status, normalized format, output path, and object count.
         """
-        normalized_format = _normalise_format(
-            file_format, _EXPORT_FORMATS, "export"
-        )
+        normalized_format = _normalise_format(file_format, _EXPORT_FORMATS, "export")
         if normalized_format in _MESH_EXPORT_FORMATS and mesh_tolerance <= 0:
             raise ValueError("mesh_tolerance must be positive for mesh exports")
 
@@ -211,7 +230,7 @@ def register_export_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
         file_path: str,
         doc_name: str | None = None,
     ) -> dict[str, Any]:
-        """Import a STEP or STL file into FreeCAD.
+        """Import STEP/STL, creating the named target document when missing.
 
         The MCP tool name is ``import``. The Python implementation uses the name
         ``import_file`` because ``import`` is a Python keyword.
@@ -219,16 +238,14 @@ def register_export_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
         Args:
             file_format: Source format: ``step`` or ``stl``.
             file_path: Input file path.
-            doc_name: Existing target document. If omitted and no document is active,
-                creates a document named ``Imported``.
+            doc_name: Target document. Reuses it when open and creates it when
+                missing. If omitted and no document is active, creates ``Imported``.
 
         Returns:
-            Import status, normalized format, target document, and names of all
-            imported objects.
+            Import status, normalized format, target document, whether it was
+            created, and names of all imported objects.
         """
-        normalized_format = _normalise_format(
-            file_format, _IMPORT_FORMATS, "import"
-        )
+        normalized_format = _normalise_format(file_format, _IMPORT_FORMATS, "import")
         code = _build_import_code(normalized_format, file_path, doc_name)
 
         bridge = await get_bridge()

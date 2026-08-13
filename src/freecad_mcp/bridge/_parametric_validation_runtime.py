@@ -73,6 +73,7 @@ def build_parametric_validation_code(
     include_sketch_constraints: bool,
     required_dimension_names: list[str] | None = None,
     validation_target: dict[str, str] | None = None,
+    workflow: str = "native_parametric",
 ) -> str:
     """Build a self-contained script executed inside the FreeCAD process.
 
@@ -91,6 +92,7 @@ required_dimension_names = __REQUIRED_DIMENSION_NAMES__
 validation_target = __VALIDATION_TARGET__ or {"kind": "model"}
 validation_target_kind = validation_target.get("kind", "model")
 validation_target_name = validation_target.get("name")
+validation_workflow = __VALIDATION_WORKFLOW__
 sheet_metal_proxy_geometry_properties = __SHEET_METAL_PROXY_PROPERTIES__
 
 
@@ -1106,6 +1108,7 @@ else:
 if doc is None:
     _result_ = {
         "informational": True,
+        "workflow": validation_workflow,
         "validation_target": validation_target,
         "target_sketch": None,
         "document": None,
@@ -1197,9 +1200,17 @@ else:
         if type_id == "PartDesign::Body" or getattr(obj, "Name", "") in body_member_names:
             continue
         shape = _shape_summary(obj)
-        if not shape["present"] or shape["is_null"] is True:
+        direct_edit_operation = getattr(obj, "DirectEditOperation", None)
+        import_source_path = getattr(obj, "ImportSourcePath", None)
+        tracked_brep = bool(
+            type_id in {"Part::Feature", "Part::FeaturePython"}
+            and (direct_edit_operation or import_source_path)
+        )
+        if not shape["present"] and not tracked_brep:
             continue
-        if (shape["solid_count"] or 0) <= 0:
+        if shape["is_null"] is True and not tracked_brep:
+            continue
+        if (shape["solid_count"] or 0) <= 0 and not tracked_brep:
             continue
         uncontained_shape_objects.append(
             {
@@ -1210,6 +1221,18 @@ else:
                 "state": _state_values(obj),
                 "shape": shape,
                 "expressions": _expression_summary(obj),
+                "direct_edit_operation": (
+                    str(direct_edit_operation) if direct_edit_operation else None
+                ),
+                "source_object": _object_ref(getattr(obj, "SourceObject", None)),
+                "import_source_path": (
+                    str(import_source_path) if import_source_path else None
+                ),
+                "import_source_format": (
+                    str(getattr(obj, "ImportSourceFormat", None))
+                    if getattr(obj, "ImportSourceFormat", None)
+                    else None
+                ),
                 "classification": (
                     "direct_shape_feature"
                     if type_id in {"Part::Feature", "Part::FeaturePython"}
@@ -1652,9 +1675,62 @@ else:
                 }
             )
 
+    direct_edit_source_names = {
+        item.get("source_object", {}).get("name")
+        for item in uncontained_shape_objects
+        if item.get("direct_edit_operation") and item.get("source_object")
+    }
     for obj in uncontained_shape_objects if validation_target_kind == "model" else []:
+        shape = obj.get("shape", {})
+        direct_edit_broken = bool(
+            obj.get("direct_edit_operation")
+            and (
+                not shape.get("present")
+                or shape.get("is_null") is True
+                or (shape.get("solid_count") or 0) <= 0
+            )
+        )
+        if (
+            shape.get("valid") is False
+            or _state_has_error(obj.get("state", []))
+            or direct_edit_broken
+        ):
+            findings.append(
+                {
+                    "severity": "error",
+                    "category": "uncontained_shape_invalid",
+                    "object": obj["name"],
+                    "message": "Solid outside a Body has an invalid Shape or error state.",
+                }
+            )
+            continue
         if obj["classification"] == "parametric_part_feature":
             continue
+        if validation_workflow == "imported_brep_edit":
+            if obj.get("direct_edit_operation") and obj.get("source_object"):
+                findings.append(
+                    {
+                        "severity": "info",
+                        "category": "intentional_direct_edit",
+                        "object": obj["name"],
+                        "message": (
+                            f"Intentional imported-BRep operation "
+                            f"{obj['direct_edit_operation']!r} references source "
+                            f"{obj['source_object'].get('name')!r}."
+                        ),
+                    }
+                )
+                continue
+            if obj["name"] in direct_edit_source_names or obj.get("import_source_path"):
+                findings.append(
+                    {
+                        "severity": "info",
+                        "category": "imported_brep_source",
+                        "object": obj["name"],
+                        "message": "Imported BRep source is intentional in this workflow.",
+                    }
+                )
+                continue
         findings.append(
             {
                 "severity": "warning",
@@ -1686,7 +1762,7 @@ else:
             f"Document '{doc.Name}': {len(bodies)} PartDesign Body/Bodies, "
             f"{len(all_sketches)} sketch(es), "
             f"{len(uncontained_shape_objects)} solid object(s) outside Bodies; "
-            f"assessment={assessment}."
+            f"workflow={validation_workflow}; assessment={assessment}."
         )
 
     driving_status = (
@@ -1695,6 +1771,7 @@ else:
 
     _result_ = {
         "informational": True,
+        "workflow": validation_workflow,
         "assessment": assessment,
         "summary": summary,
         "validation_target": validation_target,
@@ -1794,6 +1871,7 @@ else:
         .replace("__INCLUDE_CONSTRAINTS__", repr(include_sketch_constraints))
         .replace("__REQUIRED_DIMENSION_NAMES__", repr(required_dimension_names or []))
         .replace("__VALIDATION_TARGET__", repr(validation_target))
+        .replace("__VALIDATION_WORKFLOW__", repr(workflow))
         .replace(
             "__SHEET_METAL_PROXY_PROPERTIES__",
             repr(
