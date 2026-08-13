@@ -576,9 +576,7 @@ class TestPartDesignTools:
                 result={
                     "name": "Sketch",
                     "operations_applied": 1,
-                    "operation_results": [
-                        {"op": "horizontal", "constraint_index": 0}
-                    ],
+                    "operation_results": [{"op": "horizontal", "constraint_index": 0}],
                     "sketch_status": {
                         "geometry_count": 500,
                         "constraint_count": 500,
@@ -928,6 +926,43 @@ class TestPartDesignTools:
         assert "sketch.getGlobalPlacement().Rotation.multVec" in generated_code
 
     @pytest.mark.asyncio
+    async def test_pad_sketch_uses_shared_end_condition_contract(
+        self, register_tools, mock_bridge
+    ):
+        mock_bridge.execute_python = AsyncMock(
+            return_value=ExecutionResult(
+                success=True,
+                result={
+                    "name": "Pad",
+                    "validated": True,
+                    "added_volume": 10.0,
+                    "type": "ThroughAll",
+                    "native_type": "UpToLast",
+                },
+                stdout="",
+                stderr="",
+                execution_time_ms=1.0,
+            )
+        )
+
+        result = await register_tools["pad_sketch"]("Sketch", 10, type="ThroughAll")
+
+        assert result["native_type"] == "UpToLast"
+        code = mock_bridge.execute_python.await_args.args[0]
+        assert "_configure_partdesign_end_condition" in code
+        assert "'ThroughAll'" in code
+        assert "'UpToLast'" in code
+
+        await register_tools["pad_sketch"](
+            "Sketch", 10, type="UpToFace", up_to_face="Target.Face2"
+        )
+        code = mock_bridge.execute_python.await_args.args[0]
+        assert "'Target.Face2'" in code
+
+        with pytest.raises(ValueError, match="requires up_to_face"):
+            await register_tools["pad_sketch"]("Sketch", 10, type="UpToFace")
+
+    @pytest.mark.asyncio
     async def test_pad_sketch_rejects_missing_additive_evidence(
         self, register_tools, mock_bridge
     ):
@@ -1068,7 +1103,40 @@ class TestPartDesignTools:
         assert "getGlobalPlacement" in generated_code
         assert "_validate_additive_feature(rev, body, base_shape)" in generated_code
         assert "_cleanup_failed_partdesign_feature" in generated_code
+        assert "_configure_partdesign_end_condition" in generated_code
         mock_bridge.execute_python.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_revolution_and_groove_share_angular_end_conditions(
+        self, register_tools, mock_bridge
+    ):
+        mock_bridge.execute_python = AsyncMock(
+            return_value=ExecutionResult(
+                success=True,
+                result={"name": "Feature", "validated": True, "added_volume": 1.0},
+                stdout="",
+                stderr="",
+                execution_time_ms=1.0,
+            )
+        )
+
+        await register_tools["revolution_sketch"]("RevolveSketch", type="ThroughAll")
+        revolution_code = mock_bridge.execute_python.await_args.args[0]
+        assert "'UpToLast'" in revolution_code
+
+        mock_bridge.execute_python.return_value = ExecutionResult(
+            success=True,
+            result={"name": "Groove", "validated": True, "removed_volume": 1.0},
+            stdout="",
+            stderr="",
+            execution_time_ms=1.0,
+        )
+        await register_tools["groove_sketch"](
+            "GrooveSketch", type="UpToFace", up_to_face="BodyFeature.Face4"
+        )
+        groove_code = mock_bridge.execute_python.await_args.args[0]
+        assert "'UpToFace'" in groove_code
+        assert "'BodyFeature.Face4'" in groove_code
 
     @pytest.mark.asyncio
     async def test_groove_sketch(self, register_tools, mock_bridge):
@@ -2085,7 +2153,7 @@ async def test_pocket_sketch_exposes_direction_and_explicit_base() -> None:
     assert "_resolve_partdesign_base_feature" in code
     assert "'LinearPatternBands'" in code
     assert "requested_direction = 'reversed'" in code
-    assert 'else [requested_direction]' in code
+    assert "else [requested_direction]" in code
     assert 'pocket.Reversed = candidate_direction == "normal"' in code
     assert "sketch_normal if pocket.Reversed else sketch_normal * -1.0" in code
     assert '"volume_diagnostics"' in code
@@ -2097,11 +2165,8 @@ async def test_pocket_sketch_exposes_direction_and_explicit_base() -> None:
         up_to_face="Pad.Face3",
     )
     up_to_face_code = bridge.execute_python.await_args.args[0]
-    assert (
-        "up_to_object_name, up_to_element = 'Pad.Face3'.rsplit(\".\", 1)"
-        in up_to_face_code
-    )
-    assert "pocket.UpToFace = up_to_face_reference" in up_to_face_code
+    assert "_configure_partdesign_end_condition" in up_to_face_code
+    assert "'Pad.Face3'" in up_to_face_code
 
     with pytest.raises(ValueError, match="requires up_to_face"):
         await registered["pocket_sketch"]("PocketSketch", 12, type="UpToFace")

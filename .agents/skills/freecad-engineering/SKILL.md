@@ -485,7 +485,61 @@ Read [references/drawing-reconstruction.md](references/drawing-reconstruction.md
 - Avoid appending compensating geometry or creating a replacement Body merely to
   hide a failed edit.
 - Recompute and inspect downstream features after every upstream change.
-- Preserve unrelated dimensions and functional interfaces.
+- Treat existing functional features and interfaces as invariants unless the change request explicitly targets them.
+
+### Preserve functional geometry when choosing what to move
+
+When a requested dimension can be achieved by modifying either of two
+boundaries, do not choose the boundary only from geometric convenience.
+
+1. Identify the surfaces/features that define the current dimension.
+2. Classify each side as a functional/interface feature or as ordinary
+   structural/envelope geometry.
+3. Preserve functional geometry unless the request explicitly requires changing
+   it. Functional geometry includes threads, fits, bearing or seal seats, mating
+   faces, hole axes/diameters, splines/teeth, and other interfaces to another
+   component.
+4. Prefer changing the less functionally constrained boundary and make the
+   smallest semantic change to the existing model.
+5. Do not destroy and reconstruct a complex accepted feature merely because
+   rebuilding it makes the requested numeric dimension easier to obtain.
+
+Example: if the wall around an existing threaded bore must increase from
+10 mm to 15 mm and the thread itself is not requested to change, preserve the
+thread geometry and increase the outer boss diameter/radius. Do not fill the
+existing thread and cut a smaller replacement thread.
+
+### Preserve feature attachment and transition geometry
+
+When modifying an existing local feature such as a boss, lug, rib, flange,
+pad, pocket, or nozzle, do not treat the bounds of one selected face as the
+bounds of the whole feature.
+
+Before editing:
+
+1. Inspect the faces adjacent to the primary target face and follow the
+   attachment side at least one topology hop toward the parent body.
+
+2. Identify transition geometry connecting the feature to its parent,
+   including fillets, chamfers, blends, lofted/BSpline transitions, tangent
+   faces, and intersecting support surfaces.
+
+3. Treat those transition faces as part of the feature's design intent.
+   If the primary feature dimension changes, preserve or reconstruct the
+   original transition type and dimensions unless the request explicitly
+   changes them.
+
+4. For an additive enlargement, do not stop new material at the trimmed
+   boundary of the original analytical face when that face terminates in a
+   blend or other transition. Extend the primary geometry until it intersects
+   the parent/support geometry, then recreate the required transition.
+
+5. Do not introduce a new sharp junction where the original feature joined
+   its parent through a fillet, chamfer, tangent blend, or smooth transition.
+
+6. Verify the edited attachment with local topology and a section through the
+   feature axis. Check that the feature reaches the parent body and that the
+   expected transition/continuity is present.
 
 ## 7. Validate during work without over-constraining the workflow
 

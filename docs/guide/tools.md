@@ -84,7 +84,7 @@ that behavior so a missing target can receive imported STEP/STL data.
 | `common_all` | Find the common (intersection) of multiple shapes. |
 | `make_wire` | Create a wire (polyline) from a list of points. |
 | `make_face` | Create a face from a closed wire. |
-| `extrude_shape` | Extrude a wire or face along a direction vector. |
+| `extrude_shape` | Extrude a wire or face by a fixed vector; use `pad_sketch` for target-aware end conditions. |
 | `revolve_shape` | Revolve a wire or face around an axis. |
 | `part_loft` | Create a loft (transition shape) between multiple profiles. |
 | `part_sweep` | Sweep a profile along a spine path. |
@@ -121,12 +121,12 @@ remains as a strict discriminated compatibility dispatcher for older clients.
 | `create_sketch` | Create a Sketch using a typed `support` selector for an origin plane, Body Tip face, explicit feature face, or datum plane. |
 | `edit_sketch_geometry` | Apply geometry edits to one sketch in a single transaction, including endpoint/radius arcs and tangent line fillets. |
 | `edit_sketch_constraints` | Apply constraint edits and Spreadsheet expressions in one transaction; Fix/Block may cover at most 50% of sketch geometry. |
-| `pad_sketch` | Create a Pad (extrusion) from a sketch. |
-| `pocket_sketch` | Create a validated Pocket; automatic direction is the default and an explicit base is optional. |
+| `pad_sketch` | Create a Pad with Length, ThroughAll/UpToLast, UpToFirst, or UpToFace termination. |
+| `pocket_sketch` | Create a validated Pocket with shared linear end conditions; automatic direction is the default. |
 | `fillet_edges` | Add fillet (rounded edges) to an object. |
 | `chamfer_edges` | Add chamfer (beveled edges) to an object. |
-| `revolution_sketch` | Create a Revolution (rotational extrusion) from a sketch. |
-| `groove_sketch` | Create a Groove with automatic or explicit revolution direction. |
+| `revolution_sketch` | Create a Revolution with Angle, ThroughAll/UpToLast, UpToFirst, or UpToFace termination. |
+| `groove_sketch` | Create a Groove with shared angular end conditions and validated direction. |
 | `thread_helix` | Create additive or subtractive editable helical geometry with validated automatic direction. |
 | `create_hole` | Create a validated Hole with automatic or explicit sketch-normal direction. |
 | `create_cylindrical_cut` | Create a validated cylindrical cut; automatically try the supplied world-space axis and its reverse. |

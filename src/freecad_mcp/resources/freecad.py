@@ -596,8 +596,8 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                         },
                         {
                             "name": "extrude_shape",
-                            "description": "Extrude shape along vector",
-                            "key_params": ["object_name", "direction", "length"],
+                            "description": "Extrude a standalone shape by a fixed vector; use Pad for target-aware limits",
+                            "key_params": ["object_name", "direction"],
                         },
                         {
                             "name": "revolve_shape",
@@ -738,8 +738,13 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                         },
                         {
                             "name": "pad_sketch",
-                            "description": "Extrude sketch (additive)",
-                            "key_params": ["sketch_name", "length"],
+                            "description": "Extrude sketch additively with a native end condition",
+                            "key_params": [
+                                "sketch_name",
+                                "length",
+                                "type",
+                                "up_to_face",
+                            ],
                         },
                         {
                             "name": "pocket_sketch",
@@ -747,6 +752,7 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                             "key_params": [
                                 "sketch_name",
                                 "length",
+                                "type",
                                 "direction",
                                 "base_feature_name",
                                 "up_to_face",
@@ -754,8 +760,14 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                         },
                         {
                             "name": "revolution_sketch",
-                            "description": "Revolve sketch around axis",
-                            "key_params": ["sketch_name", "axis", "angle"],
+                            "description": "Revolve sketch additively with a native end condition",
+                            "key_params": [
+                                "sketch_name",
+                                "axis",
+                                "angle",
+                                "type",
+                                "up_to_face",
+                            ],
                         },
                         {
                             "name": "groove_sketch",
@@ -764,7 +776,9 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                                 "sketch_name",
                                 "axis",
                                 "angle",
+                                "type",
                                 "direction",
+                                "up_to_face",
                             ],
                         },
                         {

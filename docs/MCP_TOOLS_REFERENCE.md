@@ -998,15 +998,21 @@ solid or the Body volume fails to increase.
 
 #### pad_sketch
 
-Extrude a sketch to create material. For direction-sensitive pads, prefer `direction=[x, y, z]`; the tool resolves `Reversed` from the sketch global normal and reports the effective world-space direction.
+Extrude a sketch to create material. For direction-sensitive pads, prefer
+`direction=[x, y, z]`; the tool resolves `Reversed` from the sketch global
+normal and reports the effective world-space direction. Pad supports the same
+public end conditions as Pocket. For additive features, public `ThroughAll`
+maps to FreeCAD's equivalent native `UpToLast` enumeration.
 
 ```python
 pad_sketch(
     sketch_name: str,
     length: float,
+    type: str = "Length",  # "Length", "ThroughAll", "UpToFirst", "UpToFace"
     symmetric: bool = False,
     reversed: bool = False,
     direction: list[float] | None = None,  # desired world-space direction
+    up_to_face: str | None = None,  # required for UpToFace: "Feature.FaceN"
     name: str | None = None,
     doc_name: str | None = None
 ) -> dict
@@ -1020,9 +1026,11 @@ Revolve a sketch around an axis.
 revolution_sketch(
     sketch_name: str,
     angle: float = 360.0,
+    type: str = "Angle",  # "Angle", "ThroughAll", "UpToFirst", "UpToFace"
     axis: str = "Base_X",  # "Base_X/Y/Z" or "Sketch_V/H"
     symmetric: bool = False,
     reversed: bool = False,
+    up_to_face: str | None = None,
     name: str | None = None,
     doc_name: str | None = None
 ) -> dict
@@ -1100,10 +1108,12 @@ Cut material by revolving a sketch.
 groove_sketch(
     sketch_name: str,
     angle: float = 360.0,
+    type: str = "Angle",  # "Angle", "ThroughAll", "UpToFirst", "UpToFace"
     axis: str = "Base_X",
     symmetric: bool = False,
     reversed: bool | None = None,  # deprecated compatibility override
     direction: str = "auto",  # "auto", "forward", or "reversed"
+    up_to_face: str | None = None,
     name: str | None = None,
     doc_name: str | None = None
 ) -> dict
@@ -1112,6 +1122,18 @@ groove_sketch(
 For a partial groove, `auto` tries both revolution directions and retains the
 first measurable subtraction. Use an explicit direction when both sides of an
 embedded profile intersect material and design intent requires one side.
+
+`pad_sketch`, `pocket_sketch`, `revolution_sketch`, and `groove_sketch` share
+one end-condition implementation. `UpToFace` always requires a validated
+`Feature.FaceN` reference. The response exposes both the requested public
+`type` and FreeCAD's `native_type`; additive `ThroughAll` is reported as native
+`UpToLast`. Runtime enum validation produces an explicit compatibility error if
+the connected FreeCAD build does not expose a requested native mode.
+
+The standalone `extrude_shape` tool deliberately remains vector-length based.
+It calls `TopoShape.extrude` and has no PartDesign support solid, so “first face”
+and “through all material” are undefined. Use `pad_sketch` when an extrusion
+must terminate at body material or an explicit face.
 
 #### subtractive_loft
 

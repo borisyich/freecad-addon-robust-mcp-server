@@ -286,6 +286,9 @@
 - Made shape-checkpoint comparison complexity-aware, separated nominal coaxial
   cylinder thickness from finite-patch distance, added world-axis placement for
   axial primitives, and allowed zero topology page limits in `inspect_object`.
+- Expanded Modify existing models paragraph in Skill.md.
+- Added one shared native end-condition contract to Pad, Pocket, Revolution,
+  and Groove: bounded length/angle, ThroughAll, UpToFirst, and UpToFace.
 
 This project uses **component-specific versioning**. Each component has its own
 release notes and version history.

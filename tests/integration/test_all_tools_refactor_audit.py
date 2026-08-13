@@ -235,6 +235,7 @@ DOCUMENTED_CHOICES: dict[tuple[str, str], tuple[str, ...]] = {
         "set_expression",
         "clear_expression",
     ),
+    ("pad_sketch", "type"): ("Length", "ThroughAll", "UpToFirst", "UpToFace"),
     ("pocket_sketch", "type"): ("Length", "ThroughAll", "UpToFirst", "UpToFace"),
     ("pocket_sketch", "direction"): ("auto", "normal", "reversed"),
     ("revolution_sketch", "axis"): (
@@ -243,6 +244,12 @@ DOCUMENTED_CHOICES: dict[tuple[str, str], tuple[str, ...]] = {
         "Base_Z",
         "Sketch_V",
         "Sketch_H",
+    ),
+    ("revolution_sketch", "type"): (
+        "Angle",
+        "ThroughAll",
+        "UpToFirst",
+        "UpToFace",
     ),
     ("thread_helix", "operation"): ("additive", "subtractive"),
     ("thread_helix", "direction"): ("auto", "forward", "reversed"),
@@ -259,6 +266,12 @@ DOCUMENTED_CHOICES: dict[tuple[str, str], tuple[str, ...]] = {
         "Base_Z",
         "Sketch_V",
         "Sketch_H",
+    ),
+    ("groove_sketch", "type"): (
+        "Angle",
+        "ThroughAll",
+        "UpToFirst",
+        "UpToFace",
     ),
     ("groove_sketch", "direction"): ("auto", "forward", "reversed"),
     ("create_hole", "hole_type"): ("Dimension", "ThroughAll"),

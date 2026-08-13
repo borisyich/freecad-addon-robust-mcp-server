@@ -780,5 +780,6 @@ class TestMcpInstructions:
         assert largest_tool_bytes < 8_000
         # Dedicated measurement schemas and the flattened semantic selector trade
         # a modest registry increase for declarations that remain agent-readable.
-        # Two read-only Shape checkpoint contracts add focused invariant evidence.
-        assert payload_bytes < 112_000
+        # Two read-only Shape checkpoint contracts and explicit end-condition
+        # discovery on four PartDesign tools add focused invariant evidence.
+        assert payload_bytes < 113_000

@@ -19,6 +19,12 @@ from freecad_mcp.tools._freecad_runtime_helpers import (
     REVOLUTION_AXIS_RUNTIME_HELPERS,
     SKETCH_ANALYSIS_RUNTIME_HELPERS,
 )
+from freecad_mcp.tools._partdesign_end_conditions import (
+    PARTDESIGN_END_CONDITION_RUNTIME,
+    AngularEndCondition,
+    LinearEndCondition,
+    prepare_partdesign_end_condition,
+)
 
 
 class _SketchOperation(BaseModel):
@@ -245,8 +251,8 @@ SketchGeometryOperation = Annotated[
     | GeometryIndexOperation,
     Field(discriminator="op"),
 ]
-_SKETCH_GEOMETRY_OPERATION_ADAPTER: TypeAdapter[SketchGeometryOperation] = (
-    TypeAdapter(SketchGeometryOperation)
+_SKETCH_GEOMETRY_OPERATION_ADAPTER: TypeAdapter[SketchGeometryOperation] = TypeAdapter(
+    SketchGeometryOperation
 )
 
 
@@ -1681,9 +1687,11 @@ _result_ = {{
     async def pad_sketch(
         sketch_name: str,
         length: float,
+        type: LinearEndCondition = "Length",
         symmetric: bool = False,
         reversed: bool = False,
         direction: list[float] | None = None,
+        up_to_face: str | None = None,
         name: str | None = None,
         doc_name: str | None = None,
     ) -> dict[str, Any]:
@@ -1692,12 +1700,17 @@ _result_ = {{
         Args:
             sketch_name: Name of the sketch to pad.
             length: Pad length (extrusion distance).
+            type: End condition: ``Length``, ``ThroughAll``, ``UpToFirst``, or
+                ``UpToFace``. Additive ``ThroughAll`` maps to FreeCAD's
+                equivalent native ``UpToLast`` mode.
             symmetric: Whether to extrude symmetrically. Defaults to False.
             reversed: Whether to reverse direction when ``direction`` is not supplied.
             direction: Optional desired world-space extrusion direction ``[x, y, z]``.
                 The tool resolves ``Reversed`` from the sketch global normal and rejects
                 directions perpendicular to the sketch. Prefer this for direction-sensitive
                 features instead of guessing ``reversed``.
+            up_to_face: Required only for ``type="UpToFace"``. Explicit
+                ``Feature.FaceN`` reference.
             name: Pad feature name. Auto-generated if None.
             doc_name: Document containing the sketch. Uses active document if None.
 
@@ -1709,13 +1722,25 @@ _result_ = {{
                 - validated: Whether the additive result passed validation
                 - added_volume: Effective volume added to the Body
                 - effective_direction: Actual extrusion direction in world coordinates
+                - type: Requested public end condition
+                - native_type: FreeCAD end-condition enumeration actually used
         """
+        if length <= 0:
+            raise ValueError("Pad length must be greater than zero")
+        end_condition = prepare_partdesign_end_condition(
+            type,
+            bounded_type="Length",
+            operation="additive",
+            up_to_face=up_to_face,
+        )
         bridge = await get_bridge()
 
         code = f"""
 {BODY_RUNTIME_HELPERS}
 
 {FEATURE_VALIDATION_RUNTIME_HELPERS}
+
+{PARTDESIGN_END_CONDITION_RUNTIME}
 
 {DOCUMENT_RESOLUTION_RUNTIME}
 doc = _resolve_document({doc_name!r})
@@ -1742,6 +1767,13 @@ try:
     created_pad_name = pad.Name
     pad.Profile = sketch
     pad.Length = {length}
+    end_condition = _configure_partdesign_end_condition(
+        doc,
+        pad,
+        {end_condition.requested_type!r},
+        {end_condition.native_type!r},
+        {end_condition.up_to_face!r},
+    )
     # Resolve the direction from the sketch global normal. Plane orientation can
     # differ between support types and FreeCAD builds, so callers may supply an
     # explicit world-space direction instead of guessing Reversed.
@@ -1804,6 +1836,7 @@ _result_ = {{
         float(effective_direction_vec.y),
         float(effective_direction_vec.z),
     ],
+    **end_condition,
 }}
 """
         result = await bridge.execute_python(code)
@@ -1815,7 +1848,7 @@ _result_ = {{
     async def pocket_sketch(
         sketch_name: str,
         length: float,
-        type: Literal["Length", "ThroughAll", "UpToFirst", "UpToFace"] = "Length",
+        type: LinearEndCondition = "Length",
         direction: Literal["auto", "normal", "reversed"] = "auto",
         base_feature_name: str | None = None,
         up_to_face: str | None = None,
@@ -1863,25 +1896,20 @@ _result_ = {{
         """
         if length <= 0:
             raise ValueError("Pocket length must be greater than zero")
-        if type == "UpToFace":
-            if not up_to_face or "." not in up_to_face:
-                raise ValueError('type="UpToFace" requires up_to_face="Feature.FaceN"')
-            object_name, face_name = up_to_face.rsplit(".", 1)
-            if (
-                not object_name
-                or not face_name.startswith("Face")
-                or not face_name[4:].isdigit()
-                or int(face_name[4:]) < 1
-            ):
-                raise ValueError('up_to_face must use the form "Feature.FaceN"')
-        elif up_to_face is not None:
-            raise ValueError('up_to_face is valid only for type="UpToFace"')
+        end_condition = prepare_partdesign_end_condition(
+            type,
+            bounded_type="Length",
+            operation="subtractive",
+            up_to_face=up_to_face,
+        )
         bridge = await get_bridge()
 
         code = f"""
 {BODY_RUNTIME_HELPERS}
 
 {FEATURE_VALIDATION_RUNTIME_HELPERS}
+
+{PARTDESIGN_END_CONDITION_RUNTIME}
 
 {DOCUMENT_RESOLUTION_RUNTIME}
 doc = _resolve_document({doc_name!r})
@@ -1902,29 +1930,6 @@ base_feature, base_selection = _resolve_partdesign_base_feature(
     {base_feature_name!r},
 )
 base_shape = base_feature.Shape.copy()
-up_to_face_reference = None
-if {type!r} == "UpToFace":
-    up_to_object_name, up_to_element = {up_to_face!r}.rsplit(".", 1)
-    up_to_object = doc.getObject(up_to_object_name)
-    if up_to_object is None:
-        raise ValueError(f"Up-to-face object not found: {{up_to_object_name!r}}")
-    up_to_shape = getattr(up_to_object, "Shape", None)
-    face_index = int(up_to_element[4:])
-    if (
-        up_to_shape is None
-        or up_to_shape.isNull()
-        or face_index > len(up_to_shape.Faces)
-    ):
-        available = (
-            0
-            if up_to_shape is None or up_to_shape.isNull()
-            else len(up_to_shape.Faces)
-        )
-        raise ValueError(
-            f"Face not found: {{up_to_object_name}}.{{up_to_element}}. "
-            f"Available faces: Face1..Face{{available}}"
-        )
-    up_to_face_reference = (up_to_object, [up_to_element])
 
 original_tip = getattr(body, "Tip", None)
 original_tip_name = getattr(original_tip, "Name", None)
@@ -1939,9 +1944,13 @@ try:
     created_pocket_name = pocket.Name
     pocket.Profile = sketch
     pocket.Length = {length}
-    pocket.Type = {type!r}
-    if up_to_face_reference is not None:
-        pocket.UpToFace = up_to_face_reference
+    end_condition = _configure_partdesign_end_condition(
+        doc,
+        pocket,
+        {end_condition.requested_type!r},
+        {end_condition.native_type!r},
+        {end_condition.up_to_face!r},
+    )
 
     try:
         sketch_rotation = sketch.getGlobalPlacement().Rotation
@@ -2025,7 +2034,7 @@ _result_ = {{
     "requested_direction": requested_direction,
     "direction": selected_direction,
     "direction_attempts": direction_attempts,
-    "up_to_face": {up_to_face!r},
+    **end_condition,
     "effective_direction": [
         float(effective_direction_vec.x),
         float(effective_direction_vec.y),
@@ -2226,9 +2235,11 @@ _result_ = {{
     async def revolution_sketch(
         sketch_name: str,
         angle: float = 360.0,
+        type: AngularEndCondition = "Angle",
         axis: Literal["Base_X", "Base_Y", "Base_Z", "Sketch_V", "Sketch_H"] = "Base_X",
         symmetric: bool = False,
         reversed: bool = False,
+        up_to_face: str | None = None,
         name: str | None = None,
         doc_name: str | None = None,
     ) -> dict[str, Any]:
@@ -2239,6 +2250,9 @@ _result_ = {{
         Args:
             sketch_name: Name of the sketch to revolve.
             angle: Revolution angle in degrees. Defaults to 360.
+            type: End condition: ``Angle``, ``ThroughAll``, ``UpToFirst``, or
+                ``UpToFace``. Additive ``ThroughAll`` maps to the native
+                ``UpToLast`` mode.
             axis: Axis to revolve around. Options:
                 - "Base_X" - X axis
                 - "Base_Y" - Y axis
@@ -2247,6 +2261,8 @@ _result_ = {{
                 - "Sketch_H" - Sketch horizontal axis
             symmetric: Whether to revolve symmetrically. Defaults to False.
             reversed: Whether to reverse direction. Defaults to False.
+            up_to_face: Required only for ``type="UpToFace"``. Explicit
+                ``Feature.FaceN`` reference.
             name: Revolution feature name. Auto-generated if None.
             doc_name: Document containing the sketch. Uses active document if None.
 
@@ -2257,13 +2273,24 @@ _result_ = {{
                 - type_id: Object type
                 - validated: Check if the result has a valid shape
                 - added_volume: Effective volume added to the Body
+                - type/native_type: Requested and native end conditions
         """
+        if angle <= 0:
+            raise ValueError("Revolution angle must be greater than zero")
+        end_condition = prepare_partdesign_end_condition(
+            type,
+            bounded_type="Angle",
+            operation="additive",
+            up_to_face=up_to_face,
+        )
         bridge = await get_bridge()
 
         code = f"""
 {REVOLUTION_AXIS_RUNTIME_HELPERS}
 
 {FEATURE_VALIDATION_RUNTIME_HELPERS}
+
+{PARTDESIGN_END_CONDITION_RUNTIME}
 
 {DOCUMENT_RESOLUTION_RUNTIME}
 doc = _resolve_document({doc_name!r})
@@ -2290,6 +2317,13 @@ try:
     created_revolution_name = rev.Name
     rev.Profile = sketch
     rev.Angle = {angle}
+    end_condition = _configure_partdesign_end_condition(
+        doc,
+        rev,
+        {end_condition.requested_type!r},
+        {end_condition.native_type!r},
+        {end_condition.up_to_face!r},
+    )
     # FreeCAD 1.0 uses Midplane instead of Symmetric
     if {symmetric}:
         rev.Midplane = True
@@ -2328,6 +2362,7 @@ _result_ = {{
     "type_id": rev.TypeId,
     "validated": validation["ok"],
     "added_volume": validation["added_volume"],
+    **end_condition,
 }}
 """
         result = await bridge.execute_python(code)
@@ -2339,10 +2374,12 @@ _result_ = {{
     async def groove_sketch(
         sketch_name: str,
         angle: float = 360.0,
+        type: AngularEndCondition = "Angle",
         axis: Literal["Base_X", "Base_Y", "Base_Z", "Sketch_V", "Sketch_H"] = "Base_X",
         symmetric: bool = False,
         reversed: bool | None = None,
         direction: Literal["auto", "forward", "reversed"] = "auto",
+        up_to_face: str | None = None,
         name: str | None = None,
         doc_name: str | None = None,
     ) -> dict[str, Any]:
@@ -2353,6 +2390,8 @@ _result_ = {{
         Args:
             sketch_name: Name of the sketch to revolve.
             angle: Groove angle in degrees. Defaults to 360.
+            type: End condition: ``Angle``, ``ThroughAll``, ``UpToFirst``, or
+                ``UpToFace``.
             axis: Axis to revolve around. Options:
                 - "Base_X" - X axis
                 - "Base_Y" - Y axis
@@ -2365,6 +2404,8 @@ _result_ = {{
                 direction.
             direction: ``auto`` (default) tries forward and reversed revolution
                 directions and keeps the first measurable material removal.
+            up_to_face: Required only for ``type="UpToFace"``. Explicit
+                ``Feature.FaceN`` reference.
             name: Groove feature name. Auto-generated if None.
             doc_name: Document containing the sketch. Uses active document if None.
 
@@ -2377,17 +2418,26 @@ _result_ = {{
                 - removed_volume: Removed volume of the body
                 - direction: Selected forward or reversed revolution direction
                 - direction_attempts: Compact validation evidence per side
+                - type/native_type: Requested and native end conditions
         """
+        if angle <= 0:
+            raise ValueError("Groove angle must be greater than zero")
         if reversed is not None and direction != "auto":
-            raise ValueError(
-                "Specify direction or the legacy reversed flag, not both"
-            )
+            raise ValueError("Specify direction or the legacy reversed flag, not both")
+        end_condition = prepare_partdesign_end_condition(
+            type,
+            bounded_type="Angle",
+            operation="subtractive",
+            up_to_face=up_to_face,
+        )
         bridge = await get_bridge()
 
         code = f"""
 {REVOLUTION_AXIS_RUNTIME_HELPERS}
 
 {FEATURE_VALIDATION_RUNTIME_HELPERS}
+
+{PARTDESIGN_END_CONDITION_RUNTIME}
 
 {DOCUMENT_RESOLUTION_RUNTIME}
 doc = _resolve_document({doc_name!r})
@@ -2416,6 +2466,13 @@ try:
     created_groove_name = groove.Name
     groove.Profile = sketch
     groove.Angle = {angle}
+    end_condition = _configure_partdesign_end_condition(
+        doc,
+        groove,
+        {end_condition.requested_type!r},
+        {end_condition.native_type!r},
+        {end_condition.up_to_face!r},
+    )
     # FreeCAD 1.0 uses Midplane instead of Symmetric
     if {symmetric}:
         groove.Midplane = True
@@ -2486,6 +2543,7 @@ _result_ = {{
     "requested_direction": requested_direction,
     "direction": selected_direction,
     "direction_attempts": direction_attempts,
+    **end_condition,
 }}
 """
         result = await bridge.execute_python(code)
@@ -2542,9 +2600,7 @@ _result_ = {{
         if height <= 0:
             raise ValueError("Thread height must be greater than zero")
         if reversed is not None and direction != "auto":
-            raise ValueError(
-                "Specify direction or the legacy reversed flag, not both"
-            )
+            raise ValueError("Specify direction or the legacy reversed flag, not both")
         bridge = await get_bridge()
         code = f"""
 {REVOLUTION_AXIS_RUNTIME_HELPERS}
@@ -2751,9 +2807,7 @@ _result_ = {{
         if depth <= 0:
             raise ValueError("Hole depth must be greater than zero")
         if reversed is not None and direction != "auto":
-            raise ValueError(
-                "Specify direction or the legacy reversed flag, not both"
-            )
+            raise ValueError("Specify direction or the legacy reversed flag, not both")
 
         normalized_hole_type = hole_type.strip().lower().replace("_", "")
         hole_type_map = {
