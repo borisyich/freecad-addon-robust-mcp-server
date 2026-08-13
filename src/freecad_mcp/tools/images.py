@@ -535,7 +535,7 @@ def register_image_tools(mcp: Any) -> None:
         output_path: str | None = None,
         view_context: str | None = None,
     ) -> CallToolResult:
-        """Return a labelled side-by-side comparison as one MCP image.
+        """Return one labelled comparison image; example: reference_path="drawing-front.png", candidate_path="model-front.png", view_context="Front / XZ / normal Y".
 
         The left panel is always REFERENCE and the right panel is CANDIDATE.
         Use this only for equivalent projections. Supply ``view_context`` such as

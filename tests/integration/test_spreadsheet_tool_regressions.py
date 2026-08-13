@@ -69,6 +69,69 @@ def partdesign_tools(live_bridge: XmlRpcBridge) -> dict[str, Any]:
 
 
 @pytest.mark.asyncio
+async def test_batch_stages_quantities_aliases_and_dependent_formulas(
+    live_bridge: XmlRpcBridge,
+    spreadsheet_tools: dict[str, Any],
+) -> None:
+    """One batch may define Quantity aliases before formulas consume them."""
+    doc_name = "MCPSpreadsheetStagedBatchRegression"
+    setup = await live_bridge.execute_python(
+        f"""
+if {doc_name!r} in FreeCAD.listDocuments():
+    FreeCAD.closeDocument({doc_name!r})
+doc = FreeCAD.newDocument({doc_name!r})
+doc.addObject("Spreadsheet::Sheet", "Parameters")
+doc.recompute()
+_result_ = True
+"""
+    )
+    assert setup.success, setup.error_traceback
+
+    try:
+        result = await spreadsheet_tools["spreadsheet_apply_batch"](
+            spreadsheet_name="Parameters",
+            cells=[
+                {"cell": "A1", "value": {"value": 40, "unit": "mm"}},
+                {"cell": "A2", "value": {"value": 5, "unit": "mm"}},
+                {"cell": "A3", "formula": "=MidplaneZ-HoleSpacing/2"},
+            ],
+            aliases=[
+                {"cell": "A1", "alias": "MidplaneZ"},
+                {"cell": "A2", "alias": "HoleSpacing"},
+            ],
+            doc_name=doc_name,
+        )
+        # FreeCAD canonicalizes explicit quantities as expression cells, so the
+        # validator covers both quantities plus the alias-dependent formula.
+        assert result["formula_cells_validated"] == 3
+
+        state = await live_bridge.execute_python(
+            f"""
+sheet = FreeCAD.getDocument({doc_name!r}).getObject("Parameters")
+computed = sheet.get("A3")
+_result_ = {{
+    "contents": [sheet.getContents(cell) for cell in ("A1", "A2", "A3")],
+    "aliases": [sheet.getAlias(cell) for cell in ("A1", "A2")],
+    "value": float(computed.Value),
+    "unit": str(computed.Unit),
+}}
+"""
+        )
+        assert state.success, state.error_traceback
+        assert state.result["aliases"] == ["MidplaneZ", "HoleSpacing"]
+        assert state.result["contents"][2].replace(" ", "") == (
+            "=MidplaneZ-HoleSpacing/2"
+        )
+        assert state.result["value"] == pytest.approx(37.5)
+        assert "mm" in state.result["unit"]
+        assert "Length" in state.result["unit"]
+    finally:
+        await live_bridge.execute_python(
+            f"FreeCAD.closeDocument({doc_name!r}) if {doc_name!r} in FreeCAD.listDocuments() else None"
+        )
+
+
+@pytest.mark.asyncio
 async def test_numeric_360_alias_retry_discovery_and_clear(
     live_bridge: XmlRpcBridge,
     spreadsheet_tools: dict[str, Any],
@@ -130,7 +193,7 @@ _result_ = {{
         }
 
         unitful_args = dict(batch_args)
-        unitful_args["cells"] = [{"cell": "A1", "value": "360 deg"}]
+        unitful_args["cells"] = [{"cell": "A1", "value": {"value": 360, "unit": "deg"}}]
         unitful = await spreadsheet_tools["spreadsheet_apply_batch"](**unitful_args)
         assert unitful["bindings"][0]["source_unit"] == "Angle"
         assert unitful["bindings"][0]["unit_coercion"] is None
@@ -283,7 +346,9 @@ _result_ = {{
         assert state.success, state.error_traceback
         assert state.result["x"] == pytest.approx(12.0)
         assert state.result["z"] == pytest.approx(7.0)
-        assert [".Placement.Base.x", "Params.OffsetX"] in state.result["box_expressions"]
+        assert [".Placement.Base.x", "Params.OffsetX"] in state.result[
+            "box_expressions"
+        ]
         assert [".AttachmentOffset.Base.z", "Params.AttachZ"] in state.result[
             "attached_expressions"
         ]
@@ -527,7 +592,7 @@ _result_ = True
         with pytest.raises(ValueError, match="Spreadsheet formula failed in A1"):
             await spreadsheet_tools["spreadsheet_apply_batch"](
                 spreadsheet_name="Parameters",
-                cells=[{"cell": "A1", "value": "=MissingObject.MissingProperty"}],
+                cells=[{"cell": "A1", "formula": "=MissingObject.MissingProperty"}],
                 doc_name=doc_name,
             )
 

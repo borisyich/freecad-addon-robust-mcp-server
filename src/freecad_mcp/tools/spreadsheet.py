@@ -8,7 +8,15 @@ from collections.abc import Awaitable, Callable
 from textwrap import dedent
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictFloat,
+    StrictInt,
+    field_validator,
+    model_validator,
+)
 
 SPREADSHEET_RUNTIME_HELPERS = dedent(
     r'''
@@ -188,12 +196,69 @@ SPREADSHEET_RUNTIME_HELPERS = dedent(
 ).strip()
 
 
-class SpreadsheetCellUpdate(BaseModel):
-    """One cell value update for ``spreadsheet_apply_batch``."""
+class SpreadsheetQuantity(BaseModel):
+    """A numeric Spreadsheet value with an explicit FreeCAD unit."""
 
     model_config = ConfigDict(extra="forbid")
-    cell: str = Field(pattern=r"^[A-Za-z]+[1-9]\d*$")
-    value: str | int | float
+    value: StrictInt | StrictFloat = Field(
+        allow_inf_nan=False,
+        description="Finite numeric magnitude, for example 40.",
+    )
+    unit: str = Field(
+        min_length=1,
+        max_length=32,
+        description="FreeCAD unit expression, for example mm, deg, or kg/m^3.",
+    )
+
+    @field_validator("unit")
+    @classmethod
+    def validate_unit(cls, value: str) -> str:
+        """Keep unit expressions single-line and unambiguous."""
+        normalized = value.strip()
+        if not normalized or any(character in normalized for character in "\r\n"):
+            raise ValueError("unit must be a non-empty single-line FreeCAD unit")
+        return normalized
+
+
+class SpreadsheetCellUpdate(BaseModel):
+    """One typed cell update for ``spreadsheet_apply_batch``."""
+
+    model_config = ConfigDict(extra="forbid")
+    cell: str = Field(
+        pattern=r"^[A-Za-z]+[1-9]\d*$",
+        description="Spreadsheet address, for example A1 or B12.",
+    )
+    value: StrictInt | StrictFloat | SpreadsheetQuantity | None = Field(
+        default=None,
+        description=(
+            "Numeric literal or structured Quantity, for example 40 or "
+            '{"value":40,"unit":"mm"}. Strings are not accepted here.'
+        ),
+    )
+    formula: str | None = Field(
+        default=None,
+        description=(
+            'Formula beginning with "=", for example "=MidplaneZ-HoleSpacing/2".'
+        ),
+    )
+    text: str | None = Field(
+        default=None,
+        description="Explicit literal text; use formula for strings beginning with =.",
+    )
+
+    @model_validator(mode="after")
+    def validate_content(self) -> "SpreadsheetCellUpdate":
+        """Require one explicit content kind and reject ambiguous strings."""
+        supplied = sum(
+            item is not None for item in (self.value, self.formula, self.text)
+        )
+        if supplied != 1:
+            raise ValueError("supply exactly one of value, formula, or text")
+        if self.formula is not None and not self.formula.lstrip().startswith("="):
+            raise ValueError("formula must begin with '='")
+        if self.text is not None and self.text.lstrip().startswith("="):
+            raise ValueError("text must not begin with '='; use formula instead")
+        return self
 
 
 class SpreadsheetAliasUpdate(BaseModel):
@@ -903,18 +968,38 @@ except Exception:
         bindings: list[SpreadsheetPropertyBinding] | None = None,
         doc_name: str | None = None,
     ) -> dict[str, Any]:
-        """Apply cell values, aliases and property bindings atomically.
+        """Atomically stage values, aliases, dependent formulas, and bindings; for example cells=[{"cell":"A1","value":{"value":40,"unit":"mm"}},{"cell":"A2","formula":"=Length/2"}], aliases=[{"cell":"A1","alias":"Length"}].
 
-        All changes use one FreeCAD transaction and one final recompute. After
-        recompute, every non-empty formula cell on the sheet is evaluated, not
-        only cells changed by the batch. Any encoded formula failure rolls back
-        the affected cells, aliases, and expressions. This is the preferred tool
-        when building a parameter table because it avoids one MCP round trip and
-        one recompute per individual operation.
+        Within one FreeCAD transaction this applies literal values/quantities,
+        aliases, alias-dependent formulas, and property bindings in that order,
+        followed by one document recompute and formula validation. Any failure
+        rolls back the affected cells, aliases, and expressions. This is the
+        preferred tool for a parameter table because formulas may safely use
+        aliases created by the same call.
+
+        Example::
+
+            cells=[
+                {"cell":"A1", "value":{"value":40, "unit":"mm"}},
+                {"cell":"A2", "value":{"value":5, "unit":"mm"}},
+                {"cell":"A3", "formula":"=MidplaneZ-HoleSpacing/2"},
+                {"cell":"B1", "text":"mounting parameters"},
+            ]
+            aliases=[
+                {"cell":"A1", "alias":"MidplaneZ"},
+                {"cell":"A2", "alias":"HoleSpacing"},
+            ]
+            bindings=[
+                {"alias":"MidplaneZ", "target_object":"Sketch",
+                 "target_property":"Constraints[0]"},
+            ]
 
         Args:
             spreadsheet_name: Existing Spreadsheet object.
-            cells: Cell/value updates.
+            cells: Typed updates. Use numeric ``value``, structured Quantity
+                ``value={"value":40,"unit":"mm"}``, ``formula="=..."``, or
+                explicit ``text``. Ambiguous string values such as ``"40 mm"``
+                are rejected by the schema.
             aliases: Cell/alias assignments.
             bindings: Object-property bindings to spreadsheet aliases.
             doc_name: Document containing the objects. Uses active if None.
@@ -1036,8 +1121,21 @@ try:
     for target, property_name, _old_expression in expression_snapshot:
         target.setExpression(property_name, None)
 
-    for item in cells:
-        sheet.set(item["cell"], str(item["value"]))
+    literal_cells = [item for item in cells if item.get("formula") is None]
+    formula_cells = [item for item in cells if item.get("formula") is not None]
+
+    # Stage 1: literals and structured quantities. Quantity input is normalized
+    # through FreeCAD.Units rather than treating a unit-bearing string as generic
+    # Spreadsheet text.
+    for item in literal_cells:
+        value = item.get("value")
+        if isinstance(value, dict):
+            quantity = FreeCAD.Units.Quantity(value["value"], value["unit"])
+            sheet.set(item["cell"], quantity.UserString)
+        elif value is not None:
+            sheet.set(item["cell"], str(value))
+        else:
+            sheet.set(item["cell"], item["text"])
 
     # Remove aliases from every affected cell first so swaps and idempotent
     # retries cannot fail with "Alias already defined".
@@ -1047,11 +1145,25 @@ try:
     for item in aliases:
         sheet.setAlias(item["cell"], item["alias"])
 
-    # Make values (including formula units) queryable without recomputing the
-    # whole document. The final doc.recompute() below still occurs exactly once.
-    if bindings:
+    # Stage 2 is now complete. Refresh only the sheet so aliases and literal
+    # units are available before any dependent formula is parsed.
+    quantity_cells = [
+        item for item in literal_cells if isinstance(item.get("value"), dict)
+    ]
+    if aliases or bindings or formula_cells or quantity_cells:
+        sheet.recompute()
+    for item in quantity_cells:
+        computed_quantity = sheet.get(item["cell"])
+        if not hasattr(computed_quantity, "Unit") or not str(computed_quantity.Unit):
+            raise ValueError(f"Spreadsheet did not retain Quantity in {{item['cell']}}")
+
+    # Stage 3: formulas are installed only after all aliases exist.
+    for item in formula_cells:
+        sheet.set(item["cell"], item["formula"])
+    if formula_cells and bindings:
         sheet.recompute()
 
+    # Stage 4: property bindings can safely inspect computed source units.
     expression_results = []
     for item, target in resolved_bindings:
         expression, binding_metadata = _spreadsheet_binding_expression(
@@ -1104,7 +1216,9 @@ try:
             ) from exc
         computed_cells.append({{
             "cell": item["cell"],
-            "value": item["value"],
+            "value": item.get("value"),
+            "formula": item.get("formula"),
+            "text": item.get("text"),
             "computed": _spreadsheet_serializable_value(computed),
         }})
     doc.commitTransaction()

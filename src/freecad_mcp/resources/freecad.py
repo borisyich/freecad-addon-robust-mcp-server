@@ -1260,6 +1260,16 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                             "key_params": ["doc_name"],
                         },
                         {
+                            "name": "capture_shape_checkpoint",
+                            "description": "Capture an in-memory B-rep baseline without modifying the document",
+                            "key_params": ["checkpoint_name", "object_name", "doc_name"],
+                        },
+                        {
+                            "name": "compare_shape_checkpoint",
+                            "description": "Report before/after metrics and exact added/removed Shape regions",
+                            "key_params": ["checkpoint_name", "object_name", "doc_name"],
+                        },
+                        {
                             "name": "validate_parametric_model",
                             "description": "Compact model or sketch-target diagnostic; expanded structure/full reports only on request",
                             "key_params": [

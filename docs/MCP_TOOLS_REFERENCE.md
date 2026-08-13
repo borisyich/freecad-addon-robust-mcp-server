@@ -23,7 +23,7 @@ The exact generated inventory is grouped as follows:
 | Images | 3 |
 | Checkpoints | 1 |
 | View / GUI / History | 10 |
-| Validation | 5 |
+| Validation | 7 |
 | Export / Import | 2 |
 | Macros | 6 |
 | **Total** | **131** |
@@ -1624,19 +1624,26 @@ the public schema.
 
 ### spreadsheet_apply_batch
 
-Apply cell values, aliases, and object-property bindings to an existing Spreadsheet in one transaction and one final recompute. Use this instead of dozens of independent setter calls when creating a parameter table. Binding targets accept FreeCAD expression paths such as `Length`, `Placement.Base.x`, and `AttachmentOffset.Base.z`; FreeCAD validates the leaf path through `setExpression`. Aliases, duplicate entries, and alias collisions are validated before mutation. Because FreeCAD 1.0 does not roll Spreadsheet mutations back on `abortTransaction()`, the tool snapshots and explicitly restores affected cells, aliases, and expressions if any operation fails.
+Apply literals/quantities, aliases, dependent formulas, and object-property bindings to an existing Spreadsheet in that order, inside one transaction with one final document recompute. Use this instead of dozens of independent setter calls when creating a parameter table. Binding targets accept FreeCAD expression paths such as `Length`, `Placement.Base.x`, and `AttachmentOffset.Base.z`; FreeCAD validates the leaf path through `setExpression`. Aliases, duplicate entries, and alias collisions are validated before mutation. Because FreeCAD 1.0 does not roll Spreadsheet mutations back on `abortTransaction()`, the tool snapshots and explicitly restores affected cells, aliases, and expressions if any operation fails.
 
 ```python
 spreadsheet_apply_batch(
     spreadsheet_name: str,
-    cells: list[dict] | None = None,       # {"cell": "B2", "value": "42 mm"}
+    cells: list[dict] | None = None,       # numeric {"cell":"B2","value":42}
+                                           # Quantity {"cell":"B3","value":{"value":40,"unit":"mm"}}
+                                           # formula {"cell":"B4","formula":"=Length/2"}
+                                           # text {"cell":"C1","text":"Parameters"}
     aliases: list[dict] | None = None,     # {"cell": "B2", "alias": "Length"}
     bindings: list[dict] | None = None,    # {"alias": "Length", "target_object": "Pad", "target_property": "Length"}
     doc_name: str | None = None,
 ) -> dict
 ```
 
-At least one non-empty list is required. Aliases created in the same batch may immediately be used by bindings.
+At least one non-empty list is required. The `value` field accepts only a number
+or structured Quantity; raw strings such as `"40 mm"` are rejected because they
+are ambiguous with Spreadsheet text. Use `formula` and `text` explicitly for
+those content kinds. Aliases created in the same batch may immediately be used
+by later formulas and bindings.
 Retries are idempotent, including aliases that already point to the requested
 cell. When a unitless Spreadsheet value is bound to an `App::PropertyAngle`
 such as `PartDesign::PolarPattern.Angle`, the generated expression multiplies
@@ -2014,6 +2021,38 @@ under Execution and Document Tools:
 
 - `get_console_output(lines=100)`;
 - `recompute_document(doc_name=None)`.
+
+### Shape checkpoints for direct edits
+
+Use a session-local B-rep checkpoint to prove both what changed and what stayed
+invariant across an edit. Capturing and comparing are read-only and add no
+objects or properties to the FreeCAD document.
+
+```python
+capture_shape_checkpoint(
+    checkpoint_name="before_holes",
+    object_name="Body",
+    doc_name="Bracket",
+)
+
+compare_shape_checkpoint(
+    checkpoint_name="before_holes",
+    object_name="Body",  # optional; defaults to captured object
+    doc_name="Bracket",  # optional; defaults to captured document
+    volume_tolerance=1e-7,
+    linear_tolerance=1e-7,
+)
+```
+
+The report includes before/after validity, solid/shell/face/edge/vertex counts,
+volume, surface area, bounding boxes and their deltas. OCCT computes both
+`before.cut(after)` and `after.cut(before)`; each removed or added connected
+solid is reported with its own bounds and topology. Thus four isolated drilled
+regions normally appear as four removed regions, with surface-type evidence
+such as `Cylinder` on their faces. If the boolean operation
+fails, `difference.available` is false and the error is explicit; metric deltas
+remain available. Checkpoints live only for the current MCP server session (up
+to 32 named baselines) and can be intentionally replaced with `overwrite=True`.
 
 ### validate_parametric_model
 

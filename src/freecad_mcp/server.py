@@ -71,6 +71,9 @@ Before modifying geometry:
   or unresolved.
 Prefer standard MCP tools. Use execute_python or safe_execute only when
 a required operation is unavailable or broken.
+For a direct or imported-BRep edit, capture_shape_checkpoint immediately before
+mutation and compare_shape_checkpoint afterwards to report both localized Shape
+differences and unchanged invariants.
 Use compact/default detail levels first. Request full topology, properties,
 sketch records, or validation structure only for a specific diagnosis, and page
 large face/edge/vertex/constraint collections instead of loading them all at once.

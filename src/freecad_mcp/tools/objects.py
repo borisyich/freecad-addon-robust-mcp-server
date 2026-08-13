@@ -1157,7 +1157,7 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
         offset: int = 0,
         page_size: int = 20,
     ) -> dict[str, Any]:
-        """Select faces, edges, or vertices by semantic geometric criteria.
+        """Select topology semantically; example: object_name="Body", criteria={"kind":"face","surface_types":["Cylinder"],"radius_min":2.49,"radius_max":2.51}.
 
         Use this tool before creating a face-supported sketch or choosing edges
         for Fillet/Chamfer. It avoids brittle manual loops over ``Shape.Faces``

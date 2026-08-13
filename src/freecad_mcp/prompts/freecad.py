@@ -362,10 +362,11 @@ off-face cuts. `thread_type="ISO_FINE"` is supported; provide the exact fine
 `edit_object`, set `ThreadType` and `ThreadSize` in the same call.
 
 For Spreadsheet-driven pattern angles, a unitless value such as `360` is bound
-as degrees. Prefer `spreadsheet_apply_batch` for atomic value/alias/binding
-updates; failed formulas and Report View expression errors are not successful
-results, and failed batches restore the affected cells, aliases, and
-expressions.""",
+as degrees. Prefer `spreadsheet_apply_batch` for staged typed values/quantities,
+aliases, dependent formulas, and bindings. Use a structured Quantity such as
+`{"value": 40, "unit": "mm"}` rather than a raw unit-bearing string. Failed
+formulas and Report View expression errors are not successful results, and
+failed batches restore the affected cells, aliases, and expressions.""",
             "boolean": """# Boolean Operations Guidance
 
 ## Available Operations

@@ -153,7 +153,7 @@ def register_document_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) 
         doc_name: str | None = None,
         save_changes: bool = False,
     ) -> dict[str, Any]:
-        """Close a FreeCAD document.
+        """Close a FreeCAD document; example: doc_name="Bracket", save_changes=True. Omitting doc_name closes the active document.
 
         Args:
             doc_name: Name of document to close. Uses active document if None.

@@ -16,7 +16,11 @@ class GeometryReference(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    object_name: str = Field(min_length=1)
+    object_name: str = Field(
+        min_length=1,
+        description='FreeCAD object Name, for example "Body" or "Pad".',
+        json_schema_extra={"examples": ["Body"]},
+    )
     subshape: str | None = Field(
         default=None,
         pattern=r"^(Face|Edge|Vertex)[1-9]\d*$",
@@ -24,6 +28,7 @@ class GeometryReference(BaseModel):
             "Optional FaceN, EdgeN, or VertexN returned by select_subshapes. "
             "Omit to measure the complete object Shape."
         ),
+        json_schema_extra={"examples": ["Face3", "Edge7"]},
     )
 
 
@@ -824,7 +829,7 @@ def register_measurement_tools(
         doc_name: str | None = None,
         force_recompute: bool = True,
     ) -> dict[str, Any]:
-        """Measure the exact minimum OCCT distance between two references."""
+        """Measure exact OCCT distance; example: first={"object_name":"Body","subshape":"Face1"}, second={"object_name":"Body","subshape":"Face4"}."""
         return await _run_measurement(
             DistanceMeasurement(
                 kind="distance", first=first, second=second, tolerance_mm=tolerance_mm

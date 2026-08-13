@@ -642,6 +642,7 @@ class TestMcpInstructions:
         required_clauses = (
             "inspect the intended document and existing feature history",
             "use select_subshapes rather than manual Face/Edge enumeration",
+            "capture_shape_checkpoint immediately before mutation",
             "save every explicit non-starred dimension",
             "driving, verification, or unresolved",
             "bind the alias to the dimensional constraint expression path",
@@ -677,6 +678,39 @@ class TestMcpInstructions:
         assert description == " ".join(first_paragraph.split())
         assert len(description) > 360
         assert "Verbose workflow details" not in description
+
+    @pytest.mark.asyncio
+    async def test_nested_tool_contracts_include_working_examples(self):
+        """Common nested requests should be formable without reading source."""
+        from freecad_mcp import server as server_module
+
+        listed = {tool.name: tool for tool in await server_module.mcp.list_tools()}
+        example_tools = (
+            "spreadsheet_apply_batch",
+            "select_subshapes",
+            "measure_distance",
+            "create_cylindrical_cut",
+            "compare_images",
+            "close_document",
+            "capture_shape_checkpoint",
+            "compare_shape_checkpoint",
+        )
+        for tool_name in example_tools:
+            assert "example" in (listed[tool_name].description or "").lower()
+
+        distance_schema = listed["measure_distance"].inputSchema
+        first_schema = distance_schema["properties"]["first"]
+        assert first_schema["properties"]["object_name"]["examples"] == ["Body"]
+        assert first_schema["properties"]["subshape"]["examples"] == [
+            "Face3",
+            "Edge7",
+        ]
+
+        spreadsheet_schema = listed["spreadsheet_apply_batch"].inputSchema
+        value_schema = spreadsheet_schema["$defs"]["SpreadsheetCellUpdate"][
+            "properties"
+        ]["value"]
+        assert all(branch.get("type") != "string" for branch in value_schema["anyOf"])
 
     @pytest.mark.asyncio
     async def test_tools_list_does_not_duplicate_global_guidance_or_schema_titles(self):
@@ -715,4 +749,5 @@ class TestMcpInstructions:
         assert largest_tool_bytes < 8_000
         # Dedicated measurement schemas and the flattened semantic selector trade
         # a modest registry increase for declarations that remain agent-readable.
-        assert payload_bytes < 107_000
+        # Two read-only Shape checkpoint contracts add focused invariant evidence.
+        assert payload_bytes < 112_000

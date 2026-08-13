@@ -46,6 +46,96 @@ class TestValidationTools:
     # ========== validate_object tests ==========
 
     @pytest.mark.asyncio
+    async def test_shape_checkpoint_captures_and_compares_without_document_edits(
+        self, register_tools, mock_bridge
+    ):
+        capture_payload = {
+            "success": True,
+            "document": "Bracket",
+            "object_name": "Body",
+            "metrics": {"valid": True, "volume": 1000.0},
+            "_brep": "DBRep_DrawableShape\nmock-brep",
+        }
+        compare_payload = {
+            "success": True,
+            "document": "Bracket",
+            "object_name": "Body",
+            "delta": {"volume": -10.0},
+            "difference": {
+                "available": True,
+                "removed_region_count": 4,
+                "added_region_count": 0,
+            },
+        }
+        mock_bridge.execute_python = AsyncMock(
+            side_effect=[
+                ExecutionResult(
+                    success=True,
+                    result=capture_payload,
+                    stdout="",
+                    stderr="",
+                    execution_time_ms=1.0,
+                ),
+                ExecutionResult(
+                    success=True,
+                    result=compare_payload,
+                    stdout="",
+                    stderr="",
+                    execution_time_ms=1.0,
+                ),
+            ]
+        )
+
+        captured = await register_tools["capture_shape_checkpoint"](
+            checkpoint_name="before_holes",
+            object_name="Body",
+            doc_name="Bracket",
+        )
+        compared = await register_tools["compare_shape_checkpoint"](
+            checkpoint_name="before_holes"
+        )
+
+        assert "_brep" not in captured
+        assert captured["storage"] == "server_session_memory"
+        assert compared["checkpoint_source"] == {
+            "document": "Bracket",
+            "object_name": "Body",
+        }
+        compare_code = mock_bridge.execute_python.await_args_list[1].args[0]
+        assert "before.importBrepFromString" in compare_code
+        assert "before.cut(after)" in compare_code
+        assert "after.cut(before)" in compare_code
+
+    @pytest.mark.asyncio
+    async def test_shape_checkpoint_rejects_missing_and_duplicate_names(
+        self, register_tools, mock_bridge
+    ):
+        mock_bridge.execute_python = AsyncMock(
+            return_value=ExecutionResult(
+                success=True,
+                result={
+                    "success": True,
+                    "document": "Model",
+                    "object_name": "Body",
+                    "metrics": {},
+                    "_brep": "brep",
+                },
+                stdout="",
+                stderr="",
+                execution_time_ms=1.0,
+            )
+        )
+        capture = register_tools["capture_shape_checkpoint"]
+        await capture("baseline", "Body")
+
+        with pytest.raises(ValueError, match="already exists"):
+            await capture("baseline", "Body")
+        with pytest.raises(ValueError, match="not found"):
+            await register_tools["compare_shape_checkpoint"]("missing")
+
+        assert mock_bridge.execute_python.await_count == 1
+
+    @pytest.mark.asyncio
     async def test_validate_object_valid(self, register_tools, mock_bridge):
         """validate_object should return valid status for valid object."""
         mock_bridge.execute_python = AsyncMock(
@@ -879,6 +969,8 @@ class TestValidationToolsRegistration:
         register_validation_tools(mcp, get_bridge)
 
         expected_tools = [
+            "capture_shape_checkpoint",
+            "compare_shape_checkpoint",
             "validate_object",
             "validate_document",
             "validate_parametric_model",

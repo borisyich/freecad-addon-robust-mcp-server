@@ -162,6 +162,8 @@ TOOL_SCENARIOS: dict[str, str] = {
     "insert_part_from_library": "io_gui",
     "validate_object": "validation",
     "validate_document": "validation",
+    "capture_shape_checkpoint": "validation",
+    "compare_shape_checkpoint": "validation",
     "validate_parametric_model": "validation",
     "undo_if_invalid": "validation",
     "safe_execute": "validation",
@@ -369,12 +371,12 @@ _result_ = True
     )
 
 
-def test_runtime_registry_has_explicit_133_tool_coverage() -> None:
+def test_runtime_registry_has_explicit_135_tool_coverage() -> None:
     async def registered() -> set[str]:
         return {tool.name for tool in await production_mcp.list_tools()}
 
     actual = asyncio.run(registered())
-    assert len(actual) == 133
+    assert len(actual) == 135
     assert set(TOOL_SCENARIOS) == actual
 
 
@@ -1144,6 +1146,28 @@ async def test_spreadsheet_macro_export_image_gui_and_validation_workflow(
         doc_name=doc,
         code='obj = doc.getObject("Box"); _result_ = {"volume": obj.Shape.Volume}',
     )
+    await _call(
+        tools,
+        "capture_shape_checkpoint",
+        checkpoint_name="box_before_direct_edit",
+        object_name="Box",
+        doc_name=doc,
+    )
+    await _call(
+        tools,
+        "safe_execute",
+        doc_name=doc,
+        code='obj = doc.getObject("Box"); obj.Length = obj.Length.Value + 1; doc.recompute(); _result_ = True',
+    )
+    difference = await _call(
+        tools,
+        "compare_shape_checkpoint",
+        checkpoint_name="box_before_direct_edit",
+        object_name="Box",
+        doc_name=doc,
+    )
+    assert difference["difference"]["available"] is True
+    assert difference["difference"]["geometric_change"] is True
     await _call(tools, "validate_object", object_name="Box", doc_name=doc)
     await _call(tools, "validate_document", doc_name=doc)
     await _call(

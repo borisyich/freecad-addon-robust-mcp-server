@@ -262,6 +262,16 @@
   target document, and added best-effort import provenance metadata.
 - Accepted both normalized and integer-byte RGB triplets with schema-level length
   and range bounds.
+- Reworked `spreadsheet_apply_batch` into dependency-safe stages (typed
+  numbers/quantities, aliases, formulas, bindings, final recompute and
+  validation). Structured quantities use `{"value": 40, "unit": "mm"}`;
+  ambiguous string values are replaced by explicit `formula` and `text` fields.
+- Added session-local `capture_shape_checkpoint` and `compare_shape_checkpoint`
+  validation tools with before/after validity, bounds, volume, area, topology
+  deltas, and localized OCCT added/removed B-rep regions.
+- Added short working examples to the public schemas/descriptions of nested and
+  commonly miscalled tools so clients need not inspect Python source to form
+  requests.
 
 This project uses **component-specific versioning**. Each component has its own
 release notes and version history.

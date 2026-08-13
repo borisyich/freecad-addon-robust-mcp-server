@@ -1,6 +1,6 @@
 # Tools Reference
 
-The server currently registers **133 MCP tools**. This page is generated from the actual `@mcp.tool()` definitions in `src/freecad_mcp/tools` and is the exact inventory.
+The server currently registers **135 MCP tools**. This page is generated from the actual `@mcp.tool()` definitions in `src/freecad_mcp/tools` and is the exact inventory.
 
 Geometry-changing operations are transaction-backed where applicable. Use `history(action="undo")` for explicit recovery, `get_console_output` for console diagnostics, and `recompute_document` for document recomputation.
 
@@ -19,10 +19,10 @@ Geometry-changing operations are transaction-backed where applicable. Use `histo
 | [Images](#images) | `src/freecad_mcp/tools/images.py` | 3 |
 | [Checkpoints](#checkpoints) | `src/freecad_mcp/tools/checkpoints.py` | 1 |
 | [View / GUI / History](#view-gui-history) | `src/freecad_mcp/tools/view.py` | 11 |
-| [Validation](#validation) | `src/freecad_mcp/tools/validation.py` | 5 |
+| [Validation](#validation) | `src/freecad_mcp/tools/validation.py` | 7 |
 | [Export / Import](#export-import) | `src/freecad_mcp/tools/export.py` | 2 |
 | [Macros](#macros) | `src/freecad_mcp/tools/macros.py` | 6 |
-| **Total** |  | **133** |
+| **Total** |  | **135** |
 
 ## Execution
 
@@ -266,7 +266,7 @@ geometry types, circle counts, and bend-layer evidence in the response.
 |---|---|
 | `spreadsheet_create` | Create a new Spreadsheet object. |
 | `spreadsheet_set_cell` | Set the value of a cell in a spreadsheet. |
-| `spreadsheet_apply_batch` | Atomically apply cells, aliases, and bindings with explicit rollback on failure. |
+| `spreadsheet_apply_batch` | Stage typed numbers/quantities, aliases, dependent formulas, and bindings with explicit rollback. |
 | `spreadsheet_get_cell` | Get the value of a cell in a spreadsheet. |
 | `spreadsheet_set_alias` | Set an alias for a cell in a spreadsheet. |
 | `spreadsheet_get_aliases` | Get aliases by enumerating actual spreadsheet cells. |
@@ -329,6 +329,8 @@ path without removing earlier valid bindings.
 |---|---|
 | `validate_object` | Check the health and validity of a FreeCAD object. |
 | `validate_document` | Check the health of all objects in a FreeCAD document. |
+| `capture_shape_checkpoint` | Capture an in-memory Shape baseline without modifying the document. |
+| `compare_shape_checkpoint` | Report invariant metrics and exact added/removed B-rep regions after an edit. |
 | `validate_parametric_model` | Compact final diagnostic with expanded structure/full modes on request. |
 | `undo_if_invalid` | Check document health and undo the last operation if invalid objects exist. |
 | `safe_execute` | Execute Python code with automatic validation and rollback on failure. |

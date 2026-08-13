@@ -510,12 +510,14 @@ comparison, updates a discrepancy ledger, and may revise both the source
 interpretation and CAD. A source-backed tangency conflict blocks progress until
 endpoints, radius, arc side, datum, and the dimension chain are rechecked.
 
-#### Validation & diagnostics (5 tools)
+#### Validation & diagnostics (7 tools)
 
 | Tool | Description | Mode |
 | --- | --- | --- |
 | `validate_object` | Check one object's shape and FreeCAD state | All |
 | `validate_document` | Check geometric health across a document | All |
+| `capture_shape_checkpoint` | Capture a read-only in-memory B-rep baseline | All |
+| `compare_shape_checkpoint` | Report metric deltas and exact added/removed Shape regions | All |
 | `validate_parametric_model` | Compact final report; paged/expanded parametric diagnostics on request | All |
 | `undo_if_invalid` | Undo after invalid document state | All |
 | `safe_execute` | Run Python with optional validation and rollback | All |

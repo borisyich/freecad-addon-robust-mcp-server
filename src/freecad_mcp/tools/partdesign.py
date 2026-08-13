@@ -3198,7 +3198,7 @@ _result_ = {{
         doc_name: str | None = None,
         direction: Literal["auto", "forward", "reversed"] = "auto",
     ) -> dict[str, Any]:
-        """Create a validated cylindrical cut with an explicit world-space axis.
+        """Create a validated world-axis cut; example: body_name="Body", axis_origin=[0,0,10], axis_direction=[0,0,-1], diameter=5, depth=12.
 
         Use this tool for radial holes, tangent-plane holes, oil passages, and
         other cylindrical cuts that do not start from an actual planar face.

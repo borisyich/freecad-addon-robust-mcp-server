@@ -267,7 +267,7 @@ freecad_mcp/
 │   ├── images.py            # Local image delivery/comparison (3 tools)
 │   ├── checkpoints.py       # Optional discrepancy assessment (1 tool)
 │   ├── view.py              # View, camera, display (9 tools)
-│   ├── validation.py        # Geometry/parametric diagnostics (5 tools)
+│   ├── validation.py        # Geometry/parametric diagnostics (7 tools)
 │   ├── export.py            # Export/import operations (2 tools)
 │   └── macros.py            # Macro management (6 tools)
 │

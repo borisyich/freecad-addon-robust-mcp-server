@@ -1087,7 +1087,10 @@ async def test_spreadsheet_apply_batch_uses_one_transaction_and_recompute() -> N
     register_spreadsheet_tools(mcp, get_bridge)
     result = await registered["spreadsheet_apply_batch"](
         "Params",
-        cells=[{"cell": "A1", "value": 10}, {"cell": "A2", "value": 20}],
+        cells=[
+            {"cell": "A1", "value": {"value": 10, "unit": "mm"}},
+            {"cell": "A2", "formula": "=Length*2"},
+        ],
         aliases=[
             {"cell": "A1", "alias": "Length"},
             {"cell": "A2", "alias": "Width"},
@@ -1105,18 +1108,38 @@ async def test_spreadsheet_apply_batch_uses_one_transaction_and_recompute() -> N
     assert result["formula_cells_validated"] == 3
     generated_code = bridge.execute_python.await_args.args[0]
     assert "for formula_cell in _spreadsheet_nonempty_cells(sheet):" in generated_code
-    assert 'formula_content = _spreadsheet_cell_content(sheet, formula_cell)' in generated_code
+    assert (
+        "formula_content = _spreadsheet_cell_content(sheet, formula_cell)"
+        in generated_code
+    )
     assert '"formula_cells_validated": formula_cells_validated' in generated_code
+    transaction_code = generated_code.split(
+        'doc.openTransaction("Apply Spreadsheet Batch")', 1
+    )[1]
+    assert transaction_code.index(
+        "for item in literal_cells:"
+    ) < transaction_code.index("for item in aliases:")
+    assert transaction_code.index("for item in aliases:") < transaction_code.index(
+        "for item in formula_cells:"
+    )
+    assert transaction_code.index(
+        "for item in formula_cells:"
+    ) < transaction_code.index("for item, target in resolved_bindings:")
+    assert "FreeCAD.Units.Quantity" in generated_code
     failure_path = generated_code.split("except Exception as batch_error:", 1)[1]
-    explicit_restore = failure_path.index("for cell, previous in cell_snapshot.items():")
+    explicit_restore = failure_path.index(
+        "for cell, previous in cell_snapshot.items():"
+    )
     restored_commit = failure_path.index("doc.commitTransaction()")
     emergency_abort = failure_path.index("doc.abortTransaction()")
     assert explicit_restore < restored_commit < emergency_abort
     assert 'if previous["content"]:' in failure_path
-    assert '_spreadsheet_restore_content(sheet, cell, previous["content"])' in failure_path
-    assert 'elif _spreadsheet_cell_content(sheet, cell):' in failure_path
+    assert (
+        '_spreadsheet_restore_content(sheet, cell, previous["content"])' in failure_path
+    )
+    assert "elif _spreadsheet_cell_content(sheet, cell):" in failure_path
     assert "Bad dynamic_cast!" in failure_path
-    assert "hasattr(target, item[\"target_property\"])" not in generated_code
+    assert 'hasattr(target, item["target_property"])' not in generated_code
     assert "_spreadsheet_expression_for_path(" in generated_code
     assert "FreeCAD did not retain expression path" in generated_code
 
@@ -1168,7 +1191,7 @@ async def test_spreadsheet_apply_batch_rejects_false_success_payload() -> None:
     register_spreadsheet_tools(mcp, get_bridge)
     with pytest.raises(ValueError, match="Failed to apply spreadsheet batch"):
         await registered["spreadsheet_apply_batch"](
-            "Params", cells=[{"cell": "A1", "value": "=MissingAlias"}]
+            "Params", cells=[{"cell": "A1", "formula": "=MissingAlias"}]
         )
 
 
@@ -1200,7 +1223,7 @@ async def test_spreadsheet_apply_batch_surfaces_report_view_failure() -> None:
     register_spreadsheet_tools(mcp, get_bridge)
     with pytest.raises(ValueError, match="FreeCAD Report View"):
         await registered["spreadsheet_apply_batch"](
-            "Params", cells=[{"cell": "A1", "value": "=MissingAlias"}]
+            "Params", cells=[{"cell": "A1", "formula": "=MissingAlias"}]
         )
 
 
@@ -1217,6 +1240,15 @@ def test_spreadsheet_batch_models_reject_bad_cells_and_aliases() -> None:
         SpreadsheetCellUpdate(cell="1A", value=10)
     with pytest.raises(ValidationError):
         SpreadsheetAliasUpdate(cell="A1", alias="bad alias")
+    with pytest.raises(ValidationError, match="valid integer"):
+        SpreadsheetCellUpdate(cell="A1", value="40 mm")
+    with pytest.raises(ValidationError, match="supply exactly one"):
+        SpreadsheetCellUpdate(cell="A1", value=40, formula="=20*2")
+    with pytest.raises(ValidationError, match="formula must begin"):
+        SpreadsheetCellUpdate(cell="A1", formula="Length/2")
+
+    quantity = SpreadsheetCellUpdate(cell="A1", value={"value": 40, "unit": " mm "})
+    assert quantity.model_dump()["value"] == {"value": 40, "unit": "mm"}
 
 
 def test_spreadsheet_runtime_enumerates_real_cells_not_properties() -> None:

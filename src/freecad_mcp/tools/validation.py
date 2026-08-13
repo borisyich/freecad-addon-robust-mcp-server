@@ -141,6 +141,275 @@ def register_validation_tools(
         get_bridge: Async function to get the active bridge.
     """
 
+    shape_checkpoints: dict[str, dict[str, Any]] = {}
+
+    @mcp.tool()
+    async def capture_shape_checkpoint(
+        checkpoint_name: str,
+        object_name: str,
+        doc_name: str | None = None,
+        recompute: bool = True,
+        overwrite: bool = False,
+    ) -> dict[str, Any]:
+        """Capture an in-memory B-rep baseline; example: checkpoint_name="before_holes", object_name="Body". Use compare_shape_checkpoint after the edit.
+
+        The checkpoint is server-session-local and does not modify the FreeCAD
+        document. It records validity, bounds, volume, area, topology counts,
+        and the exact serialized Shape used by the later comparison.
+        """
+        normalized_name = checkpoint_name.strip()
+        if not normalized_name:
+            raise ValueError("checkpoint_name must not be empty")
+        if len(normalized_name) > 80:
+            raise ValueError("checkpoint_name must not exceed 80 characters")
+        if not object_name.strip():
+            raise ValueError("object_name must not be empty")
+        if normalized_name in shape_checkpoints and not overwrite:
+            raise ValueError(
+                f"Shape checkpoint already exists: {normalized_name!r}; "
+                "set overwrite=true to replace it"
+            )
+        if normalized_name not in shape_checkpoints and len(shape_checkpoints) >= 32:
+            raise ValueError(
+                "Shape checkpoint limit (32) reached; overwrite an existing "
+                "checkpoint or restart the server session"
+            )
+
+        bridge = await get_bridge()
+        code = f"""
+import FreeCAD
+
+def _shape_metrics(shape):
+    box = shape.BoundBox
+    return {{
+        "valid": bool(shape.isValid()),
+        "shape_type": str(shape.ShapeType),
+        "solid_count": len(shape.Solids),
+        "shell_count": len(shape.Shells),
+        "face_count": len(shape.Faces),
+        "edge_count": len(shape.Edges),
+        "vertex_count": len(shape.Vertexes),
+        "volume": float(shape.Volume),
+        "area": float(shape.Area),
+        "bounding_box": {{
+            "min": [float(box.XMin), float(box.YMin), float(box.ZMin)],
+            "max": [float(box.XMax), float(box.YMax), float(box.ZMax)],
+            "size": [float(box.XLength), float(box.YLength), float(box.ZLength)],
+        }},
+    }}
+
+doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
+if doc is None:
+    raise ValueError("No document found")
+if {recompute!r}:
+    doc.recompute()
+obj = doc.getObject({object_name!r})
+if obj is None:
+    raise ValueError(f"Object not found: {object_name!r}")
+shape = getattr(obj, "Shape", None)
+if shape is None or shape.isNull():
+    raise ValueError(f"Object has no usable Shape: {object_name!r}")
+_result_ = {{
+    "success": True,
+    "document": doc.Name,
+    "object_name": obj.Name,
+    "metrics": _shape_metrics(shape),
+    "_brep": shape.exportBrepToString(),
+}}
+"""
+        execution = await bridge.execute_python(code)
+        if not execution.success or not isinstance(execution.result, dict):
+            raise ValueError(
+                execution.error_traceback or "Failed to capture shape checkpoint"
+            )
+        payload = dict(execution.result)
+        brep = payload.pop("_brep", None)
+        if not isinstance(brep, str) or not brep:
+            raise ValueError("FreeCAD did not return a serialized checkpoint Shape")
+        shape_checkpoints[normalized_name] = {
+            "brep": brep,
+            "document": payload.get("document"),
+            "object_name": payload.get("object_name"),
+            "metrics": payload.get("metrics"),
+        }
+        payload["checkpoint_name"] = normalized_name
+        payload["storage"] = "server_session_memory"
+        payload["checkpoint_count"] = len(shape_checkpoints)
+        return payload
+
+    @mcp.tool()
+    async def compare_shape_checkpoint(
+        checkpoint_name: str,
+        object_name: str | None = None,
+        doc_name: str | None = None,
+        recompute: bool = True,
+        volume_tolerance: float = 1e-7,
+        linear_tolerance: float = 1e-7,
+    ) -> dict[str, Any]:
+        """Compare current geometry with a captured B-rep; example: checkpoint_name="before_holes", object_name="Body". Reports added/removed regions and metric deltas.
+
+        This is a read-only invariant check for direct edits. Exact OCCT cuts
+        localize the symmetric Shape difference; metric deltas include bounds,
+        volume, area, validity, and topology counts. A boolean failure is
+        reported explicitly rather than replaced by a misleading heuristic.
+        """
+        normalized_name = checkpoint_name.strip()
+        snapshot = shape_checkpoints.get(normalized_name)
+        if snapshot is None:
+            available = sorted(shape_checkpoints)
+            raise ValueError(
+                f"Shape checkpoint not found: {normalized_name!r}; "
+                f"available={available}"
+            )
+        if volume_tolerance < 0 or linear_tolerance < 0:
+            raise ValueError("comparison tolerances must be non-negative")
+        target_object = object_name or str(snapshot["object_name"])
+        target_doc = doc_name or str(snapshot["document"])
+        bridge = await get_bridge()
+        code = f"""
+import FreeCAD
+import Part
+
+def _bbox(shape):
+    box = shape.BoundBox
+    return {{
+        "min": [float(box.XMin), float(box.YMin), float(box.ZMin)],
+        "max": [float(box.XMax), float(box.YMax), float(box.ZMax)],
+        "size": [float(box.XLength), float(box.YLength), float(box.ZLength)],
+    }}
+
+def _metrics(shape):
+    return {{
+        "valid": bool(shape.isValid()),
+        "shape_type": str(shape.ShapeType),
+        "solid_count": len(shape.Solids),
+        "shell_count": len(shape.Shells),
+        "face_count": len(shape.Faces),
+        "edge_count": len(shape.Edges),
+        "vertex_count": len(shape.Vertexes),
+        "volume": float(shape.Volume),
+        "area": float(shape.Area),
+        "bounding_box": _bbox(shape),
+    }}
+
+def _difference_regions(shape):
+    if shape.isNull():
+        return []
+    regions = list(shape.Solids)
+    if not regions:
+        regions = [shape]
+    return [
+        {{
+            "index": index,
+            "shape_type": str(region.ShapeType),
+            "valid": bool(region.isValid()),
+            "volume": float(region.Volume),
+            "area": float(region.Area),
+            "face_count": len(region.Faces),
+            "edge_count": len(region.Edges),
+            "vertex_count": len(region.Vertexes),
+            "surface_types": sorted({{
+                type(face.Surface).__name__ for face in region.Faces
+            }}),
+            "bounding_box": _bbox(region),
+        }}
+        for index, region in enumerate(regions, 1)
+    ]
+
+doc = FreeCAD.ActiveDocument if {target_doc!r} is None else FreeCAD.getDocument({target_doc!r})
+if doc is None:
+    raise ValueError("No document found")
+if {recompute!r}:
+    doc.recompute()
+obj = doc.getObject({target_object!r})
+if obj is None:
+    raise ValueError(f"Object not found: {target_object!r}")
+after = getattr(obj, "Shape", None)
+if after is None or after.isNull():
+    raise ValueError(f"Object has no usable Shape: {target_object!r}")
+before = Part.Shape()
+before.importBrepFromString({snapshot["brep"]!r})
+before_metrics = _metrics(before)
+after_metrics = _metrics(after)
+
+boolean_error = None
+try:
+    removed = before.cut(after)
+    added = after.cut(before)
+    try:
+        removed = removed.removeSplitter()
+        added = added.removeSplitter()
+    except Exception:
+        pass
+    removed_regions = _difference_regions(removed)
+    added_regions = _difference_regions(added)
+except Exception as exc:
+    boolean_error = str(exc)
+    removed_regions = []
+    added_regions = []
+
+metric_names = ("solid_count", "shell_count", "face_count", "edge_count", "vertex_count", "volume", "area")
+deltas = {{name: after_metrics[name] - before_metrics[name] for name in metric_names}}
+bbox_delta = {{
+    key: [
+        after_metrics["bounding_box"][key][index] - before_metrics["bounding_box"][key][index]
+        for index in range(3)
+    ]
+    for key in ("min", "max", "size")
+}}
+removed_volume = sum(region["volume"] for region in removed_regions)
+added_volume = sum(region["volume"] for region in added_regions)
+bbox_changed = any(
+    abs(value) > {linear_tolerance!r}
+    for values in bbox_delta.values()
+    for value in values
+)
+geometric_change = None if boolean_error else bool(
+    removed_volume > {volume_tolerance!r}
+    or added_volume > {volume_tolerance!r}
+    or removed_regions
+    or added_regions
+)
+_result_ = {{
+    "success": True,
+    "document": doc.Name,
+    "object_name": obj.Name,
+    "before": before_metrics,
+    "after": after_metrics,
+    "delta": {{**deltas, "bounding_box": bbox_delta}},
+    "invariants": {{
+        "valid_before": before_metrics["valid"],
+        "valid_after": after_metrics["valid"],
+        "solid_count_unchanged": deltas["solid_count"] == 0,
+        "bounding_box_unchanged": not bbox_changed,
+    }},
+    "difference": {{
+        "method": "occt_before_cut_after_and_after_cut_before",
+        "available": boolean_error is None,
+        "error": boolean_error,
+        "geometric_change": geometric_change,
+        "removed_volume": removed_volume,
+        "added_volume": added_volume,
+        "removed_region_count": len(removed_regions),
+        "added_region_count": len(added_regions),
+        "removed_regions": removed_regions,
+        "added_regions": added_regions,
+    }},
+}}
+"""
+        execution = await bridge.execute_python(code)
+        if not execution.success or not isinstance(execution.result, dict):
+            raise ValueError(
+                execution.error_traceback or "Failed to compare shape checkpoint"
+            )
+        payload = dict(execution.result)
+        payload["checkpoint_name"] = normalized_name
+        payload["checkpoint_source"] = {
+            "document": snapshot["document"],
+            "object_name": snapshot["object_name"],
+        }
+        return payload
+
     @mcp.tool()
     async def validate_object(
         object_name: str,
