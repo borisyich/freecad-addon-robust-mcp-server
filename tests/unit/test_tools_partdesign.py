@@ -1190,10 +1190,53 @@ class TestPartDesignTools:
 
         assert result["name"] == "Fillet"
         generated_code = mock_bridge.execute_python.await_args.args[0]
+        assert '"source_shape_type": source_shape_type' in generated_code
+        assert '"source_solid_count": source_solid_count' in generated_code
+        assert '"adjacent_face_types": {' in generated_code
+        assert '"requested_radius": float(2.0)' in generated_code
+        assert "obj.Shape.makeFillet" in generated_code
+        assert '"failing_edge_groups": failing_edge_groups' in generated_code
         assert '_require_current_body_tip(body, obj, "Fillet")' in generated_code
         assert "_validate_single_solid_feature" in generated_code
         assert "_cleanup_failed_partdesign_feature" in generated_code
         mock_bridge.execute_python.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_fillet_edges_returns_structured_failure_diagnostics(
+        self, register_tools, mock_bridge
+    ):
+        mock_bridge.execute_python = AsyncMock(
+            return_value=ExecutionResult(
+                success=True,
+                result={
+                    "success": False,
+                    "failure": "Fillet failed: result shape is invalid",
+                    "rolled_back": True,
+                    "source_shape_type": "Solid",
+                    "source_solid_count": 1,
+                    "selected_edges": ["Edge7"],
+                    "adjacent_face_types": {"Edge7": ["Plane", "Cylinder"]},
+                    "requested_radius": 4.0,
+                    "result_state": {"shape_valid": False, "solid_count": 0},
+                    "edge_trials": [{"edge": "Edge7", "ok": False}],
+                    "failing_edges": ["Edge7"],
+                    "failing_edge_groups": [],
+                },
+                stdout="",
+                stderr="",
+                execution_time_ms=10.0,
+            )
+        )
+
+        result = await register_tools["fillet_edges"](
+            object_name="Pad", radius=4.0, edges=["Edge7"]
+        )
+
+        assert result["success"] is False
+        assert result["rolled_back"] is True
+        assert result["source_shape_type"] == "Solid"
+        assert result["adjacent_face_types"]["Edge7"] == ["Plane", "Cylinder"]
+        assert result["failing_edges"] == ["Edge7"]
 
     @pytest.mark.asyncio
     async def test_chamfer_edges(self, register_tools, mock_bridge):

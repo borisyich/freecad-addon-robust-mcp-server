@@ -61,7 +61,7 @@ that behavior so a missing target can receive imported STEP/STL data.
 | `create_primitive` | Create a Box, Cylinder, Sphere, Cone, Torus, Wedge, or Helix. |
 | `edit_object` | Edit object properties; string names are resolved for FreeCAD link properties. |
 | `delete_object` | Delete an object from a FreeCAD document. |
-| `boolean_operation` | Perform a boolean operation on two FreeCAD objects. |
+| `boolean_operation` | Boolean operation with result validity, topology, and volume evidence. |
 | `set_placement` | Set the placement (position and rotation) of a FreeCAD object. |
 | `scale_object` | Scale an object uniformly or non-uniformly. |
 | `rotate_object` | Rotate an object around an axis. |
@@ -74,7 +74,7 @@ that behavior so a missing target can receive imported STEP/STL data.
 | `create_prism` | Create a Part Prism (extruded regular polygon). |
 | `create_regular_polygon` | Create a Part Regular Polygon (2D wire). |
 | `shell_object` | Create a shell (hollow) version of a solid by removing faces. |
-| `move_faces` | Locally move selected planar faces and record an auditable static direct edit. |
+| `move_faces` | Rebuild recognized planar feature boundaries and explicitly report prism fallback. |
 | `offset_3d` | Create a 3D offset of a shape. |
 | `slice_shape` | Slice a shape with a plane, returning the cross-section. |
 | `section_shape` | Create a cross-section of a shape at a standard plane. |

@@ -926,6 +926,13 @@ class TestObjectTools:
                     "name": "Fusion",
                     "label": "Fusion",
                     "type_id": "Part::MultiFuse",
+                    "shape_valid": True,
+                    "shape_type": "Solid",
+                    "solid_count": 1,
+                    "volume": 125.0,
+                    "base_volume": 100.0,
+                    "result_volume": 125.0,
+                    "volume_delta": 25.0,
                 },
                 stdout="",
                 stderr="",
@@ -939,6 +946,15 @@ class TestObjectTools:
         )
 
         assert result["name"] == "Fusion"
+        assert result["shape_valid"] is True
+        assert result["shape_type"] == "Solid"
+        assert result["solid_count"] == 1
+        assert result["volume_delta"] == 25.0
+        generated_code = mock_bridge.execute_python.await_args.args[0]
+        assert '"shape_valid": shape_valid' in generated_code
+        assert '"shape_type": shape_type' in generated_code
+        assert '"base_volume": base_volume' in generated_code
+        assert '"result_volume": result_volume' in generated_code
         mock_bridge.execute_python.assert_called_once()
 
     @pytest.mark.asyncio
@@ -1345,6 +1361,17 @@ class TestObjectTools:
                     "face_names": ["Face3"],
                     "distance": 2.0,
                     "operation": "add",
+                    "performed_method": "feature_rebuild",
+                    "rebuild_variant": "translated_tangent_feature",
+                    "feature_face_names": ["Face3", "Face4", "Face5"],
+                    "tangent_chain_face_names": ["Face5"],
+                    "terminal_transition_face_names": [],
+                    "shape_valid": True,
+                    "shape_type": "Solid",
+                    "solid_count": 1,
+                    "base_volume": 100.0,
+                    "result_volume": 120.0,
+                    "volume_delta": 20.0,
                     "static_snapshot": True,
                     "direct_edit": True,
                 },
@@ -1359,12 +1386,21 @@ class TestObjectTools:
         )
 
         assert result["direct_edit"] is True
+        assert result["performed_method"] == "feature_rebuild"
         generated_code = mock_bridge.execute_python.await_args.args[0]
-        assert "face.extrude(normal * 2.0)" in generated_code
+        assert "source_shape.defeaturing(feature_faces)" in generated_code
+        assert "shared_edge.valueAt" in generated_code
+        assert "_selected_non_tangent_transitions" in generated_code
+        assert "controlled local B-rep surgery is required" in generated_code
+        assert "recovered_tool.fuse(moved_tool)" in generated_code
+        assert "recovered_tool.common(moved_tool)" in generated_code
+        assert 'performed_method = "prism_boolean_fallback"' in generated_code
         assert (
             'result.addProperty("App::PropertyLink", "SourceObject"' in generated_code
         )
-        assert 'result.DirectEditOperation = f"move_faces:{mode}"' in generated_code
+        assert "result.DirectEditMethod = performed_method" in generated_code
+        assert '"fallback_reason": fallback_reason' in generated_code
+        assert '"rebuild_variant": rebuild_variant' in generated_code
 
     @pytest.mark.asyncio
     async def test_move_faces_rejects_invalid_input_before_freecad(
@@ -1377,6 +1413,13 @@ class TestObjectTools:
         with pytest.raises(ValueError, match="finite non-zero"):
             await register_tools["move_faces"](
                 object_name="Pad", face_names=["Face1"], distance=0.0
+            )
+        with pytest.raises(ValueError, match="Invalid feature face reference"):
+            await register_tools["move_faces"](
+                object_name="Pad",
+                face_names=["Face1"],
+                distance=2.0,
+                feature_face_names=["Edge2"],
             )
         mock_bridge.execute_python.assert_not_awaited()
 

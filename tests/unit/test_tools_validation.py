@@ -54,6 +54,10 @@ class TestValidationTools:
             "document": "Bracket",
             "object_name": "Body",
             "metrics": {"valid": True, "volume": 1000.0},
+            "shape_placement": {
+                "base": [12.0, -4.0, 3.0],
+                "rotation_quaternion": [0.0, 0.0, 0.0, 1.0],
+            },
             "_brep": "DBRep_DrawableShape\nmock-brep",
         }
         compare_payload = {
@@ -103,6 +107,12 @@ class TestValidationTools:
         }
         compare_code = mock_bridge.execute_python.await_args_list[1].args[0]
         assert "before.importBrepFromString" in compare_code
+        assert (
+            "shape_for_export.Placement = FreeCAD.Placement()"
+            in (mock_bridge.execute_python.await_args_list[0].args[0])
+        )
+        assert "before.Placement = FreeCAD.Placement" in compare_code
+        assert "FreeCAD.Rotation(*saved_placement" in compare_code
         assert "before.cut(after)" in compare_code
         assert "after.cut(before)" in compare_code
         assert "face_product" in compare_code

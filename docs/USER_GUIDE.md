@@ -429,10 +429,23 @@ metric; use formal checkpoints only when the task benefits from them.
 - `set_body_tip` changes the active Body result without using `edit_object` or GUI selection and validates the resulting Shape/Tip contract.
 - `linear_pattern` and `polar_pattern` are for one transformation of a non-pattern seed. Use `multi_transform_pattern` for combined linear and polar stages. For drawing reconstruction, accept the single seed through `compare_images` before repeating it.
 - Pattern, Pocket, and thread responses include before/after volume diagnostics. A valid Shape is not proof that the intended amount of material changed.
+- `boolean_operation` returns Shape validity/type/solid count plus base, tool,
+  result, and delta volumes. Use those fields as the immediate Boolean checkpoint;
+  call deeper inspection only when they expose ambiguity or a failed invariant.
+- A failed `fillet_edges` rolls back and returns structured source/selection,
+  adjacent-face, radius, result-state, and per-edge trial evidence. When every
+  edge succeeds individually but the group fails, inspect `failing_edge_groups`.
 - `thread_helix` creates native additive or subtractive helical geometry from an editable profile sketch.
 - `spreadsheet_apply_batch` stages numeric/structured-Quantity values, aliases, alias-dependent formulas, and property bindings in one transaction. Use `{"value":40,"unit":"mm"}` for a Quantity, `formula="=..."` for a formula, and `text="..."` for literal text; ambiguous raw string values such as `"40 mm"` are rejected. After recompute it evaluates every non-empty formula cell on the sheet, including unchanged formulas that depend on a modified cell or alias. Any formula failure restores affected cells, aliases, and expressions. Report View formula errors are surfaced as `FreeCADReportError` rather than success.
 - A unitless spreadsheet number bound to an angle property is interpreted in degrees, so `360` can safely drive `PolarPattern.Angle`. Supply an explicit angle to batch as `{"value":360,"unit":"deg"}`.
 - Around direct edits, call `capture_shape_checkpoint` before mutation and `compare_shape_checkpoint` after it. The comparison always reports solid/topology counts, validity, and bounding-box/volume/area deltas. Its default `difference_mode="auto"` localizes added/removed regions with OCCT only below the configured face-product complexity limit; use `metrics` for imported B-reps when no booleans are wanted, or `exact` with an explicit timeout when localization is essential.
+- Shape checkpoints preserve the Shape Placement separately from the normalized
+  serialized B-rep. A translated/rotated imported object therefore compares in
+  the same coordinate frame after the BRep round-trip.
+- For imported/static B-reps, `move_faces(method="feature_rebuild")` is the
+  topology-aware path for recognized local planar boundaries and transition
+  chains. Inspect `performed_method`; `prism_boolean_fallback` is only a sharp
+  prismatic compatibility result, not general push-pull.
 - When an exact checkpoint difference is performed, `volume_tolerance` governs the summary `geometric_change` flag. Smaller OCCT sliver regions are still returned for diagnosis but do not override the threshold. Metric-only comparisons leave `geometric_change=None` and report the cheaper `metric_change_detected` signal instead.
 - Change a Hole thread profile and size together, for example `edit_object("Hole", {"ThreadType": "ISO_FINE", "ThreadSize": "M12x1.25"})`; this prevents FreeCAD from silently resetting the size.
 

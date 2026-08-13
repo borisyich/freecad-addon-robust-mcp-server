@@ -478,14 +478,42 @@ Read [references/drawing-reconstruction.md](references/drawing-reconstruction.md
 
 ## 6. Modify existing models
 
-- Inspect the current document, Body history, Tip, sketches, constraints,
-  expressions, dependencies, visibility, and baseline dimensions before editing.
-- Change the earliest parameter, constraint, sketch, or feature that semantically
-  owns the requested change.
-- Avoid appending compensating geometry or creating a replacement Body merely to
-  hide a failed edit.
-- Recompute and inspect downstream features after every upstream change.
-- Treat existing functional features and interfaces as invariants unless the change request explicitly targets them.
+First classify the model from evidence; do not assume that an imported/static
+B-rep has a semantic owner merely because it is open in FreeCAD.
+
+### Native editable history
+
+1. Inspect the current document, Body history, Tip, sketches, constraints,
+   expressions, dependencies, visibility, and baseline dimensions.
+2. Change the earliest parameter, constraint, sketch, or feature that
+   semantically owns the requested change.
+3. Avoid appending compensating geometry or creating a replacement Body merely
+   to hide a failed edit.
+4. Recompute and inspect downstream features after every upstream change.
+
+### Imported or static B-rep
+
+1. Identify the target feature and the boundary whose motion expresses the
+   requested change. Inspect adjacent walls, fillets, chamfers, blends, tangent
+   faces, and the attachment to the parent solid.
+2. Record invariants: functional/interface geometry, solid count, validity,
+   volume expectations, bounds that must stay fixed, and unaffected local regions.
+3. Call `capture_shape_checkpoint` before mutation. Placement is part of the
+   checkpoint; do not substitute a visually similar origin-normalized shape.
+4. Use a supported direct edit. For planar push-pull on a recognized local
+   feature, prefer `move_faces(method="feature_rebuild")` and supply
+   `feature_face_names` when automatic boundary discovery is ambiguous. Inspect
+   `performed_method`; do not describe `prism_boolean_fallback` as Move Face.
+5. If no supported direct edit preserves the feature, use controlled local B-rep
+   surgery: isolate the feature/material or void, preserve or reconstruct its
+   transition chain, apply the smallest edit, and validate one solid. Do not
+   silently replace a blend-bearing feature with a sharp prism.
+6. Call `compare_shape_checkpoint`, using exact localization when complexity and
+   timeout allow. Verify both the changed region and unchanged local/invariant
+   regions; whole-model volume and bounds alone are insufficient.
+
+For both branches, treat existing functional features and interfaces as
+invariants unless the change request explicitly targets them.
 
 ### Preserve functional geometry when choosing what to move
 

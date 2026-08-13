@@ -1509,6 +1509,13 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
                 - name: Result object name
                 - label: Result object label
                 - type_id: Result object type
+                - shape_valid: Whether the result Shape is valid
+                - shape_type: OCCT ShapeType (or ``Null``)
+                - solid_count: Number of result solids
+                - volume: Result volume (alias of ``result_volume``)
+                - base_volume: Volume of the first operand
+                - result_volume: Volume after the Boolean
+                - volume_delta: ``result_volume - base_volume``
         """
         bridge = await get_bridge()
 
@@ -1537,6 +1544,11 @@ if obj1 is None:
 if obj2 is None:
     raise ValueError(f"Object not found: {object2_name!r}")
 
+base_shape = getattr(obj1, "Shape", None)
+tool_shape = getattr(obj2, "Shape", None)
+base_volume = float(base_shape.Volume) if base_shape is not None and not base_shape.isNull() else 0.0
+tool_volume = float(tool_shape.Volume) if tool_shape is not None and not tool_shape.isNull() else 0.0
+
 # Wrap in transaction for undo support
 doc.openTransaction("Boolean {operation.capitalize()}")
 try:
@@ -1549,6 +1561,12 @@ try:
         result.Shapes = [obj1, obj2]
 
     doc.recompute()
+    shape = getattr(result, "Shape", None)
+    shape_is_null = shape is None or shape.isNull()
+    shape_valid = bool(not shape_is_null and shape.isValid())
+    shape_type = "Null" if shape_is_null else str(shape.ShapeType)
+    solid_count = 0 if shape_is_null else len(shape.Solids)
+    result_volume = 0.0 if shape_is_null else float(shape.Volume)
     doc.commitTransaction()
 except Exception:
     doc.abortTransaction()
@@ -1558,6 +1576,15 @@ _result_ = {{
     "name": result.Name,
     "label": result.Label,
     "type_id": result.TypeId,
+    "operation": {operation!r},
+    "shape_valid": shape_valid,
+    "shape_type": shape_type,
+    "solid_count": solid_count,
+    "volume": result_volume,
+    "base_volume": base_volume,
+    "tool_volume": tool_volume,
+    "result_volume": result_volume,
+    "volume_delta": result_volume - base_volume,
 }}
 """
         result = await bridge.execute_python(code)
@@ -2359,17 +2386,31 @@ except Exception:
         result_name: str | None = None,
         hide_source: bool = True,
         doc_name: str | None = None,
+        method: Literal["auto", "feature_rebuild", "prism"] = "auto",
+        feature_face_names: list[str] | None = None,
     ) -> dict[str, Any]:
-        """Move/offset selected planar faces by a signed normal distance.
+        """Move selected planar boundaries by a signed normal distance.
 
-        This is a local direct-edit operation. Positive distance extends material
-        along each face's oriented normal; negative distance removes material in
-        the opposite direction. ``operation`` can override the automatic
-        fuse/cut choice when working with cavity faces or unusual orientations.
+        ``feature_rebuild`` performs topology-aware local B-rep surgery for an
+        imported/static solid. It discovers the local feature from the selected
+        planar cap or floor, carries adjacent wall/blend/chamfer faces up to a
+        parallel support boundary, heals the source with OCCT defeaturing, and
+        rebuilds the recovered material or void at the moved boundary. This
+        preserves fixed attachment transitions and moves terminal transitions
+        instead of merely extruding the selected trimmed face.
+
+        ``auto`` first tries that algorithm and reports any fallback reason. It
+        uses the legacy face-prism Boolean only when feature reconstruction is
+        unavailable. ``prism`` requests that limited compatibility algorithm
+        explicitly. Use strict ``feature_rebuild`` when silent degradation is
+        unacceptable. ``operation`` controls only the prism compatibility path;
+        a boundary move itself adds material for positive distance and removes
+        material for negative distance.
 
         The result is an auditable static shape feature with links to the source,
-        selected faces, and distance. It is intentionally reported as a direct
-        edit rather than pretending to be a native parametric PartDesign feature.
+        selected and propagated faces, distance, performed method, validity, and
+        before/after volume evidence. It does not pretend to be a native
+        parametric PartDesign feature.
 
         Args:
             object_name: Shape-bearing source object.
@@ -2380,6 +2421,12 @@ except Exception:
             result_name: Optional result object name.
             hide_source: Hide the source after a successful operation.
             doc_name: Document containing the source object.
+            method: ``auto``, strict ``feature_rebuild``, or compatibility
+                ``prism``.
+            feature_face_names: Optional explicit complete local feature region.
+                Include the selected boundary, walls, fillets, chamfers, and
+                blends, but not the parallel support face. When omitted, the
+                region is discovered automatically.
 
         Returns:
             Result identity, operation evidence, and static/direct-edit status.
@@ -2395,9 +2442,21 @@ except Exception:
                 and int(face_name[4:]) > 0
             ):
                 raise ValueError(f"Invalid face reference: {face_name!r}")
+        if method not in {"auto", "feature_rebuild", "prism"}:
+            raise ValueError("method must be auto, feature_rebuild, or prism")
+        for feature_face_name in feature_face_names or []:
+            if not (
+                feature_face_name.startswith("Face")
+                and feature_face_name[4:].isdigit()
+                and int(feature_face_name[4:]) > 0
+            ):
+                raise ValueError(
+                    f"Invalid feature face reference: {feature_face_name!r}"
+                )
 
         bridge = await get_bridge()
         code = f"""
+import math
 import Part
 
 doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
@@ -2410,49 +2469,301 @@ if obj is None:
 if not hasattr(obj, "Shape") or obj.Shape.isNull():
     raise ValueError("Object has no usable shape")
 
+source_shape = obj.Shape
+face_count = len(source_shape.Faces)
 face_names = {face_names!r}
-faces = []
+selected_indexes = []
 for face_name in face_names:
     index = int(face_name[4:]) - 1
-    if index < 0 or index >= len(obj.Shape.Faces):
+    if index < 0 or index >= face_count:
         raise ValueError(f"Subelement not found: {{obj.Name}}.{{face_name}}")
-    face = obj.Shape.Faces[index]
+    selected_indexes.append(index)
+
+explicit_feature_names = {feature_face_names!r} or []
+explicit_feature_indexes = []
+for face_name in explicit_feature_names:
+    index = int(face_name[4:]) - 1
+    if index < 0 or index >= face_count:
+        raise ValueError(f"Subelement not found: {{obj.Name}}.{{face_name}}")
+    explicit_feature_indexes.append(index)
+
+def _surface_type(face):
+    return type(getattr(face, "Surface", None)).__name__
+
+def _face_normal(face):
+    center = face.CenterOfMass
+    try:
+        u, v = face.Surface.parameter(center)
+    except Exception:
+        u_min, u_max, v_min, v_max = face.ParameterRange
+        u, v = (u_min + u_max) * 0.5, (v_min + v_max) * 0.5
+    normal = face.normalAt(u, v)
+    if normal.Length <= 1e-12:
+        raise ValueError("Could not determine an oriented face normal")
+    normal.normalize()
+    return normal
+
+def _same_shape(first, second):
+    try:
+        return bool(first.isSame(second))
+    except Exception:
+        return first.isEqual(second)
+
+def _shared_edges(first, second):
+    return [
+        edge
+        for edge in first.Edges
+        if any(_same_shape(edge, other) for other in second.Edges)
+    ]
+
+def _faces_are_tangent(first, second, shared_edges, angle_tolerance_degrees=5.0):
+    if not shared_edges:
+        return False
+    shared_edge = shared_edges[0]
+    point = shared_edge.valueAt(
+        (shared_edge.FirstParameter + shared_edge.LastParameter) * 0.5
+    )
+    try:
+        first_uv = first.Surface.parameter(point)
+        second_uv = second.Surface.parameter(point)
+        first_normal = first.normalAt(*first_uv)
+        second_normal = second.normalAt(*second_uv)
+        if first_normal.Length <= 1e-12 or second_normal.Length <= 1e-12:
+            return False
+        first_normal.normalize()
+        second_normal.normalize()
+        threshold = math.cos(math.radians(angle_tolerance_degrees))
+        return abs(first_normal.dot(second_normal)) >= threshold
+    except Exception:
+        return False
+
+selected_faces = [source_shape.Faces[index] for index in selected_indexes]
+reference_normal = _face_normal(selected_faces[0])
+for face_name, face in zip(face_names, selected_faces, strict=True):
     surface_type = type(getattr(face, "Surface", None)).__name__.lower()
     if "plane" not in surface_type:
         raise ValueError(
             f"move_faces currently supports planar faces; {{face_name}} is {{surface_type or 'unknown'}}"
         )
-    faces.append((face_name, face))
+    normal = _face_normal(face)
+    if normal.dot(reference_normal) < 1.0 - 1e-6:
+        raise ValueError(
+            "feature-rebuild face groups must have aligned oriented normals"
+        )
+
+adjacency = {{index: [] for index in range(face_count)}}
+shared_edge_map = {{}}
+for first_index in range(face_count):
+    first = source_shape.Faces[first_index]
+    for second_index in range(first_index + 1, face_count):
+        second = source_shape.Faces[second_index]
+        shared = _shared_edges(first, second)
+        if shared:
+            adjacency[first_index].append(second_index)
+            adjacency[second_index].append(first_index)
+            shared_edge_map[(first_index, second_index)] = shared
+
+def _discover_feature_region():
+    if explicit_feature_indexes:
+        indexes = set(explicit_feature_indexes) | set(selected_indexes)
+        return indexes, set()
+
+    indexes = set(selected_indexes)
+    support_indexes = set()
+    queue = list(selected_indexes)
+    while queue:
+        current = queue.pop(0)
+        for candidate in adjacency[current]:
+            if candidate in indexes or candidate in support_indexes:
+                continue
+            face = source_shape.Faces[candidate]
+            surface_type = _surface_type(face).lower()
+            candidate_normal = _face_normal(face)
+            parallel = abs(candidate_normal.dot(reference_normal)) >= 1.0 - 1e-6
+            if "plane" in surface_type and parallel:
+                support_indexes.add(candidate)
+                continue
+            indexes.add(candidate)
+            queue.append(candidate)
+    return indexes, support_indexes
+
+def _discover_selected_tangent_chain():
+    tangent_indexes = set()
+    visited = set(selected_indexes)
+    queue = list(selected_indexes)
+    while queue:
+        current = queue.pop(0)
+        for candidate in adjacency[current]:
+            if candidate in visited:
+                continue
+            candidate_face = source_shape.Faces[candidate]
+            candidate_surface = _surface_type(candidate_face).lower()
+            candidate_normal = _face_normal(candidate_face)
+            if (
+                candidate not in selected_indexes
+                and "plane" in candidate_surface
+                and abs(candidate_normal.dot(reference_normal)) >= 1.0 - 1e-6
+            ):
+                continue
+            pair = tuple(sorted((current, candidate)))
+            if not _faces_are_tangent(
+                source_shape.Faces[current],
+                candidate_face,
+                shared_edge_map.get(pair, []),
+            ):
+                continue
+            visited.add(candidate)
+            tangent_indexes.add(candidate)
+            queue.append(candidate)
+    return tangent_indexes
+
+def _selected_non_tangent_transitions():
+    transitions = set()
+    for selected_index in selected_indexes:
+        for candidate in adjacency[selected_index]:
+            pair = tuple(sorted((selected_index, candidate)))
+            candidate_face = source_shape.Faces[candidate]
+            if _faces_are_tangent(
+                source_shape.Faces[selected_index],
+                candidate_face,
+                shared_edge_map.get(pair, []),
+            ):
+                continue
+            candidate_normal = _face_normal(candidate_face)
+            normal_component = abs(candidate_normal.dot(reference_normal))
+            if 1e-3 < normal_component < 1.0 - 1e-6:
+                transitions.add(candidate)
+    return transitions
+
+feature_indexes, support_indexes = _discover_feature_region()
+tangent_indexes = _discover_selected_tangent_chain()
+terminal_transition_indexes = _selected_non_tangent_transitions()
+feature_names = [f"Face{{index + 1}}" for index in sorted(feature_indexes)]
+support_names = [f"Face{{index + 1}}" for index in sorted(support_indexes)]
+tangent_names = [f"Face{{index + 1}}" for index in sorted(tangent_indexes)]
+terminal_transition_names = [
+    f"Face{{index + 1}}" for index in sorted(terminal_transition_indexes)
+]
 
 mode = {operation!r}
 if mode == "auto":
     mode = "add" if {distance!r} > 0 else "remove"
 
-doc.openTransaction("Move Faces")
-try:
-    result_shape = obj.Shape
-    for face_name, face in faces:
-        center = face.CenterOfMass
-        try:
-            u, v = face.Surface.parameter(center)
-        except Exception:
-            u_min, u_max, v_min, v_max = face.ParameterRange
-            u, v = (u_min + u_max) * 0.5, (v_min + v_max) * 0.5
-        normal = face.normalAt(u, v)
-        if normal.Length <= 1e-12:
-            raise ValueError(f"Could not determine oriented normal for {{face_name}}")
-        normal.normalize()
-        prism = face.extrude(normal * {distance!r})
-        result_shape = (
-            result_shape.fuse(prism) if mode == "add" else result_shape.cut(prism)
+requested_method = {method!r}
+performed_method = None
+fallback_reason = None
+feature_kind = None
+rebuild_variant = None
+base_volume = float(source_shape.Volume)
+volume_tolerance = max(1e-7, abs(base_volume) * 1e-10)
+
+def _feature_rebuild():
+    if not hasattr(source_shape, "defeaturing"):
+        raise ValueError("FreeCAD Shape.defeaturing is unavailable")
+    if not support_indexes and not explicit_feature_indexes:
+        raise ValueError(
+            "automatic feature region has no parallel support boundary; "
+            "supply feature_face_names or use method='prism' explicitly"
+        )
+    if terminal_transition_indexes:
+        raise ValueError(
+            "selected boundary meets a non-tangent terminal transition "
+            f"{{terminal_transition_names}}; automatic translation would leave "
+            "the transition behind, so controlled local B-rep surgery is required"
+        )
+    feature_faces = [source_shape.Faces[index] for index in sorted(feature_indexes)]
+    healed = source_shape.defeaturing(feature_faces)
+    if healed.isNull() or not healed.isValid():
+        raise ValueError("OCCT defeaturing did not produce a valid healed support")
+    if len(healed.Solids) != len(source_shape.Solids):
+        raise ValueError(
+            "OCCT defeaturing changed the source solid count "
+            f"from {{len(source_shape.Solids)}} to {{len(healed.Solids)}}"
         )
 
+    healed_volume = float(healed.Volume)
+    feature_volume_delta = healed_volume - base_volume
+    if abs(feature_volume_delta) <= volume_tolerance:
+        raise ValueError("defeaturing did not isolate a material or void feature")
+    if feature_volume_delta < 0.0:
+        local_feature_kind = "additive_material"
+        recovered_tool = source_shape.cut(healed)
+    else:
+        local_feature_kind = "subtractive_void"
+        recovered_tool = healed.cut(source_shape)
+    if recovered_tool.isNull() or float(recovered_tool.Volume) <= volume_tolerance:
+        raise ValueError("could not recover the defeatured material/void region")
+
+    if not tangent_indexes:
+        return _prism_boolean(), local_feature_kind, "sharp_boundary_sweep"
+
+    moved_tool = recovered_tool.copy()
+    moved_tool.translate(reference_normal * {distance!r})
+    grows_recovered_tool = (
+        ({distance!r} > 0 and local_feature_kind == "additive_material")
+        or ({distance!r} < 0 and local_feature_kind == "subtractive_void")
+    )
+    updated_tool = (
+        recovered_tool.fuse(moved_tool)
+        if grows_recovered_tool
+        else recovered_tool.common(moved_tool)
+    )
+    if updated_tool.isNull() or float(updated_tool.Volume) <= volume_tolerance:
+        raise ValueError(
+            "requested distance collapses or disconnects the recovered feature"
+        )
+    candidate = (
+        healed.fuse(updated_tool)
+        if local_feature_kind == "additive_material"
+        else healed.cut(updated_tool)
+    )
     try:
-        result_shape = result_shape.removeSplitter()
+        candidate = candidate.removeSplitter()
     except Exception:
         pass
+    return candidate, local_feature_kind, "translated_tangent_feature"
+
+def _prism_boolean():
+    candidate = source_shape
+    for face_name, face in zip(face_names, selected_faces, strict=True):
+        normal = _face_normal(face)
+        prism = face.extrude(normal * {distance!r})
+        candidate = candidate.fuse(prism) if mode == "add" else candidate.cut(prism)
+    try:
+        candidate = candidate.removeSplitter()
+    except Exception:
+        pass
+    return candidate
+
+doc.openTransaction("Move Faces")
+try:
+    if requested_method in ("auto", "feature_rebuild"):
+        try:
+            result_shape, feature_kind, rebuild_variant = _feature_rebuild()
+            performed_method = "feature_rebuild"
+        except Exception as exc:
+            if requested_method == "feature_rebuild":
+                raise
+            fallback_reason = str(exc)
+            result_shape = _prism_boolean()
+            performed_method = "prism_boolean_fallback"
+    else:
+        result_shape = _prism_boolean()
+        performed_method = "prism_boolean"
+
+    if str(source_shape.ShapeType) == "Solid" and len(result_shape.Solids) == 1:
+        result_shape = result_shape.Solids[0]
     if result_shape.isNull() or not result_shape.isValid():
         raise ValueError("Local face move produced an invalid shape")
+    if len(result_shape.Solids) != len(source_shape.Solids):
+        raise ValueError(
+            "Local face move changed solid count from "
+            f"{{len(source_shape.Solids)}} to {{len(result_shape.Solids)}}"
+        )
+    result_volume = float(result_shape.Volume)
+    volume_delta = result_volume - base_volume
+    if abs(volume_delta) <= volume_tolerance:
+        raise ValueError("Local face move produced no measurable material change")
 
     body = next(
         (
@@ -2472,10 +2783,16 @@ try:
     result.SourceObject = obj
     result.addProperty("App::PropertyStringList", "SourceFaces", "Direct Edit")
     result.SourceFaces = face_names
+    result.addProperty("App::PropertyStringList", "FeatureFaces", "Direct Edit")
+    result.FeatureFaces = feature_names
+    result.addProperty("App::PropertyStringList", "TangentChainFaces", "Direct Edit")
+    result.TangentChainFaces = tangent_names
     result.addProperty("App::PropertyLength", "OffsetDistance", "Direct Edit")
     result.OffsetDistance = {distance!r}
     result.addProperty("App::PropertyString", "DirectEditOperation", "Direct Edit")
-    result.DirectEditOperation = f"move_faces:{{mode}}"
+    result.DirectEditOperation = f"move_faces:{{mode}}:{{performed_method}}"
+    result.addProperty("App::PropertyString", "DirectEditMethod", "Direct Edit")
+    result.DirectEditMethod = performed_method
     if {hide_source!r} and hasattr(obj, "ViewObject"):
         obj.ViewObject.Visibility = False
 
@@ -2487,13 +2804,29 @@ try:
         "type_id": result.TypeId,
         "source_object": obj.Name,
         "face_names": face_names,
+        "feature_face_names": feature_names,
+        "support_face_names": support_names,
+        "tangent_chain_face_names": tangent_names,
+        "terminal_transition_face_names": terminal_transition_names,
         "distance": float({distance!r}),
         "operation": mode,
+        "requested_method": requested_method,
+        "performed_method": performed_method,
+        "fallback_reason": fallback_reason,
+        "feature_kind": feature_kind,
+        "rebuild_variant": rebuild_variant,
+        "shape_valid": bool(result_shape.isValid()),
+        "shape_type": str(result_shape.ShapeType),
+        "solid_count": len(result_shape.Solids),
+        "base_volume": base_volume,
+        "result_volume": result_volume,
+        "volume_delta": volume_delta,
         "static_snapshot": True,
         "direct_edit": True,
         "response_guidance": (
-            "This local direct edit stores a static Shape snapshot. Use native Sketcher/PartDesign "
-            "features when future dimensional edits are required."
+            "This local direct edit stores a static Shape snapshot. Inspect performed_method and "
+            "fallback_reason, compare a shape checkpoint, and use native Sketcher/PartDesign "
+            "features when editable history exists."
         ),
     }}
 except Exception:

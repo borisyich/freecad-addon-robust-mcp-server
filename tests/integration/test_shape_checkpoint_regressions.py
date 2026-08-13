@@ -68,6 +68,65 @@ def _assert_bbox(
 
 
 @pytest.mark.asyncio
+async def test_checkpoint_restores_shape_placement_after_brep_round_trip(
+    live_bridge: XmlRpcBridge,
+    validation_tools: dict[str, Any],
+) -> None:
+    """Serialized baselines must retain the exact spatial coordinate frame."""
+    doc_name = "MCPShapeCheckpointPlacementRegression"
+    setup = await live_bridge.execute_python(
+        f"""
+import Part
+if {doc_name!r} in FreeCAD.listDocuments():
+    FreeCAD.closeDocument({doc_name!r})
+doc = FreeCAD.newDocument({doc_name!r})
+shape = Part.makeBox(20.0, 10.0, 6.0)
+shape.Placement = FreeCAD.Placement(
+    FreeCAD.Vector(-17.0, 23.0, 4.0),
+    FreeCAD.Rotation(FreeCAD.Vector(0.0, 0.0, 1.0), 31.0),
+)
+obj = doc.addObject("Part::Feature", "PlacedSolid")
+obj.Shape = shape
+doc.recompute()
+_result_ = obj.Shape.isValid()
+"""
+    )
+    assert setup.success and setup.result is True, setup.error_traceback
+
+    try:
+        captured = await validation_tools["capture_shape_checkpoint"](
+            checkpoint_name="placed_baseline",
+            object_name="PlacedSolid",
+            doc_name=doc_name,
+        )
+        report = await validation_tools["compare_shape_checkpoint"](
+            checkpoint_name="placed_baseline",
+            difference_mode="metrics",
+        )
+
+        assert captured["shape_placement"]["base"] == pytest.approx(
+            [-17.0, 23.0, 4.0], abs=1e-9
+        )
+        for key in ("min", "max", "size"):
+            assert report["before"]["bounding_box"][key] == pytest.approx(
+                captured["metrics"]["bounding_box"][key], abs=1e-7
+            )
+            assert report["after"]["bounding_box"][key] == pytest.approx(
+                captured["metrics"]["bounding_box"][key], abs=1e-7
+            )
+        assert report["delta"]["bounding_box"]["min"] == pytest.approx(
+            [0.0, 0.0, 0.0], abs=1e-7
+        )
+        assert report["delta"]["bounding_box"]["max"] == pytest.approx(
+            [0.0, 0.0, 0.0], abs=1e-7
+        )
+    finally:
+        await live_bridge.execute_python(
+            f"FreeCAD.closeDocument({doc_name!r}) if {doc_name!r} in FreeCAD.listDocuments() else None"
+        )
+
+
+@pytest.mark.asyncio
 async def test_checkpoint_localizes_two_filled_and_two_new_cylinders(
     live_bridge: XmlRpcBridge,
     validation_tools: dict[str, Any],

@@ -531,7 +531,7 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                         },
                         {
                             "name": "boolean_operation",
-                            "description": "Union, cut, or intersection of two shapes",
+                            "description": "Union, cut, or intersection with validity, topology, and volume evidence",
                             "key_params": ["operation", "object1", "object2"],
                         },
                         {
@@ -551,12 +551,13 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                         },
                         {
                             "name": "move_faces",
-                            "description": "Locally move selected planar faces as an auditable static direct edit",
+                            "description": "Rebuild a recognized planar feature boundary and report any prism fallback",
                             "key_params": [
                                 "object_name",
                                 "face_names",
                                 "distance",
-                                "operation",
+                                "method",
+                                "feature_face_names",
                             ],
                         },
                         {

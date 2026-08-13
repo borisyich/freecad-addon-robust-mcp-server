@@ -454,6 +454,11 @@ boolean_operation(
 - `cut` - Subtract object2 from object1
 - `common` - Intersection of shapes
 
+The immediate response includes `shape_valid`, `shape_type`, `solid_count`,
+`volume`, `base_volume`, `tool_volume`, `result_volume`, and `volume_delta`.
+These fields let a caller reject a null/invalid or unexpectedly compound result
+and verify material change without a routine follow-up inspection call.
+
 ### Transformations
 
 #### set_placement
@@ -545,25 +550,51 @@ silently ignoring unresolved references.
 
 #### move_faces
 
-Locally add or remove material by moving selected planar faces along their
-oriented normals.
+Move a recognized planar feature boundary along its oriented normal, with an
+explicitly reported fallback for legacy prism Booleans.
 
 ```python
 move_faces(
-    object_name="Pad",
+    object_name="ImportedHousing",
     face_names=["Face12"],
     distance=2.0,
-    operation="auto",  # auto, add, remove
+    operation="auto",             # prism compatibility path only
     result_name=None,
     hide_source=True,
     doc_name=None,
+    method="feature_rebuild",     # auto | feature_rebuild | prism
+    feature_face_names=None,       # optional explicit local feature region
 ) -> dict
 ```
 
-This is a direct B-rep edit, not a native dimensional PartDesign feature. The
-result records its source, faces, distance, and operation, and the parametric
-validator reports it as a static `PartDesign::Feature` snapshot. Prefer native
-Sketcher/PartDesign history when future dimensional edits are required.
+`feature_rebuild` is intended for imported/static solids. Starting from the
+selected planar cap or pocket floor, it discovers adjacent wall, fillet,
+chamfer, blend, and tangent-chain faces up to a parallel support boundary. OCCT
+defeaturing heals that local feature; the recovered material/void region is
+then moved and rebuilt so fixed attachment transitions and moved terminal
+transitions are retained. If discovery is ambiguous, pass the complete feature
+region explicitly in `feature_face_names`, excluding the parallel support face.
+
+`auto` attempts that path first but may use the old selected-face extrusion plus
+Boolean. The response exposes `performed_method` and `fallback_reason`; a
+`prism_boolean_fallback` is not equivalent to Move Face and should not be
+reported as one. Use strict `feature_rebuild` when blend-aware reconstruction is
+required, or explicit `prism` only for sharp prismatic geometry. The response
+also includes propagated/support/tangent faces, Shape validity/type/solid count,
+and `base_volume`, `result_volume`, and `volume_delta`.
+`rebuild_variant="sharp_boundary_sweep"` means the selected boundary was sharp
+and its attachment transitions stayed fixed. `translated_tangent_feature` means
+the selected boundary began a tangent chain that was carried with the recovered
+material/void feature.
+
+A non-tangent terminal transition such as a chamfer directly adjoining the
+selected cap is not silently left behind by strict `feature_rebuild`: the tool
+reports `terminal_transition_face_names` and refuses the edit. `auto` may still
+produce an explicitly labelled prism fallback; use controlled local B-rep
+surgery when that fallback would violate the required transition geometry.
+
+All modes create an auditable static snapshot rather than a native dimensional
+PartDesign feature. Prefer the semantic owner whenever editable history exists.
 
 ---
 
@@ -1271,6 +1302,14 @@ fillet_edges(
     doc_name: str | None = None
 ) -> dict
 ```
+
+An OCCT build/validation failure returns `success=false` after rollback instead
+of only a generic exception string. The diagnostic includes source Shape type
+and solid count, selected `EdgeN` values, adjacent face names/surface types,
+requested radius, result validation state, and individual-edge trials.
+`failing_edges` identifies edges that fail alone. If all edges work alone but
+the combined selection fails, `failing_edge_groups` records that group-level
+interaction.
 
 #### chamfer_edges
 
@@ -2085,7 +2124,11 @@ compare_shape_checkpoint(
 ```
 
 The report always includes before/after validity, solid/shell/face/edge/vertex
-counts, volume, surface area, bounding boxes and their deltas. In `auto` mode,
+counts, volume, surface area, bounding boxes and their deltas. The captured
+B-rep is normalized to identity Placement and the exact Shape Placement
+(translation plus quaternion) is stored separately and restored before metrics
+or exact differences are computed. This prevents BRep round-trips from moving a
+checkpoint while leaving volume and topology unchanged. In `auto` mode,
 OCCT computes both `before.cut(after)` and `after.cut(before)` only when the
 product of the two face counts does not exceed `exact_face_product_limit`.
 Larger imported B-reps automatically use metric-only comparison, avoiding two

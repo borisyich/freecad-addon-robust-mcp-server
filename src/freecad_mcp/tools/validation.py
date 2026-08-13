@@ -209,12 +209,23 @@ if obj is None:
 shape = getattr(obj, "Shape", None)
 if shape is None or shape.isNull():
     raise ValueError(f"Object has no usable Shape: {object_name!r}")
+shape_placement = shape.Placement
+shape_for_export = shape.copy()
+shape_for_export.Placement = FreeCAD.Placement()
 _result_ = {{
     "success": True,
     "document": doc.Name,
     "object_name": obj.Name,
     "metrics": _shape_metrics(shape),
-    "_brep": shape.exportBrepToString(),
+    "shape_placement": {{
+        "base": [
+            float(shape_placement.Base.x),
+            float(shape_placement.Base.y),
+            float(shape_placement.Base.z),
+        ],
+        "rotation_quaternion": [float(value) for value in shape_placement.Rotation.Q],
+    }},
+    "_brep": shape_for_export.exportBrepToString(),
 }}
 """
         execution = await bridge.execute_python(code)
@@ -231,6 +242,7 @@ _result_ = {{
             "document": payload.get("document"),
             "object_name": payload.get("object_name"),
             "metrics": payload.get("metrics"),
+            "shape_placement": payload.get("shape_placement"),
         }
         payload["checkpoint_name"] = normalized_name
         payload["storage"] = "server_session_memory"
@@ -336,6 +348,12 @@ if after is None or after.isNull():
     raise ValueError(f"Object has no usable Shape: {target_object!r}")
 before = Part.Shape()
 before.importBrepFromString({snapshot["brep"]!r})
+saved_placement = {snapshot.get("shape_placement")!r}
+if saved_placement:
+    before.Placement = FreeCAD.Placement(
+        FreeCAD.Vector(*saved_placement["base"]),
+        FreeCAD.Rotation(*saved_placement["rotation_quaternion"]),
+    )
 before_metrics = _metrics(before)
 after_metrics = _metrics(after)
 face_product = before_metrics["face_count"] * after_metrics["face_count"]

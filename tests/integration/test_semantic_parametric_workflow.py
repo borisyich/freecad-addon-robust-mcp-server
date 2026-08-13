@@ -204,6 +204,249 @@ _result_ = source.Shape.isValid()
 
 
 @pytest.mark.asyncio
+async def test_imported_brep_move_faces_rebuilds_boss_with_fillet_chain(
+    live_tools: dict[str, Any],  # noqa: F811 - imported pytest fixture
+) -> None:
+    """Strict feature rebuild should move a boss cap without losing its blend."""
+    tools = live_tools
+    doc_name = "McpImportedBrepMoveFaceFillet"
+    await _fresh(tools, doc_name)
+    await _call(
+        tools,
+        "execute_python",
+        code="""
+import Part
+doc = FreeCAD.ActiveDocument
+base = Part.makeBox(40, 40, 10)
+boss = Part.makeCylinder(7, 10, FreeCAD.Vector(20, 20, 10))
+sharp = base.fuse(boss)
+shape = sharp.makeFillet(2, [sharp.Edges[9]]).Solids[0]
+source = doc.addObject("Part::Feature", "ImportedBoss")
+source.Shape = shape
+source.addProperty("App::PropertyString", "ImportSourcePath", "MCP Import")
+source.ImportSourcePath = "boss-with-fillet.step"
+source.addProperty("App::PropertyString", "ImportSourceFormat", "MCP Import")
+source.ImportSourceFormat = "step"
+doc.recompute()
+_result_ = {
+    "valid": shape.isValid(),
+    "solid_count": len(shape.Solids),
+    "max_z": shape.BoundBox.ZMax,
+}
+""",
+    )
+    cap = await _call(
+        tools,
+        "select_subshapes",
+        object_name="ImportedBoss",
+        doc_name=doc_name,
+        criteria={
+            "kind": "face",
+            "surface_types": ["Plane"],
+            "normal": [0, 0, 1],
+            "sort_by": "area",
+            "sort_order": "asc",
+            "limit": 1,
+        },
+    )
+
+    edited = await _call(
+        tools,
+        "move_faces",
+        object_name="ImportedBoss",
+        face_names=cap["references"],
+        distance=3.0,
+        method="feature_rebuild",
+        result_name="MovedBoss",
+        doc_name=doc_name,
+    )
+
+    assert edited["performed_method"] == "feature_rebuild", edited
+    assert edited["rebuild_variant"] == "sharp_boundary_sweep"
+    assert edited["fallback_reason"] is None
+    assert edited["feature_kind"] == "additive_material"
+    assert edited["shape_valid"] is True
+    assert edited["shape_type"] == "Solid"
+    assert edited["solid_count"] == 1
+    assert edited["volume_delta"] > 0.0
+    assert edited["tangent_chain_face_names"] == []
+    assert len(edited["feature_face_names"]) == 3
+
+    evidence = await _call(
+        tools,
+        "execute_python",
+        code="""
+obj = FreeCAD.ActiveDocument.getObject("MovedBoss")
+shape = obj.Shape
+surface_types = [type(face.Surface).__name__ for face in shape.Faces]
+_result_ = {
+    "valid": shape.isValid(),
+    "solid_count": len(shape.Solids),
+    "min_z": shape.BoundBox.ZMin,
+    "max_z": shape.BoundBox.ZMax,
+    "toroid_count": surface_types.count("Toroid"),
+    "cylinder_count": surface_types.count("Cylinder"),
+}
+""",
+    )
+    evidence = evidence["result"]
+    assert evidence == {
+        "valid": True,
+        "solid_count": 1,
+        "min_z": pytest.approx(0.0, abs=1e-7),
+        "max_z": pytest.approx(23.0, abs=1e-7),
+        "toroid_count": 1,
+        "cylinder_count": 1,
+    }
+
+
+@pytest.mark.asyncio
+async def test_imported_brep_move_faces_moves_pocket_tangent_chain(
+    live_tools: dict[str, Any],  # noqa: F811 - imported pytest fixture
+) -> None:
+    """A pocket floor move should carry its bottom fillet and extend the wall."""
+    tools = live_tools
+    doc_name = "McpImportedBrepMovePocketFillet"
+    await _fresh(tools, doc_name)
+    await _call(
+        tools,
+        "execute_python",
+        code="""
+import Part
+doc = FreeCAD.ActiveDocument
+base = Part.makeBox(40, 40, 10)
+tool = Part.makeCylinder(7, 7, FreeCAD.Vector(20, 20, 4))
+sharp = base.cut(tool)
+shape = sharp.makeFillet(2, [sharp.Edges[14]]).Solids[0]
+source = doc.addObject("Part::Feature", "ImportedPocket")
+source.Shape = shape
+doc.recompute()
+_result_ = {"valid": shape.isValid(), "solid_count": len(shape.Solids)}
+""",
+    )
+    floor = await _call(
+        tools,
+        "select_subshapes",
+        object_name="ImportedPocket",
+        doc_name=doc_name,
+        criteria={
+            "kind": "face",
+            "surface_types": ["Plane"],
+            "normal": [0, 0, 1],
+            "sort_by": "area",
+            "sort_order": "asc",
+            "limit": 1,
+        },
+    )
+
+    edited = await _call(
+        tools,
+        "move_faces",
+        object_name="ImportedPocket",
+        face_names=floor["references"],
+        distance=-2.0,
+        method="feature_rebuild",
+        result_name="DeepPocket",
+        doc_name=doc_name,
+    )
+
+    assert edited["performed_method"] == "feature_rebuild", edited
+    assert edited["rebuild_variant"] == "translated_tangent_feature"
+    assert edited["feature_kind"] == "subtractive_void"
+    assert edited["shape_valid"] is True
+    assert edited["shape_type"] == "Solid"
+    assert edited["solid_count"] == 1
+    assert edited["volume_delta"] < 0.0
+    assert len(edited["tangent_chain_face_names"]) == 2
+
+    evidence = await _call(
+        tools,
+        "execute_python",
+        code="""
+shape = FreeCAD.ActiveDocument.getObject("DeepPocket").Shape
+surface_types = [type(face.Surface).__name__ for face in shape.Faces]
+small_planes = [
+    face for face in shape.Faces
+    if type(face.Surface).__name__ == "Plane" and face.Area < 100.0
+]
+_result_ = {
+    "valid": shape.isValid(),
+    "solid_count": len(shape.Solids),
+    "floor_z": small_planes[0].CenterOfMass.z,
+    "toroid_count": surface_types.count("Toroid"),
+    "cylinder_count": surface_types.count("Cylinder"),
+}
+""",
+    )
+    evidence = evidence["result"]
+    assert evidence == {
+        "valid": True,
+        "solid_count": 1,
+        "floor_z": pytest.approx(2.0, abs=1e-7),
+        "toroid_count": 1,
+        "cylinder_count": 1,
+    }
+
+
+@pytest.mark.asyncio
+async def test_fillet_failure_returns_structured_edge_diagnostics_after_rollback(
+    live_tools: dict[str, Any],  # noqa: F811 - imported pytest fixture
+) -> None:
+    """An impossible radius should identify the edge and leave no failed feature."""
+    tools = live_tools
+    doc_name = "McpFilletFailureDiagnostics"
+    await _fresh(tools, doc_name)
+    await _call(
+        tools,
+        "execute_python",
+        code="""
+import Part
+doc = FreeCAD.ActiveDocument
+source = doc.addObject("Part::Feature", "FilletSource")
+source.Shape = Part.makeBox(10, 10, 10)
+doc.recompute()
+_result_ = source.Shape.isValid()
+""",
+    )
+
+    failed = await tools["fillet_edges"](
+        object_name="FilletSource",
+        radius=100.0,
+        edges=["Edge1"],
+        name="ImpossibleFillet",
+        doc_name=doc_name,
+    )
+
+    assert failed["success"] is False
+    assert failed["rolled_back"] is True
+    assert failed["source_shape_type"] == "Solid"
+    assert failed["source_solid_count"] == 1
+    assert failed["selected_edges"] == ["Edge1"]
+    assert failed["adjacent_face_types"] == {"Edge1": ["Plane", "Plane"]}
+    assert failed["requested_radius"] == 100.0
+    assert failed["result_state"]["shape_valid"] is False
+    assert failed["failing_edges"] == ["Edge1"]
+    assert failed["edge_trials"][0]["ok"] is False
+
+    state = await _call(
+        tools,
+        "execute_python",
+        code="""
+doc = FreeCAD.ActiveDocument
+source = doc.getObject("FilletSource")
+_result_ = {
+    "failed_feature_present": doc.getObject("ImpossibleFillet") is not None,
+    "source_valid": source is not None and source.Shape.isValid(),
+}
+""",
+    )
+    assert state["result"] == {
+        "failed_feature_present": False,
+        "source_valid": True,
+    }
+
+
+@pytest.mark.asyncio
 async def test_imported_brep_direct_edit_inside_body_is_informational(
     live_tools: dict[str, Any],  # noqa: F811 - imported pytest fixture
 ) -> None:
