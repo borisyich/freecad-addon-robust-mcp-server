@@ -314,6 +314,7 @@ select_subshapes(
         "axis_direction_tolerance_deg": 1,
         "axis_point": [20, 10, 0],
         "axis_point_tolerance": 0.01,
+        "adjacent_surface_types": ["Cone"],
     },
     detail_level="summary",
     page_size=200,
@@ -359,8 +360,9 @@ in generated tool declarations; each field description identifies the applicable
 topology kind. Supplying a field that is not valid for the selected `kind` is
 rejected before FreeCAD is called.
 
-Face radius uses `radius_min`/`radius_max`. Cylinder axes are geometrically
-undirected, so either sign of `axis_direction` matches. `axis_point` may be any
+Face radius uses `radius_min`/`radius_max`. Cylinder and cone axes are
+geometrically undirected, so either sign of `axis_direction` matches.
+`axis_point` may be any
 point on the expected infinite axis: comparison uses perpendicular distance and
 `axis_point_tolerance`, not the arbitrary longitudinal position of the serialized
 surface center. `page_size` and `criteria.limit` both accept values from 1 to 200.
@@ -373,14 +375,40 @@ semantic selection usable on large imported STEP topology.
 
 Line direction is treated as undirected, so `[1, 0, 0]` also matches an edge
 stored from right to left. Type names are case-insensitive and accept common
-forms such as `planar`/`Plane`, `circular`/`Circle`, and
+forms such as `planar`/`Plane`, `conical`/`Cone`, `circular`/`Circle`, and
 `LineSegment`/`Line`. When `adjacent_surface_types` contains several entries,
-every listed type must occur among the edge's adjacent faces.
+every listed type must occur among the selected face's or edge's adjacent faces.
 
 Vertex location uses `point_bounds` in world coordinates. Vertex filters also
 accept minimum/maximum adjacent edge and face counts. Use the returned
 `VertexN` directly with the relevant dedicated `measure_*` tool; do not
 infer the vertex index from an edge endpoint.
+
+#### inspect_subshape_neighborhood
+
+Inspect the local face topology without manually following each returned
+`adjacent_faces` name:
+
+```python
+inspect_subshape_neighborhood(
+    object_name="hf_217",
+    reference="Face3",
+    hops=1,
+    doc_name=None,
+)
+```
+
+Use the tool before and after every local geometry edit, not only for holes.
+Treat the selected face as an edit handle for a larger local feature; compare
+transitions, attachments, interfaces, and nearby invariant faces after
+recompute, and rollback/rework collateral changes.
+
+The target and neighbors contain compact surface evidence (`type`, radius/axis
+when applicable, normal, area, centroid, and convexity). Neighbors are ordered
+by hop distance and face index. At most 50 neighbors are returned;
+`neighbor_count`, `returned_neighbor_count`, and `truncated` expose that bound.
+The tool currently accepts exact `FaceN`
+references; reselect the face after any geometry-changing recompute.
 
 #### create_object
 
@@ -444,7 +472,8 @@ boolean_operation(
     object1_name: str,
     object2_name: str,
     result_name: str | None = None,
-    doc_name: str | None = None
+    doc_name: str | None = None,
+    expected_solid_count: int | None = 1,
 ) -> dict
 ```
 
@@ -454,10 +483,14 @@ boolean_operation(
 - `cut` - Subtract object2 from object1
 - `common` - Intersection of shapes
 
-The immediate response includes `shape_valid`, `shape_type`, `solid_count`,
+The operation commits only after the result is non-null, valid, and has exactly
+`expected_solid_count` solids. The default requires one continuous solid. A
+rejected result aborts the FreeCAD transaction and returns an MCP error; set
+`expected_solid_count=None` only for an intentional multi-solid result.
+
+The successful response includes `shape_valid`, `shape_type`, `solid_count`,
 `volume`, `base_volume`, `tool_volume`, `result_volume`, and `volume_delta`.
-These fields let a caller reject a null/invalid or unexpectedly compound result
-and verify material change without a routine follow-up inspection call.
+These fields verify material change without a routine follow-up inspection call.
 
 ### Transformations
 
@@ -1519,13 +1552,17 @@ Inspect whether an object is a usable constant-thickness sheet-metal part.
 inspect_sheet_metal(
     object_name: str,
     doc_name: str | None = None,
+    detail_level: "summary" | "candidates" | "full" = "summary",
 ) -> dict
 ```
 
-The report includes validity and solid count, declared and estimated
-thickness, native SheetMetal history, Body/Tip evidence, classified bend zones,
-visibility/display evidence, warnings, and up to eight planar
-`stationary_face_candidates`. `has_native_sheet_metal_features` means that at
+The default `summary` report includes scalar validity, thickness, topology,
+history, Body/Tip, display, readiness, and warning evidence without face lists.
+Use `candidates` to add up to eight planar `stationary_face_candidates`,
+classified `bend_pairs`, and compact native-history records. Use `full` only to
+add every `cylindrical_faces` record and complete `history_evidence`.
+
+`has_native_sheet_metal_features` means that at
 least one native proxy exists. The stronger `native_sheet_metal_history` means
 the complete active history from the first native proxy through the inspected
 object is supported; `sheet_metal_history_classification` distinguishes a
@@ -1546,9 +1583,9 @@ requires a particular normal, location, or area.
 `cylindrical_bend_face_count` include only coaxial partial-cylinder pairs whose
 radius difference matches nominal thickness and whose radius matches declared
 native bend data; `bend_zone_count` counts those pairs. Hole walls (full
-cylinders), fillets, tubes, and unmatched curved surfaces are retained in
-`cylindrical_faces` with a non-bend classification rather than inflating the
-bend count.
+cylinders), fillets, tubes, and unmatched curved surfaces are retained in the
+`full` response's `cylindrical_faces` with a non-bend classification rather than
+inflating the bend count.
 Candidate status does not guarantee that the installed upstream workbench can
 unfold the complete history. Native unfold errors, including the SheetMetal
 0.8.21 `SMFromSolid` open-box `Wire is not closed` case, remain transactional:
@@ -1612,6 +1649,7 @@ base = await create_sheet_metal_base(
 inspection = await inspect_sheet_metal(
     object_name="ReferenceLProfile",
     doc_name="McpAuditSheetMetalReference",
+    detail_level="candidates",
 )
 flat = await unfold_sheet_metal(
     feature_name="ReferenceLProfile",
@@ -1673,6 +1711,7 @@ flange = await create_sheet_metal_feature(
 inspection = await inspect_sheet_metal(
     object_name="EdgeFlange",
     doc_name="McpAuditSheetMetalFlange",
+    detail_level="candidates",
 )
 flat = await unfold_sheet_metal(
     feature_name="EdgeFlange",

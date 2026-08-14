@@ -75,6 +75,10 @@ For a direct or imported-BRep edit, capture_shape_checkpoint immediately before
 mutation and compare_shape_checkpoint afterwards. Its default auto mode localizes
 Shape differences only below the complexity limit and otherwise reports metric
 deltas and unchanged invariants without whole-shape booleans.
+Before every local geometry edit, inspect the selected faces and their
+neighborhood. After recompute, reselect transient references and repeat the same
+local observations. Undo or rework the edit if it damages any non-target face,
+transition, attachment, interface, continuity, or nearby invariant.
 Use compact/default detail levels first. Request full topology, properties,
 sketch records, or validation structure only for a specific diagnosis, and page
 large face/edge/vertex/constraint collections instead of loading them all at once.

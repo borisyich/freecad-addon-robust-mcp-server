@@ -107,6 +107,15 @@ class Cylinder:
         return 0.5, 0.5
 
 
+class Cone:
+    Radius = 6.0
+    Axis = _Vector(0.0, 1.0, 0.0)
+    Center = _Vector(3.0, 4.0, 5.0)
+
+    def parameter(self, _point):
+        return 0.5, 0.5
+
+
 class _Vertex:
     def __init__(self, point: _Vector) -> None:
         self.Point = point
@@ -147,6 +156,12 @@ class _CylindricalFace(_Face):
     def __init__(self, edges) -> None:
         super().__init__(edges)
         self.Surface = Cylinder()
+
+
+class _ConicalFace(_Face):
+    def __init__(self, edges) -> None:
+        super().__init__(edges)
+        self.Surface = Cone()
 
 
 class _TopologicalShape(_Shape):
@@ -249,6 +264,7 @@ def test_shape_topology_contains_semantic_faces_and_edges() -> None:
     assert result["faces"][0]["area"] == 100.0
     assert result["faces"][0]["centroid_kind"] == "surface_area_centroid"
     assert result["faces"][0]["adjacent_faces"] == ["Face2"]
+    assert result["faces"][0]["adjacent_surface_types"] == ["Plane"]
     assert result["faces"][0]["convexity"] == "flat"
     assert result["edges"][0]["curve_type"] == "Line"
     assert result["edges"][0]["start_point"] == {"x": 0.0, "y": 0.0, "z": 0.0}
@@ -283,6 +299,27 @@ def test_cylindrical_face_topology_contains_radius_and_axis() -> None:
     assert face["radius"] == 4.25
     assert face["axis_direction"] == {"x": 0.0, "y": 0.0, "z": 1.0}
     assert face["axis_point"] == {"x": 10.0, "y": 20.0, "z": 0.0}
+
+
+def test_conical_face_topology_contains_radius_and_axis() -> None:
+    runtime = _load_runtime()
+    shape = _TopologicalShape()
+    shape.Faces = (_ConicalFace((shape.edge1, shape.edge2)),)
+
+    result = runtime["_shape_topology_value"](
+        shape,
+        face_limit=None,
+        edge_limit=0,
+        vertex_limit=0,
+        topology_kinds=("faces",),
+        topology_fields=("surface_type", "radius", "axis_direction", "axis_point"),
+    )
+
+    face = result["faces"][0]
+    assert face["surface_type"] == "Cone"
+    assert face["radius"] == 6.0
+    assert face["axis_direction"] == {"x": 0.0, "y": 1.0, "z": 0.0}
+    assert face["axis_point"] == {"x": 3.0, "y": 4.0, "z": 5.0}
 
 
 def test_shape_topology_is_paged_and_omitted_by_default() -> None:

@@ -417,6 +417,126 @@ class TestObjectTools:
         )
 
     @pytest.mark.asyncio
+    async def test_select_subshapes_filters_faces_by_adjacent_surface_types(
+        self, register_tools, mock_bridge
+    ):
+        """Face selection should match the types of neighboring faces."""
+        mock_bridge.get_object = AsyncMock(
+            return_value=ObjectInfo(
+                name="Imported",
+                label="Imported",
+                type_id="Part::Feature",
+                shape_info={
+                    "shape_type": "Solid",
+                    "is_null": False,
+                    "faces": [
+                        {
+                            "name": "Face1",
+                            "index": 1,
+                            "surface_type": "Cylinder",
+                            "adjacent_faces": ["Face2", "Face3"],
+                            "adjacent_surface_types": ["Cone", "Plane"],
+                        },
+                        {
+                            "name": "Face2",
+                            "index": 2,
+                            "surface_type": "Cone",
+                            "adjacent_faces": ["Face1"],
+                            "adjacent_surface_types": ["Cylinder"],
+                        },
+                    ],
+                },
+            )
+        )
+
+        result = await register_tools["select_subshapes"](
+            object_name="Imported",
+            criteria={
+                "kind": "face",
+                "surface_types": ["Cylinder"],
+                "adjacent_surface_types": ["conical", "planar"],
+            },
+            detail_level="summary",
+        )
+
+        assert result["references"] == ["Face1"]
+        assert result["matches"][0]["adjacent_surface_types"] == ["Cone", "Plane"]
+        request = mock_bridge.get_object.await_args.kwargs
+        assert "adjacent_surface_types" in request["topology_fields"]
+
+    @pytest.mark.asyncio
+    async def test_inspect_subshape_neighborhood_walks_faces_compactly(
+        self, register_tools, mock_bridge
+    ):
+        mock_bridge.get_object = AsyncMock(
+            return_value=ObjectInfo(
+                name="hf_217",
+                label="hf_217",
+                type_id="Part::Feature",
+                shape_info={
+                    "shape_type": "Solid",
+                    "is_null": False,
+                    "faces": [
+                        {
+                            "name": "Face1",
+                            "surface_type": "Cone",
+                            "radius": 7.0,
+                            "adjacent_faces": ["Face3", "Face4"],
+                        },
+                        {
+                            "name": "Face2",
+                            "surface_type": "Cone",
+                            "radius": 7.0,
+                            "adjacent_faces": ["Face3"],
+                        },
+                        {
+                            "name": "Face3",
+                            "surface_type": "Cylinder",
+                            "radius": 6.0,
+                            "adjacent_faces": ["Face1", "Face2"],
+                        },
+                        {
+                            "name": "Face4",
+                            "surface_type": "Plane",
+                            "adjacent_faces": ["Face1"],
+                        },
+                    ],
+                },
+            )
+        )
+
+        result = await register_tools["inspect_subshape_neighborhood"](
+            object_name="hf_217", reference="Face3", hops=2
+        )
+
+        assert result["target"] == {
+            "name": "Face3",
+            "type": "Cylinder",
+            "radius": 6.0,
+        }
+        assert [
+            (item["name"], item["type"], item["distance"])
+            for item in result["neighbors"]
+        ] == [
+            ("Face1", "Cone", 1),
+            ("Face2", "Cone", 1),
+            ("Face4", "Plane", 2),
+        ]
+        request = mock_bridge.get_object.await_args.kwargs
+        assert request["topology_kinds"] == ("faces",)
+        assert request["edge_limit"] == 0
+
+    @pytest.mark.asyncio
+    async def test_inspect_subshape_neighborhood_rejects_non_face_reference(
+        self, register_tools, mock_bridge
+    ):
+        with pytest.raises(ValueError, match="exact FaceN"):
+            await register_tools["inspect_subshape_neighborhood"](
+                object_name="Pad", reference="Edge1"
+            )
+        mock_bridge.get_object.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_select_subshapes_filters_edges_by_direction_and_adjacency(
         self, register_tools, mock_bridge
     ):
@@ -955,7 +1075,65 @@ class TestObjectTools:
         assert '"shape_type": shape_type' in generated_code
         assert '"base_volume": base_volume' in generated_code
         assert '"result_volume": result_volume' in generated_code
+        assert "expected 1 solid(s), got {solid_count}" in generated_code
+        assert "if rejection_reasons:" in generated_code
+        assert generated_code.index("if rejection_reasons:") < generated_code.index(
+            "doc.commitTransaction()"
+        )
+        assert "doc.abortTransaction()" in generated_code
         mock_bridge.execute_python.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_boolean_operation_can_explicitly_allow_any_solid_count(
+        self, register_tools, mock_bridge
+    ):
+        mock_bridge.execute_python = AsyncMock(
+            return_value=ExecutionResult(
+                success=True,
+                result={
+                    "shape_valid": True,
+                    "shape_type": "Compound",
+                    "solid_count": 2,
+                },
+                stdout="",
+                stderr="",
+                execution_time_ms=1.0,
+            )
+        )
+
+        await register_tools["boolean_operation"](
+            operation="fuse",
+            object1_name="Left",
+            object2_name="Right",
+            expected_solid_count=None,
+        )
+
+        generated_code = mock_bridge.execute_python.await_args.args[0]
+        assert "if None is not None" in generated_code
+
+    @pytest.mark.asyncio
+    async def test_boolean_operation_propagates_transaction_rejection(
+        self, register_tools, mock_bridge
+    ):
+        mock_bridge.execute_python = AsyncMock(
+            return_value=ExecutionResult(
+                success=False,
+                result=None,
+                stdout="",
+                stderr="",
+                error_type="ValueError",
+                error_traceback=(
+                    "ValueError: Boolean cut rejected; transaction aborted: "
+                    "result Shape is null; expected 1 solid(s), got 0"
+                ),
+                execution_time_ms=1.0,
+            )
+        )
+
+        with pytest.raises(ValueError, match="transaction aborted"):
+            await register_tools["boolean_operation"](
+                operation="cut", object1_name="Base", object2_name="Tool"
+            )
 
     @pytest.mark.asyncio
     async def test_set_placement(self, register_tools, mock_bridge):

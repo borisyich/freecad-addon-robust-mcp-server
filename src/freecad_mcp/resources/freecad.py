@@ -485,13 +485,22 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                         },
                         {
                             "name": "select_subshapes",
-                            "description": "Select paged FaceN/EdgeN/VertexN references by semantic geometry, including cylindrical face radius/axis, and world location",
+                            "description": "Select paged FaceN/EdgeN/VertexN references by semantic geometry, including cylinder/cone axes, adjacent face types, and world location",
                             "key_params": [
                                 "object_name",
                                 "criteria",
                                 "detail_level",
                                 "offset",
                                 "page_size",
+                            ],
+                        },
+                        {
+                            "name": "inspect_subshape_neighborhood",
+                            "description": "Inspect a FaceN and compact adjacent-face geometry across bounded topology hops",
+                            "key_params": [
+                                "object_name",
+                                "reference",
+                                "hops",
                             ],
                         },
                         {
@@ -531,8 +540,13 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                         },
                         {
                             "name": "boolean_operation",
-                            "description": "Union, cut, or intersection with validity, topology, and volume evidence",
-                            "key_params": ["operation", "object1", "object2"],
+                            "description": "Transactional union, cut, or intersection that aborts null, invalid, or unexpected-solid results",
+                            "key_params": [
+                                "operation",
+                                "object1_name",
+                                "object2_name",
+                                "expected_solid_count",
+                            ],
                         },
                         {
                             "name": "fuse_all",

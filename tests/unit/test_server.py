@@ -643,6 +643,8 @@ class TestMcpInstructions:
             "inspect the intended document and existing feature history",
             "use select_subshapes rather than manual Face/Edge enumeration",
             "capture_shape_checkpoint immediately before mutation",
+            "Before every local geometry edit",
+            "Undo or rework the edit if it damages any non-target face",
             "save every explicit non-starred dimension",
             "driving, verification, or unresolved",
             "bind the alias to the dimensional constraint expression path",
@@ -705,9 +707,9 @@ class TestMcpInstructions:
 
         assert result["properties"]["direct"]["type"] == "object"
         assert result["properties"]["indirect"]["type"] == "object"
-        assert result["properties"]["indirect"]["properties"]["nested"][
-            "$ref"
-        ] == ("#/$defs/Foo")
+        assert result["properties"]["indirect"]["properties"]["nested"]["$ref"] == (
+            "#/$defs/Foo"
+        )
         assert "Foo" in result["$defs"]
 
     @pytest.mark.asyncio
@@ -781,5 +783,6 @@ class TestMcpInstructions:
         # Dedicated measurement schemas and the flattened semantic selector trade
         # a modest registry increase for declarations that remain agent-readable.
         # Two read-only Shape checkpoint contracts and explicit end-condition
-        # discovery on four PartDesign tools add focused invariant evidence.
-        assert payload_bytes < 113_000
+        # discovery on four PartDesign tools add focused invariant evidence. The
+        # bounded face-neighborhood contract adds one compact topology tool.
+        assert payload_bytes < 113_200

@@ -83,12 +83,14 @@ def test_feature_operation_schema_is_strict_and_discriminated():
     assert flange_definition["additionalProperties"] is False
     assert flange_definition["properties"]["length"]["exclusiveMinimum"] == 0
     assert "degrees" in flange_definition["properties"]["angle"]["description"]
-    assert "degrees" in schema["$defs"]["FoldOperation"]["properties"]["angle"][
-        "description"
-    ]
-    assert "degrees" in schema["$defs"]["HemOperation"]["properties"]["roll_angle"][
-        "description"
-    ]
+    assert (
+        "degrees"
+        in schema["$defs"]["FoldOperation"]["properties"]["angle"]["description"]
+    )
+    assert (
+        "degrees"
+        in schema["$defs"]["HemOperation"]["properties"]["roll_angle"]["description"]
+    )
 
 
 def test_operation_validation_rejects_bad_topology_and_unknown_fields():
@@ -505,9 +507,31 @@ async def test_inspector_reports_manufacturing_evidence(registered_tools, mock_b
     ):
         assert evidence in code
 
-    assert 'native_sheet_metal_history": history_evidence["native_linear_history"]' in code
-    assert 'abs(radius_delta - value)' in code
-    assert 'u_span >= 2.0 * math.pi' in code
+    assert "\"detail_level\": 'summary'" in code
+    assert 'if \'summary\' in ("candidates", "full")' in code
+    assert "if 'summary' == \"full\"" in code
+    assert (
+        'native_sheet_metal_history": history_evidence["native_linear_history"]' in code
+    )
+    assert "abs(radius_delta - value)" in code
+    assert "u_span >= 2.0 * math.pi" in code
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("detail_level", ["candidates", "full"])
+async def test_inspector_injects_requested_detail_level(
+    registered_tools, mock_bridge, detail_level
+):
+    mock_bridge.execute_python.return_value = _success({"detail_level": detail_level})
+
+    result = await registered_tools["inspect_sheet_metal"](
+        object_name="Bend", detail_level=detail_level
+    )
+    code = mock_bridge.execute_python.await_args.args[0]
+
+    assert result == {"detail_level": detail_level}
+    assert f'"detail_level": {detail_level!r}' in code
+    assert f'if {detail_level!r} == "full"' in code
 
 
 @pytest.mark.asyncio

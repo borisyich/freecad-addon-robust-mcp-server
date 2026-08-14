@@ -164,6 +164,7 @@ class FaceSelectionCriteria(_PrimitiveBase):
     convexity: Literal["flat", "convex", "concave", "saddle", "unknown"] | None = None
     adjacent_face_count_min: int | None = Field(default=None, ge=0)
     adjacent_face_count_max: int | None = Field(default=None, ge=0)
+    adjacent_surface_types: list[str] | None = None
     centroid_bounds: CoordinateRange | None = Field(
         default=None,
         validation_alias=AliasChoices("centroid_bounds", "center"),
@@ -395,7 +396,7 @@ class SubshapeSelectionCriteriaInput(_PrimitiveBase):
     )
     adjacent_surface_types: list[str] | None = Field(
         default=None,
-        description="Edge only: every listed adjacent face surface type must occur.",
+        description="Face/edge: every listed adjacent face surface type must occur.",
     )
     adjacent_edge_count_min: int | None = Field(
         default=None, ge=0, description="Vertex only: minimum adjacent edge count."
@@ -491,6 +492,7 @@ class SubshapeSelectionCriteriaInput(_PrimitiveBase):
                 "axis_point",
                 "axis_point_tolerance",
                 "convexity",
+                "adjacent_surface_types",
                 "centroid_bounds",
             },
             "edge": common
@@ -696,6 +698,8 @@ def _selection_topology_request(  # noqa: PLR0912, PLR0915
             or criteria.adjacent_face_count_max is not None
         ):
             fields.add("adjacent_faces")
+        if criteria.adjacent_surface_types:
+            fields.update({"adjacent_faces", "adjacent_surface_types"})
     elif isinstance(criteria, EdgeSelectionCriteria):
         if detail_level == "summary":
             fields.update(
@@ -844,22 +848,21 @@ def _semantic_matches(  # noqa: PLR0912, PLR0915
                 item.get("radius"), criteria.radius_min, criteria.radius_max
             ):
                 continue
-            if criteria.adjacent_surface_types:
-                adjacent_types = {
-                    _normalized_type_name(value)
-                    for value in item.get("adjacent_surface_types") or []
-                } or {
-                    _normalized_type_name(
-                        face_by_name.get(name, {}).get("surface_type")
-                    )
-                    for name in item.get("adjacent_faces") or []
-                }
-                requested_types = {
-                    _normalized_type_name(value)
-                    for value in criteria.adjacent_surface_types
-                }
-                if not requested_types.issubset(adjacent_types):
-                    continue
+
+        if criteria.adjacent_surface_types:
+            adjacent_types = {
+                _normalized_type_name(value)
+                for value in item.get("adjacent_surface_types") or []
+            } or {
+                _normalized_type_name(face_by_name.get(name, {}).get("surface_type"))
+                for name in item.get("adjacent_faces") or []
+            }
+            requested_types = {
+                _normalized_type_name(value)
+                for value in criteria.adjacent_surface_types
+            }
+            if not requested_types.issubset(adjacent_types):
+                continue
 
         if not _inside_range(
             adjacent_count,
@@ -942,6 +945,7 @@ def _compact_subshape(item: dict[str, Any]) -> dict[str, Any]:
         "centroid_kind",
         "convexity",
         "adjacent_faces",
+        "adjacent_surface_types",
         "point",
         "adjacent_edges",
         "tolerance",
@@ -950,6 +954,30 @@ def _compact_subshape(item: dict[str, Any]) -> dict[str, Any]:
     if "centroid" not in result and item.get("center") is not None:
         result["centroid"] = item["center"]
     return result
+
+
+def _compact_face_neighborhood_record(
+    item: dict[str, Any], *, distance: int | None = None
+) -> dict[str, Any]:
+    """Return compact, stable face evidence for a local topology walk."""
+    record: dict[str, Any] = {
+        "name": item["name"],
+        "type": item.get("surface_type"),
+    }
+    if distance is not None:
+        record["distance"] = distance
+    for key in (
+        "radius",
+        "axis_direction",
+        "axis_point",
+        "normal",
+        "area",
+        "centroid",
+        "convexity",
+    ):
+        if item.get(key) is not None:
+            record[key] = item[key]
+    return record
 
 
 def _primitive_definition(spec: PrimitiveSpec) -> tuple[str, dict[str, Any]]:
@@ -1320,6 +1348,106 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
         return response
 
     @mcp.tool()
+    async def inspect_subshape_neighborhood(
+        object_name: str,
+        reference: str,
+        hops: int = 1,
+        doc_name: str | None = None,
+    ) -> dict[str, Any]:
+        """Inspect a FaceN and adjacent faces before/after local edits; example: object_name="Body", reference="Face3", hops=1.
+
+        Use before local edits to reveal chamfers, fillets, blends, and supports.
+
+        Args:
+            object_name: Object containing the target face.
+            reference: Exact ``FaceN`` from ``select_subshapes``.
+            hops: Number of face-adjacency hops, from 1 to 5.
+            doc_name: Document name; uses the active document if omitted.
+
+        Returns:
+            Compact target and neighboring faces ordered by hop and index.
+        """
+        if not (
+            reference.startswith("Face")
+            and reference[4:].isdigit()
+            and int(reference[4:]) >= 1
+        ):
+            raise ValueError("reference must be an exact FaceN name")
+        if not 1 <= hops <= 5:
+            raise ValueError("hops must be between 1 and 5")
+
+        bridge = await get_bridge()
+        obj = await bridge.get_object(
+            object_name,
+            doc_name,
+            include_properties=False,
+            include_shape=True,
+            include_topology=True,
+            face_limit=None,
+            edge_limit=0,
+            vertex_limit=0,
+            topology_kinds=("faces",),
+            topology_fields=(
+                "surface_type",
+                "radius",
+                "axis_direction",
+                "axis_point",
+                "normal",
+                "area",
+                "centroid",
+                "convexity",
+                "adjacent_faces",
+                "adjacent_surface_types",
+            ),
+        )
+        if not obj:
+            raise ValueError(f"Object not found: {object_name!r}")
+        shape_info = obj.shape_info
+        if not isinstance(shape_info, dict) or shape_info.get("is_null") is True:
+            raise ValueError(f"Object {object_name!r} has no usable Shape")
+        faces = list(shape_info.get("faces") or [])
+        face_by_name = {item.get("name"): item for item in faces}
+        target = face_by_name.get(reference)
+        if target is None:
+            raise ValueError(
+                f"Cannot resolve {obj.name}.{reference}; select the face again after recompute"
+            )
+
+        visited = {reference}
+        frontier = [reference]
+        discovered: list[tuple[int, dict[str, Any]]] = []
+        for distance in range(1, hops + 1):
+            next_frontier: list[str] = []
+            for face_name in frontier:
+                for neighbor_name in (
+                    face_by_name[face_name].get("adjacent_faces") or []
+                ):
+                    if neighbor_name in visited or neighbor_name not in face_by_name:
+                        continue
+                    visited.add(neighbor_name)
+                    next_frontier.append(neighbor_name)
+                    discovered.append((distance, face_by_name[neighbor_name]))
+            frontier = sorted(set(next_frontier), key=lambda name: int(name[4:]))
+            if not frontier:
+                break
+
+        discovered.sort(key=lambda item: (item[0], int(item[1]["name"][4:])))
+        returned = discovered[:50]
+        return {
+            "object_name": obj.name,
+            "reference": reference,
+            "hops": hops,
+            "target": _compact_face_neighborhood_record(target),
+            "neighbor_count": len(discovered),
+            "returned_neighbor_count": len(returned),
+            "truncated": len(returned) < len(discovered),
+            "neighbors": [
+                _compact_face_neighborhood_record(item, distance=distance)
+                for distance, item in returned
+            ],
+        }
+
+    @mcp.tool()
     async def create_object(
         type_id: str,
         name: str | None = None,
@@ -1493,8 +1621,9 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
         object2_name: str,
         result_name: str | None = None,
         doc_name: str | None = None,
+        expected_solid_count: Annotated[int, Field(ge=1)] | None = 1,
     ) -> dict[str, Any]:
-        """Perform a boolean operation on two FreeCAD objects.
+        """Perform a transactional Boolean and reject unusable geometry.
 
         Args:
             operation: Boolean operation type: "fuse" (union), "cut" (subtract),
@@ -1503,6 +1632,9 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
             object2_name: Name of the second object.
             result_name: Name for the result object. Auto-generated if None.
             doc_name: Document containing the objects. Uses active document if None.
+            expected_solid_count: Exact required number of result solids. The
+                default is one continuous solid; set None only for an intentional
+                multi-solid result. Null and invalid Shapes are always rejected.
 
         Returns:
             Dictionary with result object information:
@@ -1567,6 +1699,20 @@ try:
     shape_type = "Null" if shape_is_null else str(shape.ShapeType)
     solid_count = 0 if shape_is_null else len(shape.Solids)
     result_volume = 0.0 if shape_is_null else float(shape.Volume)
+    rejection_reasons = []
+    if shape_is_null:
+        rejection_reasons.append("result Shape is null")
+    elif not shape_valid:
+        rejection_reasons.append("result Shape is invalid")
+    if {expected_solid_count!r} is not None and solid_count != {expected_solid_count!r}:
+        rejection_reasons.append(
+            f"expected {expected_solid_count!r} solid(s), got {{solid_count}}"
+        )
+    if rejection_reasons:
+        raise ValueError(
+            "Boolean {operation} rejected; transaction aborted: "
+            + "; ".join(rejection_reasons)
+        )
     doc.commitTransaction()
 except Exception:
     doc.abortTransaction()

@@ -53,6 +53,7 @@ This document describes the architecture for a Model Context Protocol (MCP) serv
     - [Debugging Tools](#debugging-tools)
       - [`inspect_object`](#inspect_object)
       - [`select_subshapes`](#select_subshapes)
+      - [`inspect_subshape_neighborhood`](#inspect_subshape_neighborhood)
       - [`validate_model`](#validate_model)
     - [Workbench Tools](#workbench-tools)
       - [`activate_workbench`](#activate_workbench)
@@ -1117,22 +1118,14 @@ async def add_sketch_geometry(
 ```python
 @mcp.tool()
 async def boolean_operation(
-    operation: str,
-    base_object: str,
-    tool_objects: list[str],
+    operation: Literal["fuse", "cut", "common"],
+    object1_name: str,
+    object2_name: str,
+    result_name: str | None = None,
     doc_name: str | None = None,
+    expected_solid_count: int | None = 1,
 ) -> dict:
-    """Perform boolean operation on Part objects.
-
-    Args:
-        operation: One of 'fuse' (union), 'cut' (subtract), 'common' (intersect)
-        base_object: Name of the base object
-        tool_objects: List of tool object names
-        doc_name: Document name
-
-    Returns:
-        Resulting object information
-    """
+    """Commit only a non-null, valid result with the expected solid count."""
     pass
 ```
 
@@ -1209,14 +1202,33 @@ async def select_subshapes(
 ) -> dict:
     """Return paged semantic matches and consumable topology references.
 
-    Cylindrical face records expose radius, axis_direction, and axis_point.
-    Face criteria can filter all three; page_size and criteria.limit accept 200.
+    Cylinder/cone face records expose radius, axis_direction, and axis_point.
+    Face and edge criteria accept adjacent_surface_types; page_size and
+    criteria.limit accept 200.
     """
     pass
 ```
 
 Use it to filter the topology returned by `inspect_object` for sketch support
 and Fillet/Chamfer/Draft/Thickness operations.
+
+#### `inspect_subshape_neighborhood`
+
+```python
+@mcp.tool()
+async def inspect_subshape_neighborhood(
+    object_name: str,
+    reference: str,
+    hops: int = 1,
+    doc_name: str | None = None,
+) -> dict:
+    """Return compact FaceN evidence and adjacent faces across bounded hops."""
+    pass
+```
+
+Use it before and after every local geometry edit to compare transitions,
+attachments, interfaces, and nearby invariant faces. Reselect topology after
+recompute; collateral changes require rollback or rework.
 
 #### `validate_model`
 

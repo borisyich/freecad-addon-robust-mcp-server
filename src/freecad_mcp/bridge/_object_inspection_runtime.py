@@ -36,9 +36,10 @@ OBJECT_INSPECTION_RUNTIME = dedent(
         }
 
 
-    def _cylindrical_surface_value(surface):
-        # Return stable cylinder geometry without probing unrelated surfaces.
-        if surface is None or "cylinder" not in type(surface).__name__.lower():
+    def _axial_surface_value(surface):
+        # Return stable cylinder/cone axis geometry without probing unrelated surfaces.
+        surface_name = type(surface).__name__.lower() if surface is not None else ""
+        if not any(kind in surface_name for kind in ("cylinder", "cone")):
             return None
         axis = _safe_attr(surface, "Axis")
         center = _safe_attr(surface, "Center")
@@ -371,11 +372,11 @@ OBJECT_INSPECTION_RUNTIME = dedent(
                     type(surface).__name__ if surface is not None else None
                 )
             if any(wants(field) for field in ("radius", "axis_direction", "axis_point")):
-                cylinder = _cylindrical_surface_value(surface)
-                if cylinder is not None:
+                axial_surface = _axial_surface_value(surface)
+                if axial_surface is not None:
                     for field in ("radius", "axis_direction", "axis_point"):
                         if wants(field):
-                            value[field] = cylinder[field]
+                            value[field] = axial_surface[field]
             if wants("normal"):
                 value["normal"] = normal
             if wants("area"):
@@ -390,6 +391,16 @@ OBJECT_INSPECTION_RUNTIME = dedent(
                     adjacent.update(edge_faces.get(int(edge_name[4:]) - 1, []))
                 adjacent.discard(value["name"])
                 value["adjacent_faces"] = sorted(adjacent)
+            if wants("adjacent_surface_types"):
+                adjacent = set()
+                for edge_name in face_edges.get(face_index, []):
+                    adjacent.update(edge_faces.get(int(edge_name[4:]) - 1, []))
+                adjacent.discard(value["name"])
+                value["adjacent_surface_types"] = [
+                    type(_safe_attr(faces[int(name[4:]) - 1], "Surface")).__name__
+                    for name in sorted(adjacent)
+                    if _safe_attr(faces[int(name[4:]) - 1], "Surface") is not None
+                ]
             if wants("edges"):
                 value["edges"] = face_edges.get(face_index, [])
             if wants("convexity") or wants("curvature"):

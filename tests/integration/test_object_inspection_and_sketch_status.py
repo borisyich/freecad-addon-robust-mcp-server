@@ -96,6 +96,11 @@ cylinder = doc.addObject("Part::Cylinder", "Cylinder")
 cylinder.Radius = 5.0
 cylinder.Height = 20.0
 cylinder.Placement.Base = FreeCAD.Vector(30.0, 0.0, 0.0)
+cone = doc.addObject("Part::Cone", "Cone")
+cone.Radius1 = 6.0
+cone.Radius2 = 2.0
+cone.Height = 12.0
+cone.Placement.Base = FreeCAD.Vector(50.0, 0.0, 0.0)
 doc.recompute()
 _result_ = True
 """
@@ -204,15 +209,98 @@ _result_ = True
                 "axis_direction_tolerance_deg": 1,
                 "axis_point": [30, 0, 100],
                 "axis_point_tolerance": 1e-6,
+                "adjacent_surface_types": ["Plane"],
             },
             detail_level="summary",
             page_size=200,
         )
         assert selected_cylinder["references"] == [cylindrical_faces[0]["name"]]
         assert selected_cylinder["pagination"]["page_size"] == 200
+        neighborhood = await tools["inspect_subshape_neighborhood"](
+            object_name="Cylinder",
+            reference=selected_cylinder["references"][0],
+            hops=1,
+            doc_name=doc_name,
+        )
+        assert neighborhood["target"]["type"] == "Cylinder"
+        assert {item["type"] for item in neighborhood["neighbors"]} == {"Plane"}
+
+        cone_info = await tools["inspect_object"](
+            "Cone", doc_name=doc_name, detail_level="topology"
+        )
+        conical_faces = [
+            face
+            for face in cone_info["shape_info"]["faces"]
+            if face["surface_type"] == "Cone"
+        ]
+        assert len(conical_faces) == 1
+        assert conical_faces[0]["axis_direction"] is not None
+        assert conical_faces[0]["axis_point"]["x"] == pytest.approx(50.0)
+        selected_cone = await tools["select_subshapes"](
+            object_name="Cone",
+            doc_name=doc_name,
+            criteria={
+                "kind": "face",
+                "surface_types": ["conical"],
+                "axis_direction": [0, 0, 1],
+                "axis_direction_tolerance_deg": 1,
+                "axis_point": [50, 0, -100],
+                "axis_point_tolerance": 1e-6,
+                "adjacent_surface_types": ["Plane"],
+            },
+        )
+        assert selected_cone["references"] == [conical_faces[0]["name"]]
 
         serialized = json.dumps(result)
         assert " object at " not in serialized
+    finally:
+        await _close_document(live_bridge, doc_name)
+
+
+@pytest.mark.asyncio
+async def test_boolean_operation_aborts_null_result_transaction(
+    live_bridge: XmlRpcBridge,
+    tools: dict[str, Any],
+) -> None:
+    """A rejected Boolean must not leave its result object in the document."""
+    doc_name = "MCPBooleanRollback"
+    setup = await live_bridge.execute_python(
+        f"""
+import FreeCAD
+
+if {doc_name!r} in FreeCAD.listDocuments():
+    FreeCAD.closeDocument({doc_name!r})
+doc = FreeCAD.newDocument({doc_name!r})
+left = doc.addObject("Part::Box", "Left")
+right = doc.addObject("Part::Box", "Right")
+right.Placement.Base = FreeCAD.Vector(100.0, 0.0, 0.0)
+doc.recompute()
+_result_ = True
+"""
+    )
+    assert setup.success, setup.error_traceback
+
+    try:
+        with pytest.raises(ValueError, match="transaction aborted"):
+            await tools["boolean_operation"](
+                operation="common",
+                object1_name="Left",
+                object2_name="Right",
+                result_name="RejectedCommon",
+                doc_name=doc_name,
+            )
+
+        state = await live_bridge.execute_python(
+            f"""
+doc = FreeCAD.getDocument({doc_name!r})
+_result_ = {{
+    "result_exists": doc.getObject("RejectedCommon") is not None,
+    "operands_exist": doc.getObject("Left") is not None and doc.getObject("Right") is not None,
+}}
+"""
+        )
+        assert state.success, state.error_traceback
+        assert state.result == {"result_exists": False, "operands_exist": True}
     finally:
         await _close_document(live_bridge, doc_name)
 

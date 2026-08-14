@@ -44,6 +44,7 @@ TOOL_SCENARIOS: dict[str, str] = {
     "list_objects": "objects",
     "inspect_object": "objects",
     "select_subshapes": "objects",
+    "inspect_subshape_neighborhood": "objects",
     "create_object": "objects",
     "create_primitive": "objects",
     "edit_object": "objects",
@@ -384,12 +385,12 @@ _result_ = True
     )
 
 
-def test_runtime_registry_has_explicit_135_tool_coverage() -> None:
+def test_runtime_registry_has_explicit_136_tool_coverage() -> None:
     async def registered() -> set[str]:
         return {tool.name for tool in await production_mcp.list_tools()}
 
     actual = asyncio.run(registered())
-    assert len(actual) == 135
+    assert len(actual) == 136
     assert set(TOOL_SCENARIOS) == actual
 
 
@@ -854,6 +855,14 @@ _result_ = True
         doc_name=doc,
     )
     assert selected["match_count"] == 1
+    await _call(
+        tools,
+        "inspect_subshape_neighborhood",
+        object_name="Extrusion",
+        reference=selected["references"][0],
+        hops=1,
+        doc_name=doc,
+    )
     for action in ("set", "get", "clear"):
         kwargs = {"object_names": ["Extrusion"]} if action == "set" else {}
         await _call(tools, "selection", action=action, doc_name=doc, **kwargs)
