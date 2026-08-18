@@ -6,6 +6,14 @@ inserts them. Durable repository routing therefore remains in `AGENTS.md` for
 Codex and `.clinerules/` for Cline, while detailed modeling policy lives in the
 `$freecad-engineering` Skill.
 
+Use the client's native `prompts/list` and `prompts/get` controls when available.
+If the client exposes MCP tools/resources but no prompt controls, call
+`get_freecad_prompt()` to list names or
+`get_freecad_prompt(name="...", arguments={...})` to render the same registered
+prompt implementation through the ordinary tool surface. Reading
+`src/freecad_mcp/prompts/freecad.py` is a developer diagnostic, not the normal
+agent workflow.
+
 ## Engineering routes
 
 | Prompt | Parameters | Purpose |

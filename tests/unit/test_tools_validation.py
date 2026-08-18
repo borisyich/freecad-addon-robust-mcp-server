@@ -107,14 +107,15 @@ class TestValidationTools:
         }
         compare_code = mock_bridge.execute_python.await_args_list[1].args[0]
         assert "before.importBrepFromString" in compare_code
-        assert (
-            "shape_for_export.Placement = FreeCAD.Placement()"
-            in (mock_bridge.execute_python.await_args_list[0].args[0])
-        )
-        assert "before.Placement = FreeCAD.Placement" in compare_code
-        assert "FreeCAD.Rotation(*saved_placement" in compare_code
+        capture_code = mock_bridge.execute_python.await_args_list[0].args[0]
+        assert "brep = shape.exportBrepToString()" in capture_code
+        assert "baseline.importBrepFromString(brep)" in capture_code
+        assert "shape_for_export.Placement" not in capture_code
+        assert "before.Placement =" not in compare_code
+        assert "before_metrics = {'valid': True, 'volume': 1000.0}" in compare_code
         assert "before.cut(after)" in compare_code
         assert "after.cut(before)" in compare_code
+        assert "if not _has_topology(shape)" in compare_code
         assert "face_product" in compare_code
         assert 'requested_mode == "auto"' in compare_code
         assert mock_bridge.execute_python.await_args_list[1].kwargs == {

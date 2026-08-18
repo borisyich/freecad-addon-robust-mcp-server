@@ -503,6 +503,11 @@ Native parametric `Part::*` primitives and boolean chains are accepted as
 editable history even without a `PartDesign::Body`; static/imported
 `Part::Feature` shape snapshots remain explicit review findings.
 
+If an MCP client exposes tools and resources but no native prompt controls, use
+`get_freecad_prompt()` to list prompts and `get_freecad_prompt(name="...",
+arguments={...})` to render the same server-registered prompt. Agents should not
+read prompt source files as a substitute for protocol invocation.
+
 For flat-pattern sketches, the Skill gates coarse outer contour, radius
 transitions, holes, bend lines, and final parameterization separately. Each gate
 recomputes, checks topology and deterministic dimensions, performs same-view

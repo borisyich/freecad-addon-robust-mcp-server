@@ -49,6 +49,8 @@ This reduces drift, but the delivery mechanisms are not equivalent:
   selected;
 - MCP prompts and resources are discoverable, but a client is not required to
   inject every prompt/resource automatically;
+- clients without native prompt controls can render the same registered prompts
+  through `get_freecad_prompt` instead of reading repository source;
 - tool descriptions are visible only when the corresponding MCP tool catalog is
   loaded.
 

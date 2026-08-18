@@ -178,6 +178,7 @@ def register_validation_tools(
         bridge = await get_bridge()
         code = f"""
 import FreeCAD
+import Part
 
 def _shape_metrics(shape):
     box = shape.BoundBox
@@ -209,14 +210,72 @@ if obj is None:
 shape = getattr(obj, "Shape", None)
 if shape is None or shape.isNull():
     raise ValueError(f"Object has no usable Shape: {object_name!r}")
+source_metrics = _shape_metrics(shape)
 shape_placement = shape.Placement
-shape_for_export = shape.copy()
-shape_for_export.Placement = FreeCAD.Placement()
+brep = shape.exportBrepToString()
+baseline = Part.Shape()
+baseline.importBrepFromString(brep)
+if baseline.isNull():
+    raise ValueError("Serialized checkpoint Shape could not be restored")
+baseline_metrics = _shape_metrics(baseline)
+
+def _close(first, second, absolute=1e-7, relative=1e-11):
+    return abs(first - second) <= max(
+        absolute,
+        relative * max(abs(first), abs(second)),
+    )
+
+round_trip_errors = []
+for name in ("shape_type", "solid_count", "shell_count", "face_count", "edge_count", "vertex_count", "valid"):
+    if source_metrics[name] != baseline_metrics[name]:
+        round_trip_errors.append(
+            "%s: source=%r restored=%r" % (
+                name,
+                source_metrics[name],
+                baseline_metrics[name],
+            )
+        )
+for name in ("volume", "area"):
+    if not _close(source_metrics[name], baseline_metrics[name]):
+        round_trip_errors.append(
+            "%s: source=%r restored=%r" % (
+                name,
+                source_metrics[name],
+                baseline_metrics[name],
+            )
+        )
+placement_probes = (
+    FreeCAD.Vector(0.0, 0.0, 0.0),
+    FreeCAD.Vector(1.0, 0.0, 0.0),
+    FreeCAD.Vector(0.0, 1.0, 0.0),
+    FreeCAD.Vector(0.0, 0.0, 1.0),
+)
+placement_max_error = max(
+    (
+        shape.Placement.multVec(point)
+        - baseline.Placement.multVec(point)
+    ).Length
+    for point in placement_probes
+)
+if placement_max_error > 1e-9:
+    round_trip_errors.append(
+        "placement_transform: max_probe_error=%r" % placement_max_error
+    )
+bbox_errors = [
+    abs(source_metrics["bounding_box"][key][index] - baseline_metrics["bounding_box"][key][index])
+    for key in ("min", "max", "size")
+    for index in range(3)
+]
+if round_trip_errors:
+    raise ValueError(
+        "Checkpoint BREP round-trip changed Shape metrics: "
+        + "; ".join(round_trip_errors)
+    )
 _result_ = {{
     "success": True,
     "document": doc.Name,
     "object_name": obj.Name,
-    "metrics": _shape_metrics(shape),
+    "metrics": source_metrics,
     "shape_placement": {{
         "base": [
             float(shape_placement.Base.x),
@@ -225,7 +284,10 @@ _result_ = {{
         ],
         "rotation_quaternion": [float(value) for value in shape_placement.Rotation.Q],
     }},
-    "_brep": shape_for_export.exportBrepToString(),
+    "round_trip_verified": True,
+    "round_trip_max_bbox_error": max(bbox_errors),
+    "round_trip_max_placement_error": placement_max_error,
+    "_brep": brep,
 }}
 """
         execution = await bridge.execute_python(code)
@@ -312,9 +374,17 @@ def _metrics(shape):
     }}
 
 def _difference_regions(shape):
-    if shape.isNull():
+    def _has_topology(candidate):
+        return not candidate.isNull() and bool(
+            len(candidate.Solids)
+            or len(candidate.Faces)
+            or len(candidate.Edges)
+            or len(candidate.Vertexes)
+        )
+
+    if not _has_topology(shape):
         return []
-    regions = list(shape.Solids)
+    regions = [solid for solid in shape.Solids if _has_topology(solid)]
     if not regions:
         regions = [shape]
     return [
@@ -348,13 +418,7 @@ if after is None or after.isNull():
     raise ValueError(f"Object has no usable Shape: {target_object!r}")
 before = Part.Shape()
 before.importBrepFromString({snapshot["brep"]!r})
-saved_placement = {snapshot.get("shape_placement")!r}
-if saved_placement:
-    before.Placement = FreeCAD.Placement(
-        FreeCAD.Vector(*saved_placement["base"]),
-        FreeCAD.Rotation(*saved_placement["rotation_quaternion"]),
-    )
-before_metrics = _metrics(before)
+before_metrics = {snapshot["metrics"]!r}
 after_metrics = _metrics(after)
 face_product = before_metrics["face_count"] * after_metrics["face_count"]
 requested_mode = {difference_mode!r}

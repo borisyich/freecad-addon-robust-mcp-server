@@ -2124,11 +2124,15 @@ compare_shape_checkpoint(
 ```
 
 The report always includes before/after validity, solid/shell/face/edge/vertex
-counts, volume, surface area, bounding boxes and their deltas. The captured
-B-rep is normalized to identity Placement and the exact Shape Placement
-(translation plus quaternion) is stored separately and restored before metrics
-or exact differences are computed. This prevents BRep round-trips from moving a
-checkpoint while leaving volume and topology unchanged. In `auto` mode,
+counts, volume, surface area, bounding boxes and their deltas. Capture serializes
+the original Shape directly, preserving the complete native BREP location graph;
+it does not make a shallow copy, clear Placement, or reconstruct a quaternion.
+Capture verifies the restored topology, mass properties, and placement transform.
+Metric deltas use the metrics recorded at capture time because OCCT can calculate
+a slightly different tight bounding box after serialization even when the BREP is
+geometrically identical. Exact booleans still use the restored BREP. Empty,
+non-null OCCT Compounds with no topology are discarded rather than reported as
+added or removed regions with infinite bounds. In `auto` mode,
 OCCT computes both `before.cut(after)` and `after.cut(before)` only when the
 product of the two face counts does not exceed `exact_face_product_limit`.
 Larger imported B-reps automatically use metric-only comparison, avoiding two
@@ -2142,6 +2146,14 @@ metric deltas remain available. `volume_tolerance` controls exact
 substitute for exact localization. Checkpoints live only for the current MCP
 server session (up to 32 named baselines) and may be replaced with
 `overwrite=True`.
+
+### Prompt access fallback
+
+The server registers prompts through native MCP `prompts/list` and `prompts/get`.
+When a client does not expose those protocol methods to the agent, use the
+ordinary `get_freecad_prompt` tool. With no `name` it lists prompt metadata; with
+`name` and an optional string `arguments` mapping it renders the same registered
+prompt. This is preferable to reading prompt source files from the repository.
 
 ### validate_parametric_model
 

@@ -30,12 +30,15 @@ reconstruction, model modification, validation, and completion criteria.
 6. **Tools** — perform deterministic operations and diagnostics. In particular,
    `validate_parametric_model` reports the actual FreeCAD document structure.
 
-Protocol-level `MCP_INSTRUCTIONS` is delivered once as server instructions; it
-must not be copied into every tool description. Tool descriptions contain only
-the first concise purpose paragraph. Exact typed arguments remain in JSON
-Schema, while cosmetic schema `title` fields are removed to keep `tools/list`
-within a practical context budget. Full workflows and large-response warnings
-belong in documentation, resources, prompts, and the Skill.
+Protocol-level `MCP_INSTRUCTIONS` is a minimal router. The MCP protocol delivers
+it once during initialization, but some clients flatten or repeat it alongside
+each selected tool. Keeping it below 800 bytes prevents that client behavior from
+multiplying a full engineering policy across tool declarations. Tool descriptions
+contain only the first concise purpose paragraph. Exact typed arguments remain in
+JSON Schema, while cosmetic schema `title` fields are removed to keep
+`tools/list` within a practical context budget. Full workflows and
+large-response warnings belong in documentation, resources, prompts, and the
+Skill.
 
 ## Selective client discovery
 
@@ -52,12 +55,17 @@ guidance. When inspecting tools in a client registry, filter by an exact tool
 name or the `mcp__freecad_mcp__` namespace and output a compact count/size
 summary instead of complete schemas.
 
+If a client does not expose native `prompts/list` or `prompts/get` controls, use
+the discoverable `get_freecad_prompt` tool. It delegates to the same registered
+FastMCP prompts; it does not maintain a second prompt catalog or read source files.
+
 ## Regression budgets
 
 The server does not truncate tool descriptions at runtime. Instead, tests guard
 the actual protocol and compact-response sizes:
 
-- complete compact `tools/list` payload: less than 90 KB;
+- protocol-level `MCP_INSTRUCTIONS`: less than 800 bytes;
+- complete compact `tools/list` payload: less than 113 KB;
 - aggregate tool descriptions: less than 10 KB;
 - largest single serialized tool definition: less than 8 KB;
 - representative compact `inspect_object` and `get_sketch_info` responses: less

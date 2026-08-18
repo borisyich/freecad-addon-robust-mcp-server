@@ -640,27 +640,18 @@ class TestMcpInstructions:
         normalized_instructions = " ".join(instructions.split())
 
         required_clauses = (
-            "inspect the intended document and existing feature history",
-            "use select_subshapes rather than manual Face/Edge enumeration",
-            "capture_shape_checkpoint immediately before mutation",
-            "save every explicit non-starred dimension",
-            "driving, verification, or unresolved",
-            "bind the alias to the dimensional constraint expression path",
-            "when a flat pattern is supplied, inventory the complete blank",
-            "do not substitute additive PartDesign features for sheet-metal bends",
-            "unfold with explicit material data",
-            "compare_images",
-            "Compare one seed element before applying any pattern",
+            "$freecad-engineering",
+            "freecad://skills/freecad-engineering",
+            "get_freecad_prompt",
+            "ACT -> OBSERVE -> REACT",
+            "capture_shape_checkpoint",
+            "compare_shape_checkpoint",
             "validate_parametric_model",
-            "required_dimension_names",
-            'target={"kind":"sketch","name":"..."}',
-            "never use a B-spline unless",
-            "Treat 0 DoF as solver evidence",
-            "source-backed Tangent constraint conflicts",
-            "deterministic dimensions before visual comparison",
         )
         for clause in required_clauses:
             assert clause in normalized_instructions
+        assert len(instructions.encode("utf-8")) < 800
+        assert "when a flat pattern is supplied" not in instructions
 
     def test_tool_description_preserves_complete_first_paragraph(self):
         """Purpose paragraphs are normalized but never clipped by character count."""
@@ -705,9 +696,9 @@ class TestMcpInstructions:
 
         assert result["properties"]["direct"]["type"] == "object"
         assert result["properties"]["indirect"]["type"] == "object"
-        assert result["properties"]["indirect"]["properties"]["nested"][
-            "$ref"
-        ] == ("#/$defs/Foo")
+        assert result["properties"]["indirect"]["properties"]["nested"]["$ref"] == (
+            "#/$defs/Foo"
+        )
         assert "Foo" in result["$defs"]
 
     @pytest.mark.asyncio

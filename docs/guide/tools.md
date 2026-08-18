@@ -1,6 +1,6 @@
 # Tools Reference
 
-The server currently registers **135 MCP tools**. This page is generated from the actual `@mcp.tool()` definitions in `src/freecad_mcp/tools` and is the exact inventory.
+The server currently registers **136 MCP tools**. This page is generated from the actual `@mcp.tool()` definitions in `src/freecad_mcp/tools` and is the exact inventory.
 
 Geometry-changing operations are transaction-backed where applicable. Use `history(action="undo")` for explicit recovery, `get_console_output` for console diagnostics, and `recompute_document` for document recomputation.
 
@@ -13,6 +13,7 @@ that behavior so a missing target can receive imported STEP/STL data.
 | Category | Source | Count |
 |---|---|---:|
 | [Execution](#execution) | `src/freecad_mcp/tools/execution.py` | 5 |
+| [Prompt access](#prompt-access) | `src/freecad_mcp/tools/prompt_access.py` | 1 |
 | [Documents](#documents) | `src/freecad_mcp/tools/documents.py` | 7 |
 | [Objects / Part](#objects-part) | `src/freecad_mcp/tools/objects.py` | 34 |
 | [Measurements](#measurements) | `src/freecad_mcp/tools/measurements.py` | 9 |
@@ -26,7 +27,7 @@ that behavior so a missing target can receive imported STEP/STL data.
 | [Validation](#validation) | `src/freecad_mcp/tools/validation.py` | 7 |
 | [Export / Import](#export-import) | `src/freecad_mcp/tools/export.py` | 2 |
 | [Macros](#macros) | `src/freecad_mcp/tools/macros.py` | 6 |
-| **Total** |  | **135** |
+| **Total** |  | **136** |
 
 ## Execution
 
@@ -37,6 +38,12 @@ that behavior so a missing target can receive imported STEP/STL data.
 | `get_connection_status` | Get the current FreeCAD connection status. |
 | `get_console_output` | Get recent FreeCAD console output. |
 | `get_mcp_server_environment` | Get environment info about the MCP Server and FreeCAD connection. |
+
+## Prompt access
+
+| Tool | Description |
+|---|---|
+| `get_freecad_prompt` | List or render the server's registered MCP prompts when a client does not expose native prompt controls. |
 
 ## Documents
 

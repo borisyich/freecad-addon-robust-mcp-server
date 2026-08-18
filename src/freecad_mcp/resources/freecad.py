@@ -417,6 +417,11 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                             "description": "Get Robust MCP Server environment info (instance_id, OS, hostname, FreeCAD connection)",
                             "key_params": [],
                         },
+                        {
+                            "name": "get_freecad_prompt",
+                            "description": "List or render registered MCP prompts when the client lacks native prompt controls",
+                            "key_params": ["name", "arguments"],
+                        },
                     ],
                 },
                 "documents": {

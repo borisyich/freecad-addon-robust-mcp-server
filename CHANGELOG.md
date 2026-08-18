@@ -289,6 +289,14 @@
 - Expanded Modify existing models paragraph in Skill.md.
 - Added one shared native end-condition contract to Pad, Pocket, Revolution,
   and Groove: bounded length/angle, ThroughAll, UpToFirst, and UpToFace.
+- Reduced protocol-level server instructions to a sub-800-byte router so clients
+  that repeat them beside selected tools do not multiply the full engineering
+  policy, and added `get_freecad_prompt` as a prompt-list/render fallback for
+  clients without native prompt controls.
+- Fixed Shape checkpoints for placed/nested Compounds by serializing the native
+  BREP location graph, retaining capture-time metric baselines, verifying the
+  round-trip transform, and filtering topologically empty OCCT difference
+  Compounds with sentinel infinite bounds.
 
 This project uses **component-specific versioning**. Each component has its own
 release notes and version history.

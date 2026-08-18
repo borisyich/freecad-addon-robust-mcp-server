@@ -14,6 +14,7 @@ Tools are organized by category:
 - macros: Macro management tools
 - images: Local image delivery and comparison tools
 - measurements: Tolerance-aware geometric evidence
+- prompt_access: Prompt fallback for clients without native prompt controls
 - checkpoints: Deterministic ACT-OBSERVE-REACT workflow gates
 - view: View and screenshot tools
 - validation: Object and document validation tools
@@ -32,6 +33,7 @@ from freecad_mcp.tools.macros import register_macro_tools
 from freecad_mcp.tools.measurements import register_measurement_tools
 from freecad_mcp.tools.objects import register_object_tools
 from freecad_mcp.tools.partdesign import register_partdesign_tools
+from freecad_mcp.tools.prompt_access import register_prompt_access_tools
 from freecad_mcp.tools.sheetmetal import register_sheetmetal_tools
 from freecad_mcp.tools.spreadsheet import register_spreadsheet_tools
 from freecad_mcp.tools.validation import register_validation_tools
@@ -49,6 +51,7 @@ __all__ = [
     "register_measurement_tools",
     "register_object_tools",
     "register_partdesign_tools",
+    "register_prompt_access_tools",
     "register_sheetmetal_tools",
     "register_spreadsheet_tools",
     "register_validation_tools",
@@ -64,6 +67,7 @@ def register_all_tools(mcp: Any, get_bridge_func: Callable[[], Awaitable[Any]]) 
         get_bridge_func: Async function returning the active bridge connection.
     """
     register_checkpoint_tools(mcp)
+    register_prompt_access_tools(mcp)
     register_execution_tools(mcp, get_bridge_func)
     register_document_tools(mcp, get_bridge_func)
     register_object_tools(mcp, get_bridge_func)

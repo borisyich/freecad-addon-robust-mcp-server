@@ -68,11 +68,11 @@ def _assert_bbox(
 
 
 @pytest.mark.asyncio
-async def test_checkpoint_restores_shape_placement_after_brep_round_trip(
+async def test_checkpoint_round_trip_preserves_nested_compound_coordinate_frame(
     live_bridge: XmlRpcBridge,
     validation_tools: dict[str, Any],
 ) -> None:
-    """Serialized baselines must retain the exact spatial coordinate frame."""
+    """An unchanged nested Compound must not produce bbox or empty-region noise."""
     doc_name = "MCPShapeCheckpointPlacementRegression"
     setup = await live_bridge.execute_python(
         f"""
@@ -80,10 +80,21 @@ import Part
 if {doc_name!r} in FreeCAD.listDocuments():
     FreeCAD.closeDocument({doc_name!r})
 doc = FreeCAD.newDocument({doc_name!r})
-shape = Part.makeBox(20.0, 10.0, 6.0)
-shape.Placement = FreeCAD.Placement(
+a = Part.makeBox(20.0, 10.0, 6.0)
+a.Placement = FreeCAD.Placement(
     FreeCAD.Vector(-17.0, 23.0, 4.0),
     FreeCAD.Rotation(FreeCAD.Vector(0.0, 0.0, 1.0), 31.0),
+)
+b = Part.makeCylinder(
+    5.0,
+    20.0,
+    FreeCAD.Vector(40.0, -10.0, -3.0),
+    FreeCAD.Vector(0.3, 0.7, 0.64),
+)
+shape = Part.makeCompound([a, b])
+shape.Placement = FreeCAD.Placement(
+    FreeCAD.Vector(11.0, -7.0, 2.0),
+    FreeCAD.Rotation(FreeCAD.Vector(1.0, 2.0, 3.0), 47.0),
 )
 obj = doc.addObject("Part::Feature", "PlacedSolid")
 obj.Shape = shape
@@ -101,12 +112,14 @@ _result_ = obj.Shape.isValid()
         )
         report = await validation_tools["compare_shape_checkpoint"](
             checkpoint_name="placed_baseline",
-            difference_mode="metrics",
+            difference_mode="exact",
         )
 
         assert captured["shape_placement"]["base"] == pytest.approx(
-            [-17.0, 23.0, 4.0], abs=1e-9
+            [11.0, -7.0, 2.0], abs=1e-9
         )
+        assert captured["round_trip_verified"] is True
+        assert captured["round_trip_max_placement_error"] < 1e-9
         for key in ("min", "max", "size"):
             assert report["before"]["bounding_box"][key] == pytest.approx(
                 captured["metrics"]["bounding_box"][key], abs=1e-7
@@ -120,6 +133,13 @@ _result_ = obj.Shape.isValid()
         assert report["delta"]["bounding_box"]["max"] == pytest.approx(
             [0.0, 0.0, 0.0], abs=1e-7
         )
+        difference = report["difference"]
+        assert difference["metric_change_detected"] is False
+        assert difference["geometric_change"] is False
+        assert difference["removed_region_count"] == 0
+        assert difference["added_region_count"] == 0
+        assert difference["removed_regions"] == []
+        assert difference["added_regions"] == []
     finally:
         await live_bridge.execute_python(
             f"FreeCAD.closeDocument({doc_name!r}) if {doc_name!r} in FreeCAD.listDocuments() else None"
