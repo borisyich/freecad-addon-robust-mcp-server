@@ -45,6 +45,7 @@ TOOL_SCENARIOS: dict[str, str] = {
     "list_objects": "objects",
     "inspect_object": "objects",
     "select_subshapes": "objects",
+    "inspect_subshape_neighborhood": "objects",
     "create_object": "objects",
     "create_primitive": "objects",
     "edit_object": "objects",
@@ -855,6 +856,14 @@ _result_ = True
         doc_name=doc,
     )
     assert selected["match_count"] == 1
+    await _call(
+        tools,
+        "inspect_subshape_neighborhood",
+        object_name="Extrusion",
+        reference=selected["references"][0],
+        hops=1,
+        doc_name=doc,
+    )
     for action in ("set", "get", "clear"):
         kwargs = {"object_names": ["Extrusion"]} if action == "set" else {}
         await _call(tools, "selection", action=action, doc_name=doc, **kwargs)

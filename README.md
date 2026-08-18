@@ -379,13 +379,14 @@ The server currently registers **131 MCP tools**. The tables below list common t
 | `create_object`    | Create a generic FreeCAD object by type ID                      | All  |
 | `create_primitive` | Create a Box, Cylinder, Sphere, Cone, Torus, Wedge, or Helix    | All  |
 
-#### Object Management (13 common tools)
+#### Object Management (14 common tools)
 
 | Tool                | Description                                        | Mode |
 | ------------------- | -------------------------------------------------- | ---- |
 | `list_objects`      | List all objects in a document                     | All  |
 | `inspect_object`    | Compact object metrics; paged topology/properties on request | All  |
-| `select_subshapes`  | Select paged `FaceN`/`EdgeN`/`VertexN` references by geometric criteria | All  |
+| `select_subshapes`  | Select paged topology by geometry, cone/cylinder axis, and adjacent surface types | All  |
+| `inspect_subshape_neighborhood` | Compare a `FaceN` neighborhood before/after any local geometry edit | All  |
 | `edit_object`       | Modify properties; resolve names for link properties | All  |
 | `delete_object`     | Delete an object from a document                   | All  |
 | `set_placement`     | Set object position and rotation                   | All  |
@@ -440,7 +441,7 @@ SheetMetal GUI ViewProvider, so the result remains visible and inspectable.
 | `create_sheet_metal_base` | Create a flat blank or open base-wall profile from a sketch | All |
 | `create_sheet_metal_feature` | Add typed flanges, folds, hems, reliefs, junctions, extensions, bends, or solid conversion | All |
 | `unfold_sheet_metal` | Create or transactionally verify an unfold using explicit neutral-axis data | All |
-| `inspect_sheet_metal` | Inspect thickness, classified bends, full active history, and unfold readiness | All |
+| `inspect_sheet_metal` | Inspect thickness, bends, history, and unfold readiness at summary/candidates/full detail | All |
 
 #### View & Display (12 common tools)
 

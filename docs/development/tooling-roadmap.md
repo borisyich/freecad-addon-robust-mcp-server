@@ -100,6 +100,111 @@ OCCT exposes both ordinary and optimal bounding-box algorithms; the tool should 
 - [ ] Add local validation scopes so Spreadsheet or metadata edits are not rejected because an unrelated empty Body exists.
 - [ ] Add a machine-readable operation journal suitable for replay, regression tests, and SFT/RL trajectory generation.
 
+## Imported STEP and direct B-Rep editing
+
+Imported STEP models normally arrive as static `Part::Feature` objects without
+Sketcher constraints, a `PartDesign::Body`, or editable feature history.
+PartDesign tools such as `create_hole` and `create_cylindrical_cut` create new
+history features and therefore cannot directly resize or reconstruct an
+existing STEP feature. `execute_python` and `safe_execute` must remain escape
+hatches, but they should not be the primary API: they make the agent implement
+tool geometry, tolerance search, result selection, validation, and rollback in
+ad hoc Python.
+
+The goal is not a universal command that can infer and edit arbitrary design
+intent from a B-Rep. The supported contract should recognize bounded families
+of analytic features, edit them through controlled local reconstruction, and
+reject ambiguous cases before mutating the document.
+
+### Shared edit contract
+
+- [ ] Add an internal `BRepEditTransaction` used by every direct-edit tool. It
+  captures the source Shape and target neighborhood, evaluates the candidate in
+  memory, commits only an accepted result, and restores the exact source on any
+  failure. This prevents every semantic tool from reimplementing rollback and
+  covers all static-B-Rep mutation classes.
+- [ ] Add baseline-aware validation with
+  `source_validity_policy="strict|no_new_errors"`. Imported models can contain
+  pre-existing B-Rep defects; `no_new_errors` may preserve those defects but
+  must reject a null Shape, new invalid regions, unexpected solids, or damage
+  outside the declared edit region. This covers controlled edits of imperfect
+  STEP imports without falling back to `validate_after=false`.
+- [ ] Give every direct edit `preview` and `commit` modes with the same
+  postconditions: expected solid count, added/removed volume, bounds, topology
+  counts, affected region, target-feature measurements, and preserved
+  invariants. This covers Boolean tolerance diagnosis and safe acceptance
+  without repeated `execute_python` probes.
+- [ ] Add local shape-difference evidence using a target ROI or recognized
+  feature fingerprint. Global volume, bounds, and face count are insufficient
+  to prove that a local edit preserved unrelated geometry on a large model.
+
+### Recognition and semantic edits
+
+- [x] Add `inspect_subshape_neighborhood` to return a target face and adjacent
+  faces with analytic surface evidence. This is the generic first step for
+  discovering transitions around holes, bosses, pockets, and walls.
+- [ ] Extend neighborhood inspection with an explicit adjacency graph, Shape
+  fingerprint, Cone semi-angle and limiting radii, and axial ranges for trimmed
+  Cylinder/Cone/Torus faces. The existing hop list identifies nearby faces but
+  does not yet reconstruct an engineering feature or safely survive recompute.
+- [ ] Add `inspect_axisymmetric_feature(object_name, seed_face)` to group a
+  coaxial sequence of Plane/Cylinder/Cone/Torus faces into a stable axial
+  profile. Return axis, axial intervals, limiting radii, entrances, through or
+  blind state, transitions, ambiguity, and a Shape-bound feature fingerprint.
+  This covers recognition of bores, shafts, bosses, counterbores, countersinks,
+  steps, chamfers, and coaxial channels; it also helps distinguish a requested
+  central bore from a nearby oblique passage.
+- [ ] Add `resize_axisymmetric_feature(feature_id, ...)` to modify the radial
+  profile of a recognized feature while explicitly preserving or replacing its
+  axial extents and transitions. The default transition policy must preserve
+  chamfer angles, fillet radii, and step lengths and validate the reconstructed
+  profile after recompute. This covers diameter changes to through/blind holes,
+  counterbores, countersinks, shafts, bosses, and stepped passages without
+  replacing the feature with a destructive full-length cylinder.
+- [ ] Add `inspect_planar_region(object_name, seed_face)` to recover a planar
+  wall, its outer/inner loops, parallel counterpart, local thickness, adjacent
+  transitions, and safe offset range. This covers locating pocket walls,
+  end faces, ribs, plate walls, and repeated coplanar or parallel regions.
+- [ ] Add `offset_planar_region(region_id, distance, transition_policy=...)` to
+  move one wall or a validated wall set and reconstruct adjacent analytic
+  surfaces by controlled extend/trim. This covers pocket width/depth changes,
+  inward or outward wall movement, wall-thickness changes, and local envelope
+  changes. It must reject ambiguous reconstruction instead of silently falling
+  back to a box Boolean that leaves sliver faces or stale fillets.
+
+### Generic fallback and delivery verification
+
+- [ ] Add `apply_brep_boolean` for atomic `cut`, `fuse`, and `common` directly
+  against `Part::Feature`, with declarative cylinder, cone, box, sphere,
+  extruded-profile, revolved-profile, and compound tools. This covers adding
+  simple holes, pockets, cutouts, bosses, and allowances when no existing
+  feature must be preserved. It must not claim transition preservation when a
+  semantic resize tool is required.
+- [ ] Add `export_step_verified` to export into a temporary path, re-import into
+  an isolated document, and compare the delivered STEP with the accepted working
+  Shape. Report solid/validity, target-feature measurements, global metric
+  deltas, and localized changes introduced only by the round trip. This covers
+  final acceptance of every edited STEP; successful file creation alone does
+  not prove geometric equivalence.
+- [ ] Clarify `create_cylindrical_cut` as PartDesign-only in its public name or
+  description. Its world-space axis contract currently resembles a generic
+  B-Rep cut even though it requires a valid `PartDesign::Body`; static STEP
+  cuts belong in `apply_brep_boolean`.
+- [ ] Extend `safe_execute` with the shared baseline-aware validation and mark
+  `validate_after=false` results as unverified. Keep it for diagnostics and
+  unsupported research cases rather than presenting arbitrary Python execution
+  as an accepted CAD edit.
+
+The first deliverable should be the shared transaction, baseline-aware
+validation, `inspect_axisymmetric_feature`, `resize_axisymmetric_feature`,
+`apply_brep_boolean`, and `export_step_verified`. Together they cover the most
+common STEP edits—holes, channels, shafts, bosses, steps, and simple Boolean
+material changes—before the more ambiguous planar-wall reconstruction work is
+introduced. Regression coverage must include a through bore with two chamfers:
+resize its cylinder, preserve both transitions and all axial dimensions, keep
+one expected solid, prove no change outside the local ROI, and repeat the same
+checks after STEP round-trip.
+
 ## Sheet metal design
 
 Sheet-metal modeling is a distinct manufacturing domain, not a PartDesign

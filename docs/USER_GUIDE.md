@@ -429,9 +429,10 @@ metric; use formal checkpoints only when the task benefits from them.
 - `set_body_tip` changes the active Body result without using `edit_object` or GUI selection and validates the resulting Shape/Tip contract.
 - `linear_pattern` and `polar_pattern` are for one transformation of a non-pattern seed. Use `multi_transform_pattern` for combined linear and polar stages. For drawing reconstruction, accept the single seed through `compare_images` before repeating it.
 - Pattern, Pocket, and thread responses include before/after volume diagnostics. A valid Shape is not proof that the intended amount of material changed.
-- `boolean_operation` returns Shape validity/type/solid count plus base, tool,
-  result, and delta volumes. Use those fields as the immediate Boolean checkpoint;
-  call deeper inspection only when they expose ambiguity or a failed invariant.
+- `boolean_operation` aborts its transaction for a null/invalid Shape or a solid
+  count different from `expected_solid_count` (default `1`). Successful results
+  return Shape/type/count plus base, tool, result, and delta volumes. Set the
+  expectation to `None` only for an intentional multi-solid result.
 - A failed `fillet_edges` rolls back and returns structured source/selection,
   adjacent-face, radius, result-state, and per-edge trial evidence. When every
   edge succeeds individually but the group fails, inspect `failing_edge_groups`.
@@ -531,8 +532,9 @@ For complex parts, build step by step:
 
 `inspect_object(detail_level="topology")` returns a paged topology catalogue. Faces include
 surface type, a representative oriented normal, area, adjacent faces, and local
-convexity; cylindrical faces additionally include radius, axis direction, and a
-point on the axis. Edges include curve type, endpoints, length, direction/radius, and
+  convexity; cylindrical and conical faces additionally include radius, axis direction,
+  and a point on the axis. Faces and edges can expose adjacent surface types.
+  Edges include curve type, endpoints, length, direction/radius, and
 adjacent faces. Vertices include a world point, tolerance, and adjacent
 edges/faces. Use `select_subshapes` to convert engineering intent into `FaceN`,
 `EdgeN`, or `VertexN`:
@@ -557,6 +559,7 @@ select_subshapes(
         "radius_min": 4.99, "radius_max": 5.01,
         "axis_direction": [0, 0, 1],
         "axis_point": [20, 10, 0], "axis_point_tolerance": 0.01,
+        "adjacent_surface_types": ["Cone"],
     },
     detail_level="summary", page_size=200,
 )
@@ -585,11 +588,32 @@ The selector narrows candidates but does not replace geometric verification.
 Its wire schema is a single flat `criteria` object so clients can display every
 filter instead of a ref-only `unknown` union; fields that do not apply to the
 selected `kind` are rejected before FreeCAD execution.
-`criteria.limit` and `page_size` both accept up to 200 results. Cylinder-axis
+`criteria.limit` and `page_size` both accept up to 200 results. Cylinder/cone-axis
 direction is undirected, and `axis_point` may be any point on the expected
 infinite axis.
 Inspect the returned records and confirm the selected references on the current
 Body Tip before creating topology-sensitive downstream features.
+
+Before every local edit—hole, boss, pocket wall, rib, flange, thickness change,
+or direct face move—inspect the target's topology neighborhood:
+
+```python
+inspect_subshape_neighborhood(
+    object_name="Imported",
+    reference="Face3",
+    hops=1,
+)
+```
+
+The compact target/neighbor records make transitions, attachments, functional
+interfaces, and nearby invariant faces visible without manually following each
+face name. Treat the selected face as an edit handle, not as the whole feature.
+After recompute, reselect transient references and repeat the same neighborhood,
+measurement, section/view, validity, and solid-count checks. If any non-target
+face, transition, attachment, continuity, interface, or nearby invariant is
+damaged, undo the causal edit or reconstruct the original design intent before
+continuing. For imported STEP/static B-reps, bracket this loop with
+`capture_shape_checkpoint` and `compare_shape_checkpoint`.
 
 ### Measurement evidence
 

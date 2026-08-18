@@ -15,7 +15,7 @@ that behavior so a missing target can receive imported STEP/STL data.
 | [Execution](#execution) | `src/freecad_mcp/tools/execution.py` | 5 |
 | [Prompt access](#prompt-access) | `src/freecad_mcp/tools/prompt_access.py` | 1 |
 | [Documents](#documents) | `src/freecad_mcp/tools/documents.py` | 7 |
-| [Objects / Part](#objects-part) | `src/freecad_mcp/tools/objects.py` | 34 |
+| [Objects / Part](#objects-part) | `src/freecad_mcp/tools/objects.py` | 35 |
 | [Measurements](#measurements) | `src/freecad_mcp/tools/measurements.py` | 9 |
 | [PartDesign / Sketcher](#partdesign-sketcher) | `src/freecad_mcp/tools/partdesign.py` | 28 |
 | [Sheet Metal](#sheet-metal) | `src/freecad_mcp/tools/sheetmetal.py` | 5 |
@@ -63,12 +63,13 @@ that behavior so a missing target can receive imported STEP/STL data.
 |---|---|
 | `list_objects` | List all objects in a FreeCAD document. |
 | `inspect_object` | Compact metrics by default; paged topology and full properties on request. |
-| `select_subshapes` | Select paged face/edge/vertex references by semantic criteria and global location. |
+| `select_subshapes` | Select paged topology by geometry, cylinder/cone axis, adjacent surface types, and global location. |
+| `inspect_subshape_neighborhood` | Compare a local face neighborhood before/after edits and expose collateral topology changes. |
 | `create_object` | Create a new FreeCAD object. |
 | `create_primitive` | Create a Box, Cylinder, Sphere, Cone, Torus, Wedge, or Helix. |
 | `edit_object` | Edit object properties; string names are resolved for FreeCAD link properties. |
 | `delete_object` | Delete an object from a FreeCAD document. |
-| `boolean_operation` | Boolean operation with result validity, topology, and volume evidence. |
+| `boolean_operation` | Transactional Boolean that rejects null/invalid or unexpected-solid results before commit. |
 | `set_placement` | Set the placement (position and rotation) of a FreeCAD object. |
 | `scale_object` | Scale an object uniformly or non-uniformly. |
 | `rotate_object` | Rotate an object around an axis. |
@@ -167,7 +168,7 @@ and display-mode evidence.
 | `create_sheet_metal_base` | Create a native flat blank or open base-wall profile from a Sketcher sketch with explicit thickness and bend radius. |
 | `create_sheet_metal_feature` | Create a typed native flange, sketch-line fold, junction, relief, corner relief, extend, hem, solid bend, or solid-to-sheet conversion. |
 | `unfold_sheet_metal` | Create or verification-roll back a parametric flat pattern from a planar stationary face and explicit material data. |
-| `inspect_sheet_metal` | Report full active-history classification, thickness evidence, planar stationary-face candidates, classified bend zones, Body Tip, and unfold readiness. |
+| `inspect_sheet_metal` | Report sheet-metal health at `summary`, `candidates`, or `full` detail. |
 
 Recommended sequence:
 
@@ -187,7 +188,8 @@ Recommended sequence:
 5. After each major flange or fold, inspect the formed feature and verify the
    expected panel normal and silhouette. The next operation must use the current
    Body Tip as `base_feature`.
-6. Call `inspect_sheet_metal`, choose a planar stationary face from evidence,
+6. Call `inspect_sheet_metal(detail_level="candidates")`, choose a planar
+   stationary face from evidence,
    and create the manufacturing representation with `unfold_sheet_metal`. For a
    final check, prefer `verification_only=True`: it returns geometric/sketch
    evidence and removes the temporary Unfold before structural validation.
@@ -204,6 +206,11 @@ Stale bases and wrong topology references are rejected before a new native
 proxy is created; recompute failures abort the transaction and restore the prior
 Tip.
 
+The default inspection `summary` contains counts, classifications, readiness,
+and warnings without face lists. `candidates` adds stationary planar faces and
+classified bend pairs. `full` additionally returns every cylindrical face and
+complete `history_evidence`; use it only for a focused diagnosis.
+
 Inspection audits every shape-producing feature from the first native
 SheetMetal feature through the inspected object. A later native proxy cannot
 hide an interleaved Pad or copied PartDesign feature:
@@ -218,7 +225,7 @@ hide an interleaved Pad or copied PartDesign feature:
 whose radius delta matches sheet thickness and whose radius matches a declared
 native bend radius. `bend_zone_count` counts those pairs. Full cylinders such
 as hole walls and unmatched partial cylinders such as typical fillets remain in
-`cylindrical_faces` with an explicit non-bend classification.
+the `full` response's `cylindrical_faces` with an explicit non-bend classification.
 
 Example operation payloads:
 

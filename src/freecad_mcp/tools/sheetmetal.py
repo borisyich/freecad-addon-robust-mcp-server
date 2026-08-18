@@ -1049,13 +1049,14 @@ except Exception:
     async def inspect_sheet_metal(
         object_name: str,
         doc_name: str | None = None,
+        detail_level: Literal["summary", "candidates", "full"] = "summary",
     ) -> dict[str, Any]:
         """Inspect sheet thickness, bend surfaces, history, and unfold readiness.
 
-        The report is compact: shape validity, solid count, declared/estimated
-        thickness, planar stationary-face candidates, cylindrical bend-face
-        count, native SheetMetal proxy history, Body Tip, and warnings. Use the
-        returned face candidates as evidence, then resolve the final choice with
+        ``summary`` returns scalar health/count evidence and warnings.
+        ``candidates`` adds planar stationary faces and classified bend pairs.
+        ``full`` also returns every cylindrical face and complete history
+        evidence. Use candidates as evidence, then resolve the final choice with
         ``select_subshapes`` before folding or unfolding.
         """
         bridge = await get_bridge()
@@ -1245,6 +1246,7 @@ visible = bool(getattr(view, "Visibility", False))
 if bool(getattr(FreeCAD, "GuiUp", False)) and (not display_mode or display_mode == "None"):
     warnings.append("Object has no usable GUI display mode (missing SheetMetal ViewProvider)")
 _result_ = {{
+    "detail_level": {detail_level!r},
     "object": obj.Name,
     "type_id": obj.TypeId,
     "proxy_type": type(getattr(obj, "Proxy", None)).__name__,
@@ -1254,23 +1256,21 @@ _result_ = {{
     "shape_valid": bool(shape.isValid()),
     "solid_count": len(shape.Solids),
     "volume": float(shape.Volume),
-    "declared_thicknesses": declared_thicknesses,
     "estimated_thickness": estimated_thickness,
+    "declared_thickness_count": len(declared_thicknesses),
+    "declared_bend_radius_count": len(declared_bend_radii),
     "planar_face_count": len(planar),
+    "stationary_face_candidate_count": min(len(planar), 8),
     "cylindrical_face_count": len(cylindrical_faces),
     "classified_bend_face_count": len(bend_face_names),
     # Backwards-compatible alias with strengthened semantics.
     "cylindrical_bend_face_count": len(bend_face_names),
     "bend_zone_count": len(bend_pairs),
-    "declared_bend_radii": declared_bend_radii,
-    "cylindrical_faces": cylindrical_faces,
-    "bend_pairs": bend_pairs,
-    "stationary_face_candidates": planar[:8],
-    "sheet_metal_history": history,
     "has_native_sheet_metal_features": bool(history),
     "native_sheet_metal_history": history_evidence["native_linear_history"],
     "sheet_metal_history_classification": history_evidence["classification"],
-    "history_evidence": history_evidence,
+    "history_feature_count": len(history),
+    "unsupported_shape_feature_count": len(history_evidence["unsupported_shape_features"]),
     "display_mode": display_mode,
     "visible": visible,
     "unfold_ready": bool(
@@ -1283,6 +1283,19 @@ _result_ = {{
     ),
     "warnings": warnings,
 }}
+if {detail_level!r} in ("candidates", "full"):
+    _result_.update({{
+        "declared_thicknesses": declared_thicknesses,
+        "declared_bend_radii": declared_bend_radii,
+        "bend_pairs": bend_pairs,
+        "stationary_face_candidates": planar[:8],
+        "sheet_metal_history": history,
+    }})
+if {detail_level!r} == "full":
+    _result_.update({{
+        "cylindrical_faces": cylindrical_faces,
+        "history_evidence": history_evidence,
+    }})
 """
         result = await bridge.execute_python(code)
         if result.success and result.result is not None:

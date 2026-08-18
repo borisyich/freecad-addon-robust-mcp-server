@@ -378,9 +378,10 @@ failed batches restore the affected cells, aliases, and expressions.""",
 ```
 boolean_operation(
     operation="fuse",  # or "cut" or "common"
-    object1="Box",     # Base shape
-    object2="Cylinder", # Tool shape
-    result_name="FusedShape"  # Optional result name
+    object1_name="Box",     # Base shape
+    object2_name="Cylinder", # Tool shape
+    result_name="FusedShape",  # Optional result name
+    expected_solid_count=1,
 )
 ```
 
@@ -395,11 +396,11 @@ boolean_operation(
 validate_object(object_name="Box")
 validate_object(object_name="Cylinder")
 
-# Perform operation
-boolean_operation(operation="fuse", object1="Box", object2="Cylinder")
-
-# After boolean
-validate_object(object_name="Fused")  # Check result is valid
+# Perform operation. Null/invalid or unexpected-solid results abort automatically.
+boolean_operation(
+    operation="fuse", object1_name="Box", object2_name="Cylinder",
+    expected_solid_count=1,
+)
 ```
 
 ## Common Issues
@@ -723,10 +724,11 @@ Boolean operations combine two or more shapes into a new shape.
 Combines two shapes into one:
 ```
 boolean_operation(
-    object1="Box",
-    object2="Cylinder",
+    object1_name="Box",
+    object2_name="Cylinder",
     operation="fuse",
-    result_name="FusedShape"
+    result_name="FusedShape",
+    expected_solid_count=1,
 )
 ```
 
@@ -734,10 +736,11 @@ boolean_operation(
 Removes the second shape from the first:
 ```
 boolean_operation(
-    object1="Box",
-    object2="Cylinder",
+    object1_name="Box",
+    object2_name="Cylinder",
     operation="cut",
-    result_name="CutShape"
+    result_name="CutShape",
+    expected_solid_count=1,
 )
 ```
 
@@ -745,18 +748,21 @@ boolean_operation(
 Keeps only the overlapping region:
 ```
 boolean_operation(
-    object1="Box",
-    object2="Cylinder",
+    object1_name="Box",
+    object2_name="Cylinder",
     operation="common",
-    result_name="CommonShape"
+    result_name="CommonShape",
+    expected_solid_count=1,
 )
 ```
 
 ## Tips
 - Shapes must overlap for meaningful results
+- Null, invalid, or unexpected-solid results abort before transaction commit
+- Set `expected_solid_count=None` only for an intentional multi-solid result
 - The original objects remain in the document
 - Use `set_visual_properties(object_name, visible=False)` to hide originals after operation
-- Recompute the document after boolean operations
+- The tool recomputes before validating and committing the result
 """
 
     # =========================================================================

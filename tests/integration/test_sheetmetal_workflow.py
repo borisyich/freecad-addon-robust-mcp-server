@@ -88,7 +88,7 @@ async def _sheet_state(
     result = await _call(
         tools,
         "execute_python",
-        code=f'''
+        code=f"""
 doc = FreeCAD.getDocument({doc!r})
 def shape_state(name):
     obj = doc.getObject(name)
@@ -129,7 +129,7 @@ if {flat!r} is not None:
 body = doc.getObject("Body")
 state["tip"] = body.Tip.Name if body and body.Tip else None
 _result_ = state
-''',
+""",
     )
     return result["result"]
 
@@ -145,7 +145,7 @@ async def _mutate_sheet_chain(
     result = await _call(
         tools,
         "execute_python",
-        code=f'''
+        code=f"""
 doc = FreeCAD.getDocument({doc!r})
 mutations = {mutations!r}
 formed = doc.getObject({formed!r})
@@ -177,7 +177,7 @@ for mutation in mutations:
         "flat": signature(flat),
     }})
 _result_ = trace
-''',
+""",
     )
     return result["result"]
 
@@ -189,14 +189,14 @@ async def _assert_tip_and_absence(
     result = await _call(
         tools,
         "execute_python",
-        code=f'''
+        code=f"""
 doc = FreeCAD.getDocument({doc!r})
 body = doc.getObject("Body")
 _result_ = {{
     "tip": body.Tip.Name if body.Tip else None,
     "feature_exists": doc.getObject({absent!r}) is not None,
 }}
-''',
+""",
     )
     assert result["result"] == {"tip": expected_tip, "feature_exists": False}
 
@@ -311,6 +311,7 @@ async def test_upstream_reference_l_profile_unfolds_to_100_mm_blank(
         "inspect_sheet_metal",
         object_name="ReferenceLProfile",
         doc_name=doc,
+        detail_level="candidates",
     )
     assert inspection["shape_valid"] is True
     assert inspection["solid_count"] == 1
@@ -318,6 +319,30 @@ async def test_upstream_reference_l_profile_unfolds_to_100_mm_blank(
     assert inspection["visible"] is True
     assert inspection["display_mode"] != "None"
     assert inspection["cylindrical_bend_face_count"] >= 1
+    assert "stationary_face_candidates" in inspection
+    assert "cylindrical_faces" not in inspection
+    assert "history_evidence" not in inspection
+    summary = await _call(
+        tools,
+        "inspect_sheet_metal",
+        object_name="ReferenceLProfile",
+        doc_name=doc,
+    )
+    assert summary["detail_level"] == "summary"
+    assert "stationary_face_candidates" not in summary
+    assert "cylindrical_faces" not in summary
+    assert "history_evidence" not in summary
+    full = await _call(
+        tools,
+        "inspect_sheet_metal",
+        object_name="ReferenceLProfile",
+        doc_name=doc,
+        detail_level="full",
+    )
+    assert full["detail_level"] == "full"
+    assert "stationary_face_candidates" in full
+    assert "cylindrical_faces" in full
+    assert "history_evidence" in full
     stationary_face = inspection["stationary_face_candidates"][0]["face"]
 
     unfolded = await _call(
@@ -358,7 +383,7 @@ _result_ = {{
     "tip": doc.getObject("Body").Tip.Name,
     "unfold_exists": doc.getObject("ReferenceFlatPattern") is not None,
     "remaining": [
-        name for name in {unfolded['rolled_back_objects']!r}
+        name for name in {unfolded["rolled_back_objects"]!r}
         if doc.getObject(name) is not None
     ],
 }}
@@ -501,6 +526,7 @@ async def test_semantic_edge_flange_and_unfold_workflow(
         "inspect_sheet_metal",
         object_name="EdgeFlange",
         doc_name=doc,
+        detail_level="candidates",
     )
     assert inspection["native_sheet_metal_history"] is True
     assert inspection["tip"] == "EdgeFlange"
@@ -571,13 +597,13 @@ async def test_semantic_edge_flange_and_unfold_workflow(
     dynamic_before = await _call(
         tools,
         "execute_python",
-        code=f'''
+        code=f"""
 flange = FreeCAD.getDocument({doc!r}).getObject("EdgeFlange")
 _result_ = {{
     "hash": int(flange.Shape.hashCode()),
     "status": [str(value) for value in flange.getPropertyStatus("length")],
 }}
-''',
+""",
     )
     assert {"Dynamic", "21"}.intersection(dynamic_before["result"]["status"])
     await _call(
@@ -590,13 +616,13 @@ _result_ = {{
     dynamic_after = await _call(
         tools,
         "execute_python",
-        code=f'''
+        code=f"""
 flange = FreeCAD.getDocument({doc!r}).getObject("EdgeFlange")
 _result_ = {{
     "hash": int(flange.Shape.hashCode()),
     "length": float(flange.length.Value),
 }}
-''',
+""",
     )
     assert dynamic_after["result"]["hash"] != dynamic_before["result"]["hash"]
     assert dynamic_after["result"]["length"] == pytest.approx(18.0)
@@ -645,7 +671,11 @@ async def test_sketch_line_fold_preserves_tip_holes_and_recomputes(
         doc_name=doc,
     )
     base_inspection = await _call(
-        tools, "inspect_sheet_metal", object_name="FoldBase", doc_name=doc
+        tools,
+        "inspect_sheet_metal",
+        object_name="FoldBase",
+        doc_name=doc,
+        detail_level="full",
     )
     assert base_inspection["cylindrical_face_count"] == 1
     assert base_inspection["classified_bend_face_count"] == 0
@@ -673,11 +703,11 @@ async def test_sketch_line_fold_preserves_tip_holes_and_recomputes(
     tip_state = await _call(
         tools,
         "execute_python",
-        code=f'''
+        code=f"""
 doc = FreeCAD.getDocument({doc!r})
 body = doc.getObject("Body")
 _result_ = {{"tip": body.Tip.Name, "is_base": body.Tip is doc.getObject("FoldBase")}}
-''',
+""",
     )
     assert tip_state["result"] == {"tip": "FoldBase", "is_base": True}
 
@@ -699,17 +729,22 @@ _result_ = {{"tip": body.Tip.Name, "is_base": body.Tip is doc.getObject("FoldBas
     assert fold["proxy_type"] == "SMFoldWall"
     assert fold["solid_count"] == 1
     inspection = await _call(
-        tools, "inspect_sheet_metal", object_name="SketchFold", doc_name=doc
+        tools,
+        "inspect_sheet_metal",
+        object_name="SketchFold",
+        doc_name=doc,
+        detail_level="full",
     )
     assert inspection["tip"] == "SketchFold"
     assert inspection["classified_bend_face_count"] >= 2
-    assert inspection["cylindrical_bend_face_count"] == inspection[
-        "classified_bend_face_count"
-    ]
+    assert (
+        inspection["cylindrical_bend_face_count"]
+        == inspection["classified_bend_face_count"]
+    )
     assert inspection["bend_zone_count"] >= 1
-    assert inspection["cylindrical_face_count"] > inspection[
-        "classified_bend_face_count"
-    ]
+    assert (
+        inspection["cylindrical_face_count"] > inspection["classified_bend_face_count"]
+    )
     assert any(
         item["classification"] == "full_cylinder_non_bend"
         for item in inspection["cylindrical_faces"]
@@ -732,9 +767,7 @@ _result_ = {{"tip": body.Tip.Name, "is_base": body.Tip is doc.getObject("FoldBas
             name="RejectedNonPlanarUnfold",
             doc_name=doc,
         )
-    await _assert_tip_and_absence(
-        tools, doc, "SketchFold", "RejectedNonPlanarUnfold"
-    )
+    await _assert_tip_and_absence(tools, doc, "SketchFold", "RejectedNonPlanarUnfold")
     unfolded = await _call(
         tools,
         "unfold_sheet_metal",
@@ -848,9 +881,7 @@ _result_ = {{
 """,
     )
     assert {"Dynamic", "21"}.intersection(dynamic_before["result"]["angle_status"])
-    assert {"Dynamic", "21"}.intersection(
-        dynamic_before["result"]["kfactor_status"]
-    )
+    assert {"Dynamic", "21"}.intersection(dynamic_before["result"]["kfactor_status"])
 
     await _call(
         tools,
@@ -896,8 +927,7 @@ _result_ = {{
     fold_bindings = [
         item
         for item in validation["expression_bindings"]
-        if item["object"] == "SketchFold"
-        and item["property"] in {"angle", "kfactor"}
+        if item["object"] == "SketchFold" and item["property"] in {"angle", "kfactor"}
     ]
     assert len(fold_bindings) == 2
     assert all(item["solid_driving"] for item in fold_bindings)
@@ -924,7 +954,11 @@ _result_ = {{
     )
     assert cut["validated"] is True
     cut_inspection = await _call(
-        tools, "inspect_sheet_metal", object_name="LateCylindricalCut", doc_name=doc
+        tools,
+        "inspect_sheet_metal",
+        object_name="LateCylindricalCut",
+        doc_name=doc,
+        detail_level="full",
     )
     assert cut_inspection["native_sheet_metal_history"] is True
     assert cut_inspection["sheet_metal_history_classification"] == (
@@ -932,9 +966,7 @@ _result_ = {{
     )
     assert [
         item["name"]
-        for item in cut_inspection["history_evidence"][
-            "supported_subtractive_features"
-        ]
+        for item in cut_inspection["history_evidence"]["supported_subtractive_features"]
     ] == ["LateCylindricalCut"]
     assert cut_inspection["unfold_ready"] is True
 
@@ -1101,7 +1133,11 @@ async def test_relief_configured_hemmed_enclosure_corner_recomputes(
     assert hem["proxy_type"] == "SMHem"
     assert hem["solid_count"] == 1
     inspection = await _call(
-        tools, "inspect_sheet_metal", object_name="RelievedHem", doc_name=doc
+        tools,
+        "inspect_sheet_metal",
+        object_name="RelievedHem",
+        doc_name=doc,
+        detail_level="candidates",
     )
     unfolded = await _unfold_from_planar_candidates(
         tools,
@@ -1116,7 +1152,7 @@ async def test_relief_configured_hemmed_enclosure_corner_recomputes(
     relief_state = await _call(
         tools,
         "execute_python",
-        code=f'''
+        code=f"""
 doc = FreeCAD.getDocument({doc!r})
 hem = doc.getObject("RelievedHem")
 _result_ = {{
@@ -1124,7 +1160,7 @@ _result_ = {{
     "width": float(hem.reliefw.Value),
     "depth": float(hem.reliefd.Value),
 }}
-''',
+""",
     )
     assert relief_state["result"] == {"type": "Round", "width": 1.2, "depth": 1.5}
     trace = await _mutate_sheet_chain(
@@ -1232,7 +1268,11 @@ async def test_solid_to_sheet_conversion_recomputes_and_audits_unfold(
     assert converted["proxy_type"] == "SMFromSolid"
     assert converted["solid_count"] == 1
     inspection = await _call(
-        tools, "inspect_sheet_metal", object_name="SolidToSheet", doc_name=doc
+        tools,
+        "inspect_sheet_metal",
+        object_name="SolidToSheet",
+        doc_name=doc,
+        detail_level="candidates",
     )
     assert inspection["tip"] == "SolidToSheet"
     assert inspection["cylindrical_bend_face_count"] >= 1
@@ -1240,7 +1280,7 @@ async def test_solid_to_sheet_conversion_recomputes_and_audits_unfold(
     mutation_result = await _call(
         tools,
         "execute_python",
-        code=f'''
+        code=f"""
 doc = FreeCAD.getDocument({doc!r})
 formed = doc.getObject("SolidToSheet")
 steps = [
@@ -1258,7 +1298,7 @@ for object_name, property_name, value in steps:
         "hash": int(formed.Shape.hashCode()),
     }})
 _result_ = trace
-''',
+""",
     )
     trace = mutation_result["result"]
     assert all(item["valid"] and item["solids"] == 1 for item in trace)
@@ -1269,7 +1309,11 @@ _result_ = trace
     # Keep this as a compatibility audit: future versions may start succeeding,
     # while current versions must roll back every failed candidate atomically.
     inspection = await _call(
-        tools, "inspect_sheet_metal", object_name="SolidToSheet", doc_name=doc
+        tools,
+        "inspect_sheet_metal",
+        object_name="SolidToSheet",
+        doc_name=doc,
+        detail_level="candidates",
     )
     unfolded = None
     unfold_errors = []
@@ -1291,9 +1335,7 @@ _result_ = trace
                 tools, doc, "SolidToSheet", "ConvertedFlatPattern"
             )
     if unfolded is not None:
-        state = await _sheet_state(
-            tools, doc, "SolidToSheet", "ConvertedFlatPattern"
-        )
+        state = await _sheet_state(tools, doc, "SolidToSheet", "ConvertedFlatPattern")
         assert state["flat"]["solids"] == 1
         assert state["unfold"]["bend_line_geometry"] >= 3
     else:
@@ -1456,8 +1498,20 @@ async def test_sheet_metal_negative_failures_are_atomic(
         (
             "MultiSolid",
             [
-                {"op": "add_rectangle", "x": 0.0, "y": 0.0, "width": 20.0, "height": 15.0},
-                {"op": "add_rectangle", "x": 30.0, "y": 0.0, "width": 20.0, "height": 15.0},
+                {
+                    "op": "add_rectangle",
+                    "x": 0.0,
+                    "y": 0.0,
+                    "width": 20.0,
+                    "height": 15.0,
+                },
+                {
+                    "op": "add_rectangle",
+                    "x": 30.0,
+                    "y": 0.0,
+                    "width": 20.0,
+                    "height": 15.0,
+                },
             ],
             "null shape|one non-empty solid",
         ),
@@ -1496,14 +1550,14 @@ async def test_sheet_metal_negative_failures_are_atomic(
         state = await _call(
             tools,
             "execute_python",
-            code=f'''
+            code=f"""
 doc = FreeCAD.getDocument({failure_doc!r})
 body = doc.getObject("Body")
 _result_ = {{
     "tip": body.Tip.Name if body.Tip else None,
     "feature_exists": doc.getObject("RejectedBase") is not None,
 }}
-''',
+""",
         )
         assert state["result"] == {"tip": None, "feature_exists": False}
 
@@ -1564,6 +1618,7 @@ _result_ = {{"tip": body.Tip.Name, "valid": bool(bypass.Shape.isValid())}}
         "inspect_sheet_metal",
         object_name="AdHocPadReconstruction",
         doc_name=doc,
+        detail_level="full",
     )
     assert inspection["shape_valid"] is True
     assert inspection["has_native_sheet_metal_features"] is True
@@ -1653,7 +1708,11 @@ _result_ = {{"tip": body.Tip.Name, "valid": bool(recovered.Shape.isValid())}}
     )
 
     inspection = await _call(
-        tools, "inspect_sheet_metal", object_name="RecoveredSM", doc_name=doc
+        tools,
+        "inspect_sheet_metal",
+        object_name="RecoveredSM",
+        doc_name=doc,
+        detail_level="full",
     )
     assert inspection["has_native_sheet_metal_features"] is True
     assert inspection["native_sheet_metal_history"] is False
@@ -1676,6 +1735,4 @@ _result_ = {{"tip": body.Tip.Name, "valid": bool(recovered.Shape.isValid())}}
             name="RejectedRecoveredUnfold",
             doc_name=doc,
         )
-    await _assert_tip_and_absence(
-        tools, doc, "RecoveredSM", "RejectedRecoveredUnfold"
-    )
+    await _assert_tip_and_absence(tools, doc, "RecoveredSM", "RejectedRecoveredUnfold")

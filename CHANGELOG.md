@@ -289,6 +289,16 @@
 - Expanded Modify existing models paragraph in Skill.md.
 - Added one shared native end-condition contract to Pad, Pocket, Revolution,
   and Groove: bounded length/angle, ThroughAll, UpToFirst, and UpToFace.
+- Added cone-axis serialization to semantic face selection and allowed
+  `adjacent_surface_types` for face criteria as well as edges.
+- Added `inspect_subshape_neighborhood` for compact bounded face-adjacency walks.
+- Made `boolean_operation` abort null, invalid, or unexpected-solid results
+  before transaction commit; one result solid is required by default.
+- Added `summary`, `candidates`, and `full` detail levels to
+  `inspect_sheet_metal`; the complete cylindrical-face list is now opt-in.
+- Strengthened the FreeCAD engineering Skill with a universal local-edit
+  feedback pattern: observe the face neighborhood, edit, re-observe, and
+  restore/rework any collateral damage, with stricter checkpoints for STEP/B-rep.
 - Reduced protocol-level server instructions to a sub-800-byte router so clients
   that repeat them beside selected tools do not multiply the full engineering
   policy, and added `get_freecad_prompt` as a prompt-list/render fallback for

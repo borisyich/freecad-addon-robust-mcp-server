@@ -334,8 +334,11 @@ detail and should be created earlier.
 - Verify both representations when possible: the formed state against formed or
   isometric views, and the unfolded state against the supplied flat contour,
   bend lines, and feature locations.
-- After the formed state is stable, call `inspect_sheet_metal` and use one of its
-  planar candidates as evidence for the stationary face. Create the flat pattern
+- After the formed state is stable, call
+  `inspect_sheet_metal(detail_level="candidates")` and use one of its planar
+  candidates as evidence for the stationary face. Request `full` only when
+  individual cylindrical faces or complete history evidence must be diagnosed.
+  Create the flat pattern
   with `unfold_sheet_metal`, supplying either an explicit K-factor plus ANSI/DIN
   convention or a named material-definition Spreadsheet. Never rely on an
   implicit workbench K-factor default.
@@ -480,6 +483,39 @@ Read [references/drawing-reconstruction.md](references/drawing-reconstruction.md
 
 First classify the model from evidence; do not assume that an imported/static
 B-rep has a semantic owner merely because it is open in FreeCAD.
+
+### Local edit feedback pattern (OBSERVE → EDIT → RE-OBSERVE → RESTORE/REWORK)
+
+Apply this pattern to every local geometry edit: holes and bores, bosses, pocket
+or slot walls, pads, ribs, lugs, flanges, nozzles, local thickness changes, and
+direct face moves. A selected face is only the edit handle, not the complete
+feature.
+
+1. **OBSERVE before editing.** Resolve the target face(s) with
+   `select_subshapes`, then call `inspect_subshape_neighborhood` for at least one
+   face-adjacency hop. Continue outward until the feature boundary, attachment
+   to the parent body, and transition chain are explicit. Record affected and
+   invariant faces, dimensions, surface/curve types, continuity, connectivity,
+   solid count, validity, and local section/screenshot evidence when useful.
+2. **EDIT the semantic owner.** For native history, change the earliest
+   parameter, constraint, sketch, or feature that owns the intent. For static
+   B-reps, apply the smallest supported local surgery that preserves the
+   observed attachment and transition chain.
+3. **RE-OBSERVE after recompute.** Reselect transient `FaceN` references and
+   repeat the same neighborhood walk, measurements, local section/view, and
+   validity checks. Compare the new neighborhood with the baseline: the
+   requested boundary may change; unaffected faces, functional interfaces,
+   attachment, continuity, transitions, and solid topology must not.
+4. **RESTORE or REWORK on collateral damage.** If a chamfer, fillet, blend,
+   tangent face, wall, support, interface, or unrelated local region disappears,
+   disconnects, changes unintentionally, or becomes sharp/invalid, do not accept
+   the edit. Undo/abort the causal operation or reconstruct the original design
+   intent, then repeat the loop before continuing.
+
+For imported STEP/static B-reps this pattern is mandatory and stricter: capture
+a shape checkpoint immediately before mutation and compare it afterwards.
+Whole-model volume and bounds do not replace neighborhood comparison; verify
+both the changed region and nearby regions expected to remain unchanged.
 
 ### Native editable history
 

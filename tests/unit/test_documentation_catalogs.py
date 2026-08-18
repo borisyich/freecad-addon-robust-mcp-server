@@ -183,6 +183,26 @@ def test_freecad_engineering_skill_has_codex_routing_metadata() -> None:
     assert 'value: "freecad"' in metadata
 
 
+def test_freecad_engineering_skill_requires_universal_local_edit_feedback() -> None:
+    skill = (ROOT / ".agents/skills/freecad-engineering/SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    normalized_skill = " ".join(skill.split())
+
+    for concept in (
+        "Local edit feedback pattern",
+        "OBSERVE → EDIT → RE-OBSERVE → RESTORE/REWORK",
+        "holes and bores, bosses, pocket",
+        "inspect_subshape_neighborhood",
+        "at least one face-adjacency hop",
+        "A selected face is only the edit handle",
+        "Reselect transient `FaceN` references",
+        "Undo/abort the causal operation",
+        "imported STEP/static B-reps",
+    ):
+        assert concept in normalized_skill
+
+
 def test_freecad_engineering_skill_covers_sketch_design_intent() -> None:
     skill = (ROOT / ".agents/skills/freecad-engineering/SKILL.md").read_text(
         encoding="utf-8"
