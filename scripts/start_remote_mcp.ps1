@@ -129,10 +129,14 @@ if ($LASTEXITCODE -ne 0) {
 FreeCAD bridge preflight failed. The public HTTP MCP server was not started.
 
 Check the following:
-1. FreeCAD GUI is running.
-2. Robust MCP Bridge is started inside FreeCAD.
-3. Port 9875 belongs to the current FreeCAD process.
-4. If XML-RPC ping succeeds but the queue probe fails, restart MCP Bridge inside FreeCAD.
+1. First check whether an older freecad-mcp process is still running:
+   Get-Process freecad-mcp -ErrorAction SilentlyContinue | Select-Object Id, Path, StartTime
+   If the process is stale or no longer needed, stop it and retry:
+   Stop-Process -Id <PID>
+2. FreeCAD GUI is running.
+3. Robust MCP Bridge is started inside FreeCAD.
+4. Port 9875 belongs to the current FreeCAD process.
+5. If XML-RPC ping succeeds but the queue probe fails, restart MCP Bridge inside FreeCAD.
 '@
 }
 

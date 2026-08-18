@@ -38,14 +38,18 @@ The script saves `FREECAD_ACCESS_TOKEN` in the current Windows user's environmen
 
 ## 2. Start FreeCAD and the local MCP server
 
-When upgrading from an older archive, close FreeCAD and update the bundled
-FreeCAD-side workbench first:
+Updating the installed FreeCAD-side bridge is **not required for every start or
+repository/archive update**. Run the following command only when
+`freecad/RobustMCPBridge` itself changed, the release notes explicitly require a
+bridge update, or preflight reports a missing/outdated bridge method. In that
+case, close FreeCAD first and run:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\update_freecad_bridge.ps1
 ```
 
-Start FreeCAD and enable the Robust MCP XML-RPC Bridge. Then run:
+If only the external MCP server, Skills, prompts, or documentation changed, skip
+this command. Start FreeCAD and enable the Robust MCP XML-RPC Bridge. Then run:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\start_remote_mcp.ps1
@@ -153,9 +157,26 @@ MCP request started: method=tools/call target=create_document
 MCP request completed: method=tools/call target=create_document status=200 duration_ms=84.2
 ```
 
-If startup reports that XML-RPC is reachable but the GUI execution queue is not
-responding, stop and restart **MCP Bridge inside FreeCAD**, then rerun
-`start_remote_mcp.ps1`.
+If `start_remote_mcp.ps1` fails during startup, first check whether an older
+`freecad-mcp` process is still running:
+
+```powershell
+Get-Process freecad-mcp -ErrorAction SilentlyContinue |
+    Select-Object Id, Path, StartTime
+```
+
+If the listed process is stale or no longer needed, stop it and retry startup:
+
+```powershell
+Stop-Process -Id <PID>
+```
+
+This is especially relevant when Windows reports `os error 32` or says that
+`.venv\Scripts\freecad-mcp.exe` is being used by another process.
+
+If no stale `freecad-mcp` process exists and startup reports that XML-RPC is
+reachable but the GUI execution queue is not responding, stop and restart
+**MCP Bridge inside FreeCAD**, then rerun `start_remote_mcp.ps1`.
 
 ## Stop public access
 
