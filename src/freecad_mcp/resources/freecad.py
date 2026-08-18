@@ -14,6 +14,9 @@ Resource URIs:
     - freecad://objects/{doc_name}/{obj_name} - Object details
     - freecad://active-document - Currently active document
     - freecad://skills/freecad-engineering - Canonical engineering Skill
+    - freecad://skills/freecad-engineering/bundle - Complete Skill bundle index
+    - freecad://skills/freecad-engineering/agents/openai.yaml - Skill metadata
+    - freecad://skills/freecad-engineering/references/*.md - Skill references
     - freecad://best-practices - Compact Skill/validator index
     - freecad://workflows/drawing-reconstruction - Drawing-task Skill route
     - freecad://workflows/model-modification - Existing-model Skill route
@@ -24,11 +27,16 @@ Resource URIs:
 """
 
 import json
+from importlib.resources import files
 from pathlib import Path
 from typing import Any
 
 from freecad_mcp.guidance import (
     DRAWING_RECONSTRUCTION_WORKFLOW,
+    ENGINEERING_SKILL_AGENT_METADATA_FILE,
+    ENGINEERING_SKILL_BUNDLE_RELATIVE_PATH,
+    ENGINEERING_SKILL_BUNDLE_RESOURCE_URI,
+    ENGINEERING_SKILL_REFERENCE_FILES,
     ENGINEERING_SKILL_RELATIVE_PATH,
     ENGINEERING_SKILL_RESOURCE_URI,
     FINAL_PARAMETRIC_VALIDATION_TOOL,
@@ -323,23 +331,101 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
             indent=2,
         )
 
-    def _engineering_skill_text() -> str:
-        """Read the canonical repository skill without duplicating its content."""
-        repo_root = Path(__file__).resolve().parents[3]
-        skill_path = repo_root / ENGINEERING_SKILL_RELATIVE_PATH
+    def _engineering_skill_file_text(relative_path: str) -> str:
+        """Read one canonical Skill-bundle file from package or checkout."""
+        packaged_path = files("freecad_mcp").joinpath(
+            "skills", "freecad-engineering", *Path(relative_path).parts
+        )
         try:
-            return skill_path.read_text(encoding="utf-8")
-        except OSError as exc:
-            return (
-                "# FreeCAD engineering skill unavailable\n\n"
-                f"Expected `{ENGINEERING_SKILL_RELATIVE_PATH}` but it could not "
-                f"be read: {exc}"
+            return packaged_path.read_text(encoding="utf-8")
+        except OSError:
+            repo_root = Path(__file__).resolve().parents[3]
+            skill_path = (
+                repo_root / ENGINEERING_SKILL_BUNDLE_RELATIVE_PATH / relative_path
             )
+            try:
+                return skill_path.read_text(encoding="utf-8")
+            except OSError as exc:
+                expected = (
+                    f"{ENGINEERING_SKILL_BUNDLE_RELATIVE_PATH}/{relative_path}"
+                )
+                return (
+                    "# FreeCAD engineering skill resource unavailable\n\n"
+                    f"Expected `{expected}` but it could not be read: {exc}"
+                )
+
+    def _engineering_skill_text() -> str:
+        """Read the canonical engineering Skill entrypoint."""
+        return _engineering_skill_file_text("SKILL.md")
+
+    def _engineering_skill_bundle_manifest() -> dict[str, Any]:
+        """Describe every canonical Skill-bundle file exposed through MCP."""
+        files_manifest = [
+            {
+                "path": "SKILL.md",
+                "uri": ENGINEERING_SKILL_RESOURCE_URI,
+                "role": "skill",
+            },
+            {
+                "path": ENGINEERING_SKILL_AGENT_METADATA_FILE,
+                "uri": (
+                    f"{ENGINEERING_SKILL_RESOURCE_URI}/"
+                    f"{ENGINEERING_SKILL_AGENT_METADATA_FILE}"
+                ),
+                "role": "agent_metadata",
+            },
+        ]
+        files_manifest.extend(
+            {
+                "path": f"references/{filename}",
+                "uri": f"{ENGINEERING_SKILL_RESOURCE_URI}/references/{filename}",
+                "role": "reference",
+            }
+            for filename in ENGINEERING_SKILL_REFERENCE_FILES
+        )
+        return {
+            "name": "freecad-engineering",
+            "canonical_path": ENGINEERING_SKILL_BUNDLE_RELATIVE_PATH,
+            "entrypoint": ENGINEERING_SKILL_RESOURCE_URI,
+            "files": files_manifest,
+        }
+
+    def _register_engineering_skill_file(
+        uri: str, relative_path: str, description: str
+    ) -> None:
+        """Expose one static Skill-bundle file as an MCP resource."""
+
+        async def resource_skill_file() -> str:
+            return _engineering_skill_file_text(relative_path)
+
+        resource_skill_file.__name__ = (
+            "resource_engineering_skill_"
+            + relative_path.replace("/", "_").replace(".", "_")
+        )
+        resource_skill_file.__doc__ = description
+        mcp.resource(uri)(resource_skill_file)
+
+    @mcp.resource("freecad://skills/freecad-engineering/bundle")
+    async def resource_engineering_skill_bundle() -> str:
+        """Return the MCP URI manifest for the complete engineering Skill bundle."""
+        return json.dumps(_engineering_skill_bundle_manifest(), indent=2)
 
     @mcp.resource("freecad://skills/freecad-engineering")
     async def resource_engineering_skill() -> str:
         """Return the canonical FreeCAD engineering Skill text."""
         return _engineering_skill_text()
+
+    _register_engineering_skill_file(
+        f"{ENGINEERING_SKILL_RESOURCE_URI}/{ENGINEERING_SKILL_AGENT_METADATA_FILE}",
+        ENGINEERING_SKILL_AGENT_METADATA_FILE,
+        "OpenAI agent metadata for the canonical FreeCAD engineering Skill.",
+    )
+    for _reference_file in ENGINEERING_SKILL_REFERENCE_FILES:
+        _register_engineering_skill_file(
+            f"{ENGINEERING_SKILL_RESOURCE_URI}/references/{_reference_file}",
+            f"references/{_reference_file}",
+            f"Canonical FreeCAD engineering Skill reference: {_reference_file}.",
+        )
 
     @mcp.resource("freecad://best-practices")
     async def resource_best_practices() -> str:
@@ -1350,6 +1436,27 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                     "uri": "freecad://skills/freecad-engineering",
                     "description": "Canonical FreeCAD engineering Skill used for model creation and modification",
                 },
+                {
+                    "uri": ENGINEERING_SKILL_BUNDLE_RESOURCE_URI,
+                    "description": "Manifest for the complete canonical engineering Skill bundle",
+                },
+                {
+                    "uri": (
+                        f"{ENGINEERING_SKILL_RESOURCE_URI}/"
+                        f"{ENGINEERING_SKILL_AGENT_METADATA_FILE}"
+                    ),
+                    "description": "OpenAI agent metadata for the canonical engineering Skill",
+                },
+                *[
+                    {
+                        "uri": (
+                            f"{ENGINEERING_SKILL_RESOURCE_URI}/references/"
+                            f"{filename}"
+                        ),
+                        "description": f"Canonical engineering Skill reference: {filename}",
+                    }
+                    for filename in ENGINEERING_SKILL_REFERENCE_FILES
+                ],
                 {
                     "uri": "freecad://best-practices",
                     "description": "Compact index to the canonical engineering Skill and final diagnostic",

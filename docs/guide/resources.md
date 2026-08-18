@@ -16,8 +16,8 @@ MCP Resources are read-only endpoints that provide context about FreeCAD's curre
 
 ## Available Resources
 
-The server registers **16 resources**: state resources plus lightweight routes
-to the canonical engineering Skill.
+The server registers **24 resources**: state resources, lightweight workflow
+routes, and the complete canonical engineering Skill bundle.
 
 ### freecad://capabilities
 
@@ -34,6 +34,31 @@ When the server runs from a repository checkout containing the Skill, returns th
 This is the single detailed modeling policy for stock/process classification,
 parametric construction, milling, turning, sheet metal, drawing reconstruction,
 model modification, and final validation.
+
+### freecad://skills/freecad-engineering/bundle
+
+Returns a JSON manifest of every file in the canonical Skill bundle and the MCP
+URI that exposes it. This is the preferred discovery endpoint for clients that
+loaded the Skill through MCP rather than from the repository filesystem.
+
+### freecad://skills/freecad-engineering/references/*.md
+
+Each file from `.agents/skills/freecad-engineering/references/` is exposed under
+the same relative path beneath the Skill URI. For example:
+
+```text
+freecad://skills/freecad-engineering/references/drawing-reconstruction.md
+freecad://skills/freecad-engineering/references/manufacturing-strategies.md
+freecad://skills/freecad-engineering/references/sheet-metal-flat-patterns.md
+freecad://skills/freecad-engineering/references/sketch-construction.md
+freecad://skills/freecad-engineering/references/source-notes.md
+freecad://skills/freecad-engineering/references/validation-and-editability.md
+```
+
+### freecad://skills/freecad-engineering/agents/openai.yaml
+
+Returns the Skill's OpenAI agent metadata from
+`.agents/skills/freecad-engineering/agents/openai.yaml`.
 
 ### freecad://best-practices
 
@@ -325,9 +350,10 @@ AI: [Reads freecad://documents resource]
 | `freecad://macros`                        | Available macros                         |
 | `freecad://console`                       | Recent console output                    |
 | `freecad://skills/freecad-engineering`    | Canonical engineering Skill text         |
-| `freecad://best-practices`                 | Compact Skill/validator index             |
-| `freecad://workflows/drawing-reconstruction` | Drawing-task route to the Skill          |
-| `freecad://workflows/model-modification`   | Existing-model route to the Skill         |
+| `freecad://skills/freecad-engineering/bundle`| Skill bundle manifest                 |
+| `freecad://best-practices`                | Compact Skill/validator index            |
+| `freecad://workflows/drawing-reconstruction`| Drawing-task route to the Skill        |
+| `freecad://workflows/model-modification`  | Existing-model route to the Skill        |
 
 ---
 

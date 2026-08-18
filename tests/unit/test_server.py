@@ -642,6 +642,7 @@ class TestMcpInstructions:
         required_clauses = (
             "$freecad-engineering",
             "freecad://skills/freecad-engineering",
+            "freecad://skills/freecad-engineering/bundle",
             "get_freecad_prompt",
             "ACT -> OBSERVE -> REACT",
             "capture_shape_checkpoint",
@@ -777,4 +778,4 @@ class TestMcpInstructions:
         # Two read-only Shape checkpoint contracts and explicit end-condition
         # discovery on four PartDesign tools add focused invariant evidence. The
         # bounded face-neighborhood contract adds one compact topology tool.
-        assert payload_bytes < 113_200
+        assert payload_bytes < 120_000

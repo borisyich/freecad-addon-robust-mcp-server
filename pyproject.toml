@@ -126,6 +126,9 @@ version-file = "src/freecad_mcp/_version.py"
 [tool.hatch.build.targets.wheel]
 packages = ["src/freecad_mcp"]
 
+[tool.hatch.build.targets.wheel.force-include]
+".agents/skills/freecad-engineering" = "freecad_mcp/skills/freecad-engineering"
+
 [tool.ruff]
 target-version = "py311"
 line-length = 88

@@ -436,6 +436,51 @@ class TestFreecadResources:
         assert "tangent_fillet" in result
 
     @pytest.mark.asyncio
+    async def test_resource_engineering_skill_bundle_exposes_all_files(
+        self, register_resources: dict[str, Callable[..., Any]], mock_bridge: AsyncMock
+    ) -> None:
+        """Every canonical Skill-bundle file should be readable through MCP."""
+        from freecad_mcp.guidance import (
+            ENGINEERING_SKILL_AGENT_METADATA_FILE,
+            ENGINEERING_SKILL_BUNDLE_RESOURCE_URI,
+            ENGINEERING_SKILL_REFERENCE_FILES,
+            ENGINEERING_SKILL_RESOURCE_URI,
+        )
+
+        bundle_resource = register_resources[ENGINEERING_SKILL_BUNDLE_RESOURCE_URI]
+        bundle = json.loads(await bundle_resource())
+
+        expected = {
+            "SKILL.md": ENGINEERING_SKILL_RESOURCE_URI,
+            ENGINEERING_SKILL_AGENT_METADATA_FILE: (
+                f"{ENGINEERING_SKILL_RESOURCE_URI}/"
+                f"{ENGINEERING_SKILL_AGENT_METADATA_FILE}"
+            ),
+            **{
+                f"references/{filename}": (
+                    f"{ENGINEERING_SKILL_RESOURCE_URI}/references/{filename}"
+                )
+                for filename in ENGINEERING_SKILL_REFERENCE_FILES
+            },
+        }
+        exposed = {item["path"]: item["uri"] for item in bundle["files"]}
+
+        assert exposed == expected
+        for relative_path, uri in expected.items():
+            assert uri in register_resources
+            content = await register_resources[uri]()
+            assert "resource unavailable" not in content.lower(), relative_path
+
+        metadata_uri = expected[ENGINEERING_SKILL_AGENT_METADATA_FILE]
+        metadata = await register_resources[metadata_uri]()
+        assert 'display_name: "FreeCAD Engineering"' in metadata
+
+        drawing_reference = await register_resources[
+            f"{ENGINEERING_SKILL_RESOURCE_URI}/references/drawing-reconstruction.md"
+        ]()
+        assert "drawing" in drawing_reference.lower()
+
+    @pytest.mark.asyncio
     async def test_resource_best_practices(
         self, register_resources: dict[str, Callable[..., Any]], mock_bridge: AsyncMock
     ) -> None:

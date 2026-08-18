@@ -11,10 +11,25 @@ from __future__ import annotations
 from typing import Final
 
 ENGINEERING_SKILL_NAME: Final[str] = "freecad-engineering"
+ENGINEERING_SKILL_BUNDLE_RELATIVE_PATH: Final[str] = (
+    ".agents/skills/freecad-engineering"
+)
 ENGINEERING_SKILL_RELATIVE_PATH: Final[str] = (
     ".agents/skills/freecad-engineering/SKILL.md"
 )
 ENGINEERING_SKILL_RESOURCE_URI: Final[str] = "freecad://skills/freecad-engineering"
+ENGINEERING_SKILL_BUNDLE_RESOURCE_URI: Final[str] = (
+    f"{ENGINEERING_SKILL_RESOURCE_URI}/bundle"
+)
+ENGINEERING_SKILL_AGENT_METADATA_FILE: Final[str] = "agents/openai.yaml"
+ENGINEERING_SKILL_REFERENCE_FILES: Final[tuple[str, ...]] = (
+    "drawing-reconstruction.md",
+    "manufacturing-strategies.md",
+    "sheet-metal-flat-patterns.md",
+    "sketch-construction.md",
+    "source-notes.md",
+    "validation-and-editability.md",
+)
 FINAL_PARAMETRIC_VALIDATION_TOOL: Final[str] = "validate_parametric_model"
 
 CHECKPOINT_DECISIONS: Final[tuple[str, ...]] = (

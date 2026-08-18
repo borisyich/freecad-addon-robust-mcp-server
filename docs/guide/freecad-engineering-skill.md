@@ -17,11 +17,27 @@ Skill or `AGENTS.md`. The root `AGENTS.md` requires `$freecad-engineering` for
 FreeCAD model tasks. The Skill's front-matter description also supports implicit
 routing.
 
-For clients that do not implement Codex Skills, read the same file directly. A
-repository-launched MCP server also exposes it through:
+For clients that do not implement Codex Skills, read the same file directly.
+The MCP server exposes the complete Skill bundle even when installed from a
+wheel, with the entrypoint at:
 
 ```text
 freecad://skills/freecad-engineering
+```
+
+The bundle manifest is available at:
+
+```text
+freecad://skills/freecad-engineering/bundle
+```
+
+All relative Skill files preserve their repository paths beneath that URI, for
+example:
+
+```text
+freecad://skills/freecad-engineering/references/drawing-reconstruction.md
+freecad://skills/freecad-engineering/references/sketch-construction.md
+freecad://skills/freecad-engineering/agents/openai.yaml
 ```
 
 ## Contents

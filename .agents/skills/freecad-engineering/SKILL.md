@@ -38,10 +38,14 @@ Discover only the guidance needed for the current step:
    `freecad://skills/freecad-engineering` for modeling policy. Use
    `freecad://capabilities`, `freecad://best-practices`, or one workflow resource
    only when the current task needs it.
-4. Invoke one relevant prompt such as `freecad_startup`,
+4. If this Skill was loaded through MCP rather than from the repository, resolve
+   its relative `references/...` links under
+   `freecad://skills/freecad-engineering/`; the complete bundle URI index is
+   `freecad://skills/freecad-engineering/bundle`.
+5. Invoke one relevant prompt such as `freecad_startup`,
    `reproduce_from_drawing`, `modify_existing_model`, or
    `freecad_guidance(task_type=...)`; do not load the entire prompt catalogue.
-5. Inspect an exact tool definition only when its typed arguments remain
+6. Inspect an exact tool definition only when its typed arguments remain
    unclear. In clients exposing `ALL_TOOLS`, filter by the exact name or the
    `mcp__freecad_mcp__` prefix and print a compact name/size summary rather than
    complete definitions.

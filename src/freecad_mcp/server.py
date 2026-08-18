@@ -60,7 +60,8 @@ logger = logging.getLogger(__name__)
 INSTANCE_ID: str = str(uuid.uuid4())
 
 MCP_INSTRUCTIONS = """For mechanical-modeling tasks, use the canonical
-`$freecad-engineering` Skill (`freecad://skills/freecad-engineering`). Discover
+`$freecad-engineering` Skill (`freecad://skills/freecad-engineering`); its full
+MCP bundle is indexed at `freecad://skills/freecad-engineering/bundle`. Discover
 only the FreeCAD prompt/resource needed for the task and request compact or paged
 tool detail first. Use native MCP prompts when the client exposes them; otherwise
 call `get_freecad_prompt`.
