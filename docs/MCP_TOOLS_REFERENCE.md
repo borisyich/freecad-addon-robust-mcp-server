@@ -188,6 +188,19 @@ recompute_document(doc_name: str | None = None) -> dict
 
 Tools for creating and manipulating FreeCAD objects.
 
+All root tool contracts advertise `additionalProperties: false`, and the server
+rejects unknown root arguments before dispatch. For example,
+`create_document({"doc_name": "Part"})` fails with the allowed argument list;
+use its declared `name` field. Nested discriminated models also forbid unknown
+fields where their contract is closed.
+
+Treat the live `tools/list` response as the source of truth. A copied source
+archive can legitimately describe another commit than a still-running FreeCAD
+bridge/MCP process. Restart both components after upgrades and keep the server
+commit/version with task logs. CI pins the complete registered tool inventory
+and asserts critical fields such as `boolean_operation.expected_solid_count`, so
+an implementation/schema mismatch fails before release.
+
 ### Primitive Creation
 
 #### create_primitive
@@ -474,6 +487,8 @@ boolean_operation(
     result_name: str | None = None,
     doc_name: str | None = None,
     expected_solid_count: int | None = 1,
+    refine: bool = True,
+    timeout_ms: int = 30000,
 ) -> dict
 ```
 
@@ -491,6 +506,79 @@ rejected result aborts the FreeCAD transaction and returns an MCP error; set
 The successful response includes `shape_valid`, `shape_type`, `solid_count`,
 `volume`, `base_volume`, `tool_volume`, `result_volume`, and `volume_delta`.
 These fields verify material change without a routine follow-up inspection call.
+
+#### fuse_all and common_all
+
+```python
+fuse_all(
+    object_names: list[str],
+    result_name: str | None = None,
+    doc_name: str | None = None,
+    fuzzy_tolerance: float = 0.0,
+    refine: bool = True,
+    expected_solid_count: int | None = 1,
+    timeout_ms: int = 30000,
+) -> dict
+common_all(  # same arguments
+    object_names: list[str],
+    result_name: str | None = None,
+    doc_name: str | None = None,
+    fuzzy_tolerance: float = 0.0,
+    refine: bool = True,
+    expected_solid_count: int | None = 1,
+    timeout_ms: int = 30000,
+) -> dict
+```
+
+Both tools validate every intermediate Boolean and abort before commit when a
+Shape is null/invalid, has non-positive volume, or has the wrong final solid
+count. `steps` reports intermediate solid counts and volumes. `fuse_all` is the
+general controlled fuse entry point: use `fuzzy_tolerance` only when exact
+topology is insufficient, and keep the smallest defensible value.
+
+### General BREP Surgery
+
+These tools expose the imported/static-shape workflow that was previously only
+available inside specialized edits:
+
+```python
+group_feature_faces(object_name, face_names, doc_name=None) -> dict
+detect_rotational_pattern(
+    object_name, face_groups, axis_origin=None, axis_direction=None,
+    angular_tolerance_deg=0.5, radial_tolerance=1e-4, doc_name=None,
+) -> dict
+defeature_faces(
+    object_name, face_names, result_name=None, refine=True,
+    expected_solid_count=1, hide_source=True, doc_name=None,
+) -> dict
+extract_feature_material(
+    source_name, healed_name, mode="removed_material",
+    component_indices=None, result_prefix="RecoveredFeature", refine=True,
+    doc_name=None,
+) -> dict
+sew_shell(object_names, result_name=None, tolerance=1e-7, doc_name=None) -> dict
+heal_shape(
+    object_name, result_name=None, tolerance=1e-7, refine=True,
+    expected_solid_count=None, doc_name=None,
+) -> dict
+make_solid(
+    object_name, result_name=None, refine=True, expected_solid_count=1,
+    doc_name=None,
+) -> dict
+polar_pattern_shape(
+    object_name, occurrences, total_angle_deg=360.0,
+    axis_origin=None, axis_direction=None, result_name=None, fuse=False,
+    fuzzy_tolerance=0.0, refine=True, expected_solid_count=None,
+    hide_source=True, doc_name=None,
+) -> dict
+```
+
+A typical impeller repair is: group the known feature faces; confirm equal
+rotational spacing; defeature all blade faces to recover the support; subtract
+that support from the original with `extract_feature_material`; select one exact
+solid component; then create the required count with `polar_pattern_shape`.
+Every geometry-producing tool opens a FreeCAD transaction, validates before
+commit, and reports `transaction_state`.
 
 ### Transformations
 
@@ -2340,8 +2428,16 @@ safe_execute(
     doc_name: str | None = None,
     validate_after: bool = True,
     auto_undo_on_failure: bool = True,
+    timeout_ms: int = 30000,
 ) -> dict
 ```
+
+The failure response preserves `error_type`, `stderr`, duration,
+`operation_state`, `transaction_state`, `continues_running`, and `request_id`.
+A request cancelled while queued has `rolled_back=false` because it never opened
+a transaction. A timeout after execution starts has `rolled_back=null` and an
+unknown transaction state: CPython/OCCT work already running on FreeCAD's thread
+cannot be interrupted safely and may still be modifying the document.
 
 ---
 

@@ -1011,6 +1011,37 @@ class TestValidationTools:
         call_args = mock_bridge.execute_python.call_args[0][0]
         assert "MyDocument" in call_args
 
+    @pytest.mark.asyncio
+    async def test_safe_execute_timeout_reports_unknown_rollback(
+        self, register_tools, mock_bridge
+    ):
+        """A running timeout must not claim that no rollback occurred."""
+        mock_bridge.execute_python = AsyncMock(
+            return_value=ExecutionResult(
+                success=False,
+                result=None,
+                stdout="",
+                stderr="Execution timed out after 250ms",
+                execution_time_ms=250.0,
+                error_type="TimeoutError",
+                operation_state="running",
+                continues_running=True,
+                transaction_state="unknown",
+                request_id="safe-1",
+            )
+        )
+
+        result = await register_tools["safe_execute"]("long_call()", timeout_ms=250)
+
+        assert result["success"] is False
+        assert result["rolled_back"] is None
+        assert result["operation_state"] == "running"
+        assert result["continues_running"] is True
+        assert result["diagnostics"]["error_type"] == "TimeoutError"
+        assert "Execution timed out" in result["message"]
+        mock_bridge.execute_python.assert_awaited_once()
+        assert mock_bridge.execute_python.call_args.kwargs == {"timeout_ms": 250}
+
 
 class TestValidationToolsRegistration:
     """Tests for validation tools registration."""

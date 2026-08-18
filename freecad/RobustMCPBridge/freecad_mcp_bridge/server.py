@@ -227,6 +227,8 @@ class ExecutionRequest:
         self.result: dict[str, Any] | None = None
         self.completed = threading.Event()
         self.cancelled = threading.Event()
+        self.started = threading.Event()
+        self.state_lock = threading.Lock()
 
 
 class FreecadMCPPlugin:
@@ -773,15 +775,28 @@ class FreecadMCPPlugin:
         while not self._request_queue.empty():
             try:
                 request = self._request_queue.get_nowait()
-                if request.cancelled.is_set():
+                with request.state_lock:
+                    cancelled = request.cancelled.is_set()
+                    if not cancelled:
+                        request.started.set()
+                if cancelled:
                     request.result = {
                         "success": False,
                         "error_type": "CancelledError",
                         "error_message": "Request expired before execution",
+                        "stderr": "Request expired before execution",
+                        "operation_state": "cancelled",
+                        "continues_running": False,
+                        "transaction_state": "not_started",
+                        "request_id": request.request_id,
                     }
                     request.completed.set()
                     continue
                 result = self._execute_code_sync(request.code)
+                result.setdefault("operation_state", "completed")
+                result.setdefault("continues_running", False)
+                result.setdefault("transaction_state", "unknown")
+                result.setdefault("request_id", request.request_id)
                 request.result = result
                 request.completed.set()
                 # Track request for status bar
@@ -806,7 +821,7 @@ class FreecadMCPPlugin:
         Returns:
             Execution result dictionary.
         """
-        request = ExecutionRequest(code, timeout_ms)
+        request = ExecutionRequest(code, timeout_ms, request_id=str(uuid.uuid4()))
         self._request_queue.put(request)
 
         # Wait for completion
@@ -821,12 +836,21 @@ class FreecadMCPPlugin:
             # executing later if the GUI timer recovers. A request that has
             # already started cannot be interrupted safely, but stalled queued
             # work is now discarded instead of becoming a delayed side effect.
-            request.cancelled.set()
+            with request.state_lock:
+                already_started = request.started.is_set()
+                request.cancelled.set()
+            operation_state = "running" if already_started else "cancelled"
+            transaction_state = "unknown" if already_started else "not_started"
             return {
                 "success": False,
                 "error_type": "TimeoutError",
                 "error_message": f"Execution timed out after {timeout_ms}ms",
+                "stderr": f"Execution timed out after {timeout_ms}ms",
                 "execution_time_ms": timeout_ms,
+                "operation_state": operation_state,
+                "continues_running": already_started,
+                "transaction_state": transaction_state,
+                "request_id": request.request_id,
             }
 
     def _get_report_view_text(self) -> str | None:

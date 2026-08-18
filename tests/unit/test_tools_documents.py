@@ -280,4 +280,6 @@ class TestDocumentTools:
         result = await recompute_document(doc_name="NonExistent")
 
         assert result["success"] is False
-        assert result["error"] == "No document found"
+        assert result["error"].startswith("No document found")
+        assert "error_type=ValueError" in result["error"]
+        assert "duration_ms=5.0" in result["error"]

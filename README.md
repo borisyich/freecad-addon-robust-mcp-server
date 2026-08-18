@@ -398,6 +398,19 @@ The server currently registers **131 MCP tools**. The tables below list common t
 | `selection`         | Get/set/clear object or qualified subelement selection | GUI  |
 | `move_faces`        | Locally move planar faces as an auditable static direct edit | All  |
 
+#### Imported/static BREP surgery (8 tools)
+
+| Tool | Description | Mode |
+| ---- | ----------- | ---- |
+| `group_feature_faces` | Group selected faces into connected features | All |
+| `detect_rotational_pattern` | Detect equal angular spacing of face groups | All |
+| `defeature_faces` | Remove faces with OCCT defeaturing and heal support | All |
+| `extract_feature_material` | Recover exact removed material or filled voids | All |
+| `sew_shell` | Sew object faces into a validated shell | All |
+| `heal_shape` | Fix tolerances and refine a Shape | All |
+| `make_solid` | Convert closed shells into validated solids | All |
+| `polar_pattern_shape` | Pattern exact Shapes with optional controlled fuse | All |
+
 #### PartDesign - Sketching and Core Features (14 common tools)
 
 | Tool                       | Description                                                | Mode |

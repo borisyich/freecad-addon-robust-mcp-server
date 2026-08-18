@@ -30,6 +30,37 @@ def test_cancelled_request_is_not_executed():
     assert request.completed.is_set()
     assert request.result is not None
     assert request.result["error_type"] == "CancelledError"
+    assert request.result["operation_state"] == "cancelled"
+    assert request.result["continues_running"] is False
+
+
+def test_queue_timeout_reports_cancelled_before_start():
+    plugin = MODULE.FreecadMCPPlugin(enable_xmlrpc=False)
+
+    result = plugin._execute_via_queue("_result_ = True", timeout_ms=1)
+
+    assert result["error_type"] == "TimeoutError"
+    assert result["operation_state"] == "cancelled"
+    assert result["continues_running"] is False
+    assert result["transaction_state"] == "not_started"
+    assert result["request_id"]
+
+
+def test_queue_timeout_reports_already_running_request(monkeypatch):
+    plugin = MODULE.FreecadMCPPlugin(enable_xmlrpc=False)
+    request = MODULE.ExecutionRequest("_result_ = True", timeout_ms=1)
+    request.started.set()
+
+    def request_factory(*_args, **_kwargs):
+        return request
+
+    monkeypatch.setattr(MODULE, "ExecutionRequest", request_factory)
+
+    result = plugin._execute_via_queue("_result_ = True", timeout_ms=1)
+
+    assert result["operation_state"] == "running"
+    assert result["continues_running"] is True
+    assert result["transaction_state"] == "unknown"
 
 
 def test_report_view_error_turns_successful_exec_into_failure(monkeypatch):

@@ -54,6 +54,14 @@ class ExecutionResult:
         execution_time_ms: Time taken in milliseconds.
         error_type: Type of exception if failed, None otherwise.
         error_traceback: Full traceback if failed, None otherwise.
+        operation_state: Whether execution completed, was cancelled before it
+            started, is still running, or is unknown.
+        continues_running: True when a timed-out operation is known to still be
+            executing, False when it is known to have stopped, and None when the
+            transport cannot determine that safely.
+        transaction_state: Best-known transaction state reported by the
+            FreeCAD-side wrapper.
+        request_id: Bridge request identifier when the transport supplies one.
     """
 
     success: bool
@@ -63,6 +71,53 @@ class ExecutionResult:
     execution_time_ms: float
     error_type: str | None = None
     error_traceback: str | None = None
+    operation_state: str = "completed"
+    continues_running: bool | None = False
+    transaction_state: str = "unknown"
+    request_id: str | None = None
+
+    def __post_init__(self) -> None:
+        """Preserve structured failure evidence for legacy tool error paths."""
+        if not self.success and (
+            self.error_traceback or self.error_type or self.stderr.strip()
+        ):
+            self.error_traceback = self.failure_details("FreeCAD execution failed")
+
+    def failure_details(self, fallback: str) -> str:
+        """Build one actionable error without discarding transport diagnostics."""
+        if self.error_traceback and all(
+            marker in self.error_traceback
+            for marker in ("duration_ms=", "operation_state=", "transaction_state=")
+        ):
+            return self.error_traceback
+        primary = (self.error_traceback or self.stderr or fallback).strip()
+        details = [primary]
+        if self.error_type and self.error_type not in primary:
+            details.append(f"error_type={self.error_type}")
+        if self.stderr and self.stderr.strip() and self.stderr.strip() not in primary:
+            details.append(f"stderr={self.stderr.strip()}")
+        details.append(f"duration_ms={self.execution_time_ms:.1f}")
+        details.append(f"operation_state={self.operation_state}")
+        if self.continues_running is not None:
+            details.append(f"continues_running={str(self.continues_running).lower()}")
+        else:
+            details.append("continues_running=unknown")
+        details.append(f"transaction_state={self.transaction_state}")
+        if self.request_id:
+            details.append(f"request_id={self.request_id}")
+        return "; ".join(details)
+
+    def diagnostics(self) -> dict[str, Any]:
+        """Return structured execution metadata suitable for MCP responses."""
+        return {
+            "error_type": self.error_type,
+            "stderr": self.stderr,
+            "duration_ms": self.execution_time_ms,
+            "operation_state": self.operation_state,
+            "continues_running": self.continues_running,
+            "transaction_state": self.transaction_state,
+            "request_id": self.request_id,
+        }
 
 
 @dataclass

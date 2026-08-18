@@ -393,6 +393,8 @@ The FreeCAD Robust MCP Bridge server is not running. To fix this:
                 stderr="Not connected to XML-RPC server",
                 execution_time_ms=0,
                 error_type="ConnectionError",
+                operation_state="unknown",
+                continues_running=None,
             )
 
         start = time.perf_counter()
@@ -437,9 +439,13 @@ The FreeCAD Robust MCP Bridge server is not running. To fix this:
                     result=result.get("result"),
                     stdout=result.get("stdout", ""),
                     stderr=result.get("stderr", ""),
-                    execution_time_ms=elapsed,
+                    execution_time_ms=result.get("execution_time_ms", elapsed),
                     error_type=result.get("error_type"),
                     error_traceback=result.get("error_traceback"),
+                    operation_state=result.get("operation_state", "completed"),
+                    continues_running=result.get("continues_running", False),
+                    transaction_state=result.get("transaction_state", "unknown"),
+                    request_id=result.get("request_id"),
                 )
             else:
                 # Simple result format
@@ -459,6 +465,8 @@ The FreeCAD Robust MCP Bridge server is not running. To fix this:
                 stderr=str(e),
                 execution_time_ms=(time.perf_counter() - start) * 1000,
                 error_type=type(e).__name__,
+                operation_state="unknown",
+                continues_running=None,
             )
         except Exception as e:
             elapsed = (time.perf_counter() - start) * 1000
@@ -469,6 +477,8 @@ The FreeCAD Robust MCP Bridge server is not running. To fix this:
                 stderr=str(e),
                 execution_time_ms=elapsed,
                 error_type=type(e).__name__,
+                operation_state="unknown",
+                continues_running=None,
             )
 
     # =========================================================================

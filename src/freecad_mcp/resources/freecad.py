@@ -346,9 +346,7 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
             try:
                 return skill_path.read_text(encoding="utf-8")
             except OSError as exc:
-                expected = (
-                    f"{ENGINEERING_SKILL_BUNDLE_RELATIVE_PATH}/{relative_path}"
-                )
+                expected = f"{ENGINEERING_SKILL_BUNDLE_RELATIVE_PATH}/{relative_path}"
                 return (
                     "# FreeCAD engineering skill resource unavailable\n\n"
                     f"Expected `{expected}` but it could not be read: {exc}"
@@ -637,17 +635,92 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                                 "object1_name",
                                 "object2_name",
                                 "expected_solid_count",
+                                "refine",
+                                "timeout_ms",
                             ],
                         },
                         {
                             "name": "fuse_all",
-                            "description": "Fuse multiple objects together",
-                            "key_params": ["object_names"],
+                            "description": "Controlled multi-shape fuse with fuzzy tolerance, refine, and strict validation",
+                            "key_params": [
+                                "object_names",
+                                "fuzzy_tolerance",
+                                "refine",
+                                "expected_solid_count",
+                            ],
                         },
                         {
                             "name": "common_all",
-                            "description": "Find intersection of multiple objects",
-                            "key_params": ["object_names"],
+                            "description": "Transactional multi-shape intersection with per-step diagnostics",
+                            "key_params": [
+                                "object_names",
+                                "fuzzy_tolerance",
+                                "refine",
+                                "expected_solid_count",
+                            ],
+                        },
+                        {
+                            "name": "group_feature_faces",
+                            "description": "Group selected faces into edge-connected feature regions",
+                            "key_params": ["object_name", "face_names"],
+                        },
+                        {
+                            "name": "detect_rotational_pattern",
+                            "description": "Detect equal angular spacing of face groups about an axis",
+                            "key_params": [
+                                "object_name",
+                                "face_groups",
+                                "axis_origin",
+                                "axis_direction",
+                            ],
+                        },
+                        {
+                            "name": "defeature_faces",
+                            "description": "Remove selected faces with OCCT defeaturing and validate the healed support",
+                            "key_params": [
+                                "object_name",
+                                "face_names",
+                                "expected_solid_count",
+                            ],
+                        },
+                        {
+                            "name": "extract_feature_material",
+                            "description": "Extract exact material or void components from source and healed Shapes",
+                            "key_params": [
+                                "source_name",
+                                "healed_name",
+                                "mode",
+                                "component_indices",
+                            ],
+                        },
+                        {
+                            "name": "sew_shell",
+                            "description": "Sew faces from supplied objects into a validated shell",
+                            "key_params": ["object_names", "tolerance"],
+                        },
+                        {
+                            "name": "heal_shape",
+                            "description": "Fix Shape tolerances and optionally refine the result",
+                            "key_params": [
+                                "object_name",
+                                "tolerance",
+                                "expected_solid_count",
+                            ],
+                        },
+                        {
+                            "name": "make_solid",
+                            "description": "Build validated positive-volume solids from closed shells",
+                            "key_params": ["object_name", "expected_solid_count"],
+                        },
+                        {
+                            "name": "polar_pattern_shape",
+                            "description": "Pattern exact Shape copies about an axis with optional controlled fuse",
+                            "key_params": [
+                                "object_name",
+                                "occurrences",
+                                "fuse",
+                                "fuzzy_tolerance",
+                            ],
                         },
                         {
                             "name": "shell_object",
@@ -1421,8 +1494,8 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                         },
                         {
                             "name": "safe_execute",
-                            "description": "Execute Python code with automatic rollback on failure",
-                            "key_params": ["code", "doc_name"],
+                            "description": "Execute Python transactionally with an explicit deadline and continuation diagnostics",
+                            "key_params": ["code", "doc_name", "timeout_ms"],
                         },
                     ],
                 },
@@ -1450,8 +1523,7 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                 *[
                     {
                         "uri": (
-                            f"{ENGINEERING_SKILL_RESOURCE_URI}/references/"
-                            f"{filename}"
+                            f"{ENGINEERING_SKILL_RESOURCE_URI}/references/{filename}"
                         ),
                         "description": f"Canonical engineering Skill reference: {filename}",
                     }

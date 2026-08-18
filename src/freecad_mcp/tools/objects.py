@@ -1622,6 +1622,8 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
         result_name: str | None = None,
         doc_name: str | None = None,
         expected_solid_count: Annotated[int, Field(ge=1)] | None = 1,
+        refine: bool = True,
+        timeout_ms: Annotated[int, Field(ge=1, le=600000)] = 30000,
     ) -> dict[str, Any]:
         """Perform a transactional Boolean and reject unusable geometry.
 
@@ -1635,6 +1637,9 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
             expected_solid_count: Exact required number of result solids. The
                 default is one continuous solid; set None only for an intentional
                 multi-solid result. Null and invalid Shapes are always rejected.
+            refine: Remove unnecessary splitter edges when the FreeCAD feature
+                exposes a Refine property.
+            timeout_ms: Bridge execution deadline in milliseconds.
 
         Returns:
             Dictionary with result object information:
@@ -1678,6 +1683,10 @@ if obj2 is None:
 
 base_shape = getattr(obj1, "Shape", None)
 tool_shape = getattr(obj2, "Shape", None)
+if base_shape is None or base_shape.isNull() or not base_shape.isValid():
+    raise ValueError("First operand Shape must be non-null and valid")
+if tool_shape is None or tool_shape.isNull() or not tool_shape.isValid():
+    raise ValueError("Second operand Shape must be non-null and valid")
 base_volume = float(base_shape.Volume) if base_shape is not None and not base_shape.isNull() else 0.0
 tool_volume = float(tool_shape.Volume) if tool_shape is not None and not tool_shape.isNull() else 0.0
 
@@ -1691,6 +1700,8 @@ try:
     else:
         result = doc.addObject({op_type!r}, {result_name!r})
         result.Shapes = [obj1, obj2]
+    if hasattr(result, "Refine"):
+        result.Refine = {refine!r}
 
     doc.recompute()
     shape = getattr(result, "Shape", None)
@@ -1704,6 +1715,8 @@ try:
         rejection_reasons.append("result Shape is null")
     elif not shape_valid:
         rejection_reasons.append("result Shape is invalid")
+    if result_volume <= 0.0:
+        rejection_reasons.append(f"result volume must be positive, got {{result_volume}}")
     if {expected_solid_count!r} is not None and solid_count != {expected_solid_count!r}:
         rejection_reasons.append(
             f"expected {expected_solid_count!r} solid(s), got {{solid_count}}"
@@ -1731,12 +1744,14 @@ _result_ = {{
     "tool_volume": tool_volume,
     "result_volume": result_volume,
     "volume_delta": result_volume - base_volume,
+    "refined": {refine!r},
+    "transaction_state": "committed",
 }}
 """
-        result = await bridge.execute_python(code)
+        result = await bridge.execute_python(code, timeout_ms=timeout_ms)
         if result.success:
             return result.result
-        raise ValueError(result.error_traceback or "Boolean operation failed")
+        raise ValueError(result.failure_details("Boolean operation failed"))
 
     @mcp.tool()
     async def set_placement(
@@ -3301,30 +3316,20 @@ except Exception:
             return result.result
         raise ValueError(result.error_traceback or "Explode compound failed")
 
-    @mcp.tool()
-    async def fuse_all(
+    async def _nary_boolean(
+        operation: Literal["fuse", "common"],
         object_names: list[str],
-        result_name: str | None = None,
-        doc_name: str | None = None,
+        result_name: str | None,
+        doc_name: str | None,
+        fuzzy_tolerance: float,
+        refine: bool,
+        expected_solid_count: int | None,
+        timeout_ms: int,
     ) -> dict[str, Any]:
-        """Fuse (union) multiple shapes into a single solid.
-
-        Unlike boolean_operation which works on two objects at a time,
-        this fuses all specified objects at once.
-
-        Args:
-            object_names: List of object names to fuse.
-            result_name: Name for result object. Auto-generated if None.
-            doc_name: Document containing the objects. Uses active document if None.
-
-        Returns:
-            Dictionary with result object information:
-                - name: Result object name
-                - label: Result object label
-                - type_id: Result object type
-        """
+        if len(object_names) < 2:
+            raise ValueError(f"Need at least 2 objects to {operation}")
         bridge = await get_bridge()
-
+        default_name = "Fusion" if operation == "fuse" else "Common"
         code = f"""
 import Part
 
@@ -3337,110 +3342,126 @@ for obj_name in {object_names!r}:
     obj = doc.getObject(obj_name)
     if obj is None:
         raise ValueError(f"Object not found: {{obj_name}}")
-    if not hasattr(obj, "Shape"):
-        raise ValueError(f"Object has no shape: {{obj_name}}")
-    shapes.append(obj.Shape)
+    shape = getattr(obj, "Shape", None)
+    if shape is None or shape.isNull():
+        raise ValueError(f"Object has a null Shape: {{obj_name}}")
+    if not shape.isValid():
+        raise ValueError(f"Object has an invalid Shape: {{obj_name}}")
+    shapes.append(shape)
 
-if len(shapes) < 2:
-    raise ValueError("Need at least 2 objects to fuse")
-
-# Wrap in transaction for undo support
-doc.openTransaction("Fuse All")
+doc.openTransaction("{operation.capitalize()} All")
 try:
-    # Fuse all shapes
-    fused = shapes[0]
-    for s in shapes[1:]:
-        fused = fused.fuse(s)
+    current = shapes[0]
+    steps = []
+    for step_index, next_shape in enumerate(shapes[1:], start=1):
+        if {fuzzy_tolerance!r} > 0.0:
+            try:
+                current = current.{operation}(next_shape, {fuzzy_tolerance!r})
+            except TypeError as exc:
+                raise ValueError(
+                    "This FreeCAD build does not expose fuzzy tolerance for "
+                    "TopoShape.{operation}"
+                ) from exc
+        else:
+            current = current.{operation}(next_shape)
+        if current.isNull():
+            raise ValueError(f"{operation} step {{step_index}} produced a null Shape")
+        if not current.isValid():
+            raise ValueError(f"{operation} step {{step_index}} produced an invalid Shape")
+        steps.append({{
+            "step": step_index,
+            "solid_count": len(current.Solids),
+            "volume": float(current.Volume),
+            "valid": True,
+        }})
 
-    result_name = {result_name!r} or "Fusion"
-    result = doc.addObject("Part::Feature", result_name)
-    result.Shape = fused
+    if {refine!r}:
+        current = current.removeSplitter()
+    if current.isNull() or not current.isValid():
+        raise ValueError("Final {operation} Shape is null or invalid")
+    solid_count = len(current.Solids)
+    volume = float(current.Volume)
+    if volume <= 0.0:
+        raise ValueError(f"Final {operation} volume must be positive; got {{volume}}")
+    if {expected_solid_count!r} is not None and solid_count != {expected_solid_count!r}:
+        raise ValueError(
+            f"Final {operation} expected {expected_solid_count!r} solid(s), "
+            f"got {{solid_count}}"
+        )
 
+    result_obj = doc.addObject("Part::Feature", {result_name!r} or {default_name!r})
+    result_obj.Shape = current
     doc.recompute()
+    if result_obj.Shape.isNull() or not result_obj.Shape.isValid():
+        raise ValueError("Stored {operation} result is null or invalid")
     doc.commitTransaction()
-
     _result_ = {{
-        "name": result.Name,
-        "label": result.Label,
-        "type_id": result.TypeId,
+        "name": result_obj.Name,
+        "label": result_obj.Label,
+        "type_id": result_obj.TypeId,
+        "shape_valid": True,
+        "shape_type": current.ShapeType,
+        "solid_count": solid_count,
+        "volume": volume,
+        "fuzzy_tolerance": {fuzzy_tolerance!r},
+        "refined": {refine!r},
+        "steps": steps,
+        "transaction_state": "committed",
     }}
 except Exception:
     doc.abortTransaction()
     raise
 """
-        result = await bridge.execute_python(code)
-        if result.success:
-            return result.result
-        raise ValueError(result.error_traceback or "Fuse all failed")
+        execution = await bridge.execute_python(code, timeout_ms=timeout_ms)
+        if execution.success:
+            return execution.result
+        raise ValueError(
+            execution.failure_details(f"{operation.capitalize()} all failed")
+        )
+
+    @mcp.tool()
+    async def fuse_all(
+        object_names: list[str],
+        result_name: str | None = None,
+        doc_name: str | None = None,
+        fuzzy_tolerance: Annotated[float, Field(ge=0, allow_inf_nan=False)] = 0.0,
+        refine: bool = True,
+        expected_solid_count: Annotated[int, Field(ge=1)] | None = 1,
+        timeout_ms: Annotated[int, Field(ge=1, le=600000)] = 30000,
+    ) -> dict[str, Any]:
+        """Fuse shapes transactionally with fuzzy tolerance and strict validation."""
+        return await _nary_boolean(
+            "fuse",
+            object_names,
+            result_name,
+            doc_name,
+            fuzzy_tolerance,
+            refine,
+            expected_solid_count,
+            timeout_ms,
+        )
 
     @mcp.tool()
     async def common_all(
         object_names: list[str],
         result_name: str | None = None,
         doc_name: str | None = None,
+        fuzzy_tolerance: Annotated[float, Field(ge=0, allow_inf_nan=False)] = 0.0,
+        refine: bool = True,
+        expected_solid_count: Annotated[int, Field(ge=1)] | None = 1,
+        timeout_ms: Annotated[int, Field(ge=1, le=600000)] = 30000,
     ) -> dict[str, Any]:
-        """Find the common (intersection) of multiple shapes.
-
-        Args:
-            object_names: List of object names to intersect.
-            result_name: Name for result object. Auto-generated if None.
-            doc_name: Document containing the objects. Uses active document if None.
-
-        Returns:
-            Dictionary with result object information:
-                - name: Result object name
-                - label: Result object label
-                - type_id: Result object type
-        """
-        bridge = await get_bridge()
-
-        code = f"""
-import Part
-
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
-if doc is None:
-    raise ValueError("No document found")
-
-shapes = []
-for obj_name in {object_names!r}:
-    obj = doc.getObject(obj_name)
-    if obj is None:
-        raise ValueError(f"Object not found: {{obj_name}}")
-    if not hasattr(obj, "Shape"):
-        raise ValueError(f"Object has no shape: {{obj_name}}")
-    shapes.append(obj.Shape)
-
-if len(shapes) < 2:
-    raise ValueError("Need at least 2 objects for common operation")
-
-# Wrap in transaction for undo support
-doc.openTransaction("Common All")
-try:
-    # Find common of all shapes
-    common = shapes[0]
-    for s in shapes[1:]:
-        common = common.common(s)
-
-    result_name = {result_name!r} or "Common"
-    result = doc.addObject("Part::Feature", result_name)
-    result.Shape = common
-
-    doc.recompute()
-    doc.commitTransaction()
-
-    _result_ = {{
-        "name": result.Name,
-        "label": result.Label,
-        "type_id": result.TypeId,
-    }}
-except Exception:
-    doc.abortTransaction()
-    raise
-"""
-        result = await bridge.execute_python(code)
-        if result.success:
-            return result.result
-        raise ValueError(result.error_traceback or "Common all failed")
+        """Intersect shapes transactionally with per-step and final validation."""
+        return await _nary_boolean(
+            "common",
+            object_names,
+            result_name,
+            doc_name,
+            fuzzy_tolerance,
+            refine,
+            expected_solid_count,
+            timeout_ms,
+        )
 
     # =========================================================================
     # Part Wire/Face Operations

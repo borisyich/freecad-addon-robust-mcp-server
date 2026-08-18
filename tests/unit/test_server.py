@@ -627,6 +627,24 @@ class TestHttpToolResultCompatibility:
         assert getattr(result[0], "type", None) == "text"
         assert "Document1" in getattr(result[0], "text", "")
 
+    @pytest.mark.asyncio
+    async def test_unknown_tool_arguments_are_rejected(self):
+        """A misspelled root argument must never be silently discarded."""
+        from freecad_mcp.server import FreecadFastMCP
+
+        server = FreecadFastMCP("strict-arguments-test")
+
+        @server.tool()
+        async def create_document(name: str = "Unnamed") -> dict[str, str]:
+            return {"name": name}
+
+        with pytest.raises(ValueError, match=r"Unknown argument.*doc_name"):
+            await server.call_tool("create_document", {"doc_name": "Wrong"})
+
+        listed = await server.list_tools()
+        tool = next(item for item in listed if item.name == "create_document")
+        assert tool.inputSchema["additionalProperties"] is False
+
 
 class TestMcpInstructions:
     """Tests for protocol-level server instructions."""
@@ -778,4 +796,6 @@ class TestMcpInstructions:
         # Two read-only Shape checkpoint contracts and explicit end-condition
         # discovery on four PartDesign tools add focused invariant evidence. The
         # bounded face-neighborhood contract adds one compact topology tool.
-        assert payload_bytes < 120_000
+        # Eight general BREP surgery contracts add explicit repair/pattern
+        # parameters while keeping the complete registry below 130 KB.
+        assert payload_bytes < 130_000

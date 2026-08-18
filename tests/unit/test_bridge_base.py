@@ -46,7 +46,29 @@ class TestExecutionResult:
         assert result.success is False
         assert result.result is None
         assert result.error_type == "ValueError"
-        assert result.error_traceback == "Traceback..."
+        assert result.error_traceback is not None
+        assert result.error_traceback.startswith("Traceback...")
+        assert "error_type=ValueError" in result.error_traceback
+        assert "duration_ms=5.0" in result.error_traceback
+        assert "operation_state=completed" in result.error_traceback
+
+    def test_stderr_only_failure_is_promoted_to_actionable_diagnostics(self):
+        result = ExecutionResult(
+            success=False,
+            result=None,
+            stdout="",
+            stderr="Execution timed out after 50ms",
+            execution_time_ms=50.0,
+            error_type="TimeoutError",
+            operation_state="running",
+            continues_running=True,
+        )
+
+        assert result.error_traceback is not None
+        assert "Execution timed out after 50ms" in result.error_traceback
+        assert "error_type=TimeoutError" in result.error_traceback
+        assert "operation_state=running" in result.error_traceback
+        assert "continues_running=true" in result.error_traceback
 
 
 class TestDocumentInfo:

@@ -16,6 +16,7 @@ Tools are organized by category:
 - measurements: Tolerance-aware geometric evidence
 - prompt_access: Prompt fallback for clients without native prompt controls
 - checkpoints: Deterministic ACT-OBSERVE-REACT workflow gates
+- brep: General-purpose imported/static BREP surgery and repair
 - view: View and screenshot tools
 - validation: Object and document validation tools
 """
@@ -23,6 +24,7 @@ Tools are organized by category:
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from freecad_mcp.tools.brep import register_brep_tools
 from freecad_mcp.tools.checkpoints import register_checkpoint_tools
 from freecad_mcp.tools.documents import register_document_tools
 from freecad_mcp.tools.draft import register_draft_tools
@@ -42,6 +44,7 @@ from freecad_mcp.tools.view import register_view_tools
 __all__ = [
     "register_all_tools",
     "register_checkpoint_tools",
+    "register_brep_tools",
     "register_document_tools",
     "register_draft_tools",
     "register_execution_tools",
@@ -71,6 +74,7 @@ def register_all_tools(mcp: Any, get_bridge_func: Callable[[], Awaitable[Any]]) 
     register_execution_tools(mcp, get_bridge_func)
     register_document_tools(mcp, get_bridge_func)
     register_object_tools(mcp, get_bridge_func)
+    register_brep_tools(mcp, get_bridge_func)
     register_measurement_tools(mcp, get_bridge_func)
     register_partdesign_tools(mcp, get_bridge_func)
     register_sheetmetal_tools(mcp, get_bridge_func)

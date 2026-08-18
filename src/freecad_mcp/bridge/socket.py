@@ -144,12 +144,15 @@ class SocketBridge(FreecadBridge):
         self,
         method: str,
         params: dict[str, Any] | None = None,
+        response_timeout: float | None = None,
     ) -> Any:
         """Send a JSON-RPC request and wait for response.
 
         Args:
             method: Method name to call.
             params: Method parameters.
+            response_timeout: Per-request response deadline in seconds. Uses
+                the bridge default when omitted.
 
         Returns:
             Result from the JSON-RPC response.
@@ -181,7 +184,7 @@ class SocketBridge(FreecadBridge):
                 # Read response
                 response_data = await asyncio.wait_for(
                     self._reader.readline(),
-                    timeout=self._timeout,
+                    timeout=response_timeout or self._timeout,
                 )
 
                 if not response_data:
@@ -286,9 +289,10 @@ class SocketBridge(FreecadBridge):
         start = time.perf_counter()
 
         try:
-            result = await asyncio.wait_for(
-                self._send_request("execute", {"code": code}),
-                timeout=timeout_ms / 1000,
+            result = await self._send_request(
+                "execute",
+                {"code": code, "timeout_ms": timeout_ms},
+                response_timeout=timeout_ms / 1000 + 1.0,
             )
             elapsed = (time.perf_counter() - start) * 1000
 
@@ -298,9 +302,13 @@ class SocketBridge(FreecadBridge):
                     result=result.get("result"),
                     stdout=result.get("stdout", ""),
                     stderr=result.get("stderr", ""),
-                    execution_time_ms=elapsed,
+                    execution_time_ms=result.get("execution_time_ms", elapsed),
                     error_type=result.get("error_type"),
                     error_traceback=result.get("error_traceback"),
+                    operation_state=result.get("operation_state", "completed"),
+                    continues_running=result.get("continues_running", False),
+                    transaction_state=result.get("transaction_state", "unknown"),
+                    request_id=result.get("request_id"),
                 )
             else:
                 return ExecutionResult(
@@ -319,6 +327,8 @@ class SocketBridge(FreecadBridge):
                 stderr=f"Execution timed out after {timeout_ms}ms",
                 execution_time_ms=float(timeout_ms),
                 error_type="TimeoutError",
+                operation_state="unknown",
+                continues_running=None,
             )
         except JsonRpcError as e:
             elapsed = (time.perf_counter() - start) * 1000
@@ -329,6 +339,8 @@ class SocketBridge(FreecadBridge):
                 stderr=e.message,
                 execution_time_ms=elapsed,
                 error_type="JsonRpcError",
+                operation_state="unknown",
+                continues_running=None,
             )
         except ConnectionError as e:
             return ExecutionResult(
@@ -338,6 +350,8 @@ class SocketBridge(FreecadBridge):
                 stderr=str(e),
                 execution_time_ms=0,
                 error_type="ConnectionError",
+                operation_state="unknown",
+                continues_running=None,
             )
 
     # =========================================================================

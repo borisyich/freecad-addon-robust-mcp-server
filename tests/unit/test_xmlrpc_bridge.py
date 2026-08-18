@@ -111,3 +111,29 @@ async def test_execute_preserves_freecad_report_error_type():
     assert result.success is False
     assert result.error_type == "FreeCADReportError"
     assert "Invalid expression" in (result.error_traceback or "")
+
+
+@pytest.mark.asyncio
+async def test_execute_preserves_timeout_continuation_metadata():
+    bridge = XmlRpcBridge()
+    bridge._proxy = MagicMock()
+    bridge._call_rpc = AsyncMock(
+        return_value={
+            "success": False,
+            "result": None,
+            "stdout": "",
+            "stderr": "Execution timed out after 50ms",
+            "error_type": "TimeoutError",
+            "operation_state": "running",
+            "continues_running": True,
+            "transaction_state": "unknown",
+            "request_id": "xml-9",
+        }
+    )
+
+    result = await bridge.execute_python("long_call()", timeout_ms=50)
+
+    assert result.operation_state == "running"
+    assert result.continues_running is True
+    assert result.transaction_state == "unknown"
+    assert result.request_id == "xml-9"

@@ -227,7 +227,7 @@ def register_export_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
         if result.success:
             return result.result
         raise ValueError(
-            result.error_traceback or f"{normalized_format.upper()} export failed"
+            result.failure_details(f"{normalized_format.upper()} export failed")
         )
 
     @mcp.tool(name="import")
@@ -259,5 +259,5 @@ def register_export_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
         if result.success:
             return result.result
         raise ValueError(
-            result.error_traceback or f"{normalized_format.upper()} import failed"
+            result.failure_details(f"{normalized_format.upper()} import failed")
         )

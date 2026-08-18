@@ -307,6 +307,17 @@
   BREP location graph, retaining capture-time metric baselines, verifying the
   round-trip transform, and filtering topologically empty OCCT difference
   Compounds with sentinel infinite bounds.
+- Added general BREP surgery tools for face grouping, rotational-pattern
+  detection, defeaturing, feature extraction, sewing, healing, solid creation,
+  and exact-Shape polar patterns.
+- Preserved execution error type, stderr, duration, transaction state, and
+  continuation status across legacy and new tools.
+- Added bounded `safe_execute` queue cancellation and explicit running/unknown
+  state when timed-out FreeCAD code cannot be interrupted safely.
+- Hardened Boolean operations with intermediate/final validity, positive-volume,
+  solid-count, fuzzy-tolerance, refine, and rollback checks.
+- Rejected unknown root tool arguments, advertised strict schemas, and added
+  registry-contract coverage for API drift.
 
 This project uses **component-specific versioning**. Each component has its own
 release notes and version history.

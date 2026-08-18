@@ -452,6 +452,7 @@ class FreecadFastMCP(FastMCP):
             tool.inputSchema = _inline_direct_property_refs(
                 _strip_schema_titles(tool.inputSchema)
             )
+            tool.inputSchema["additionalProperties"] = False
             if getattr(tool, "outputSchema", None) is not None:
                 tool.outputSchema = _strip_schema_titles(tool.outputSchema)
         logger.info("MCP tools/list completed: count=%d", len(tools))
@@ -472,6 +473,17 @@ class FreecadFastMCP(FastMCP):
                 _log_json(arguments, max_chars=self._log_value_max_chars),
             )
         try:
+            tool = self._tool_manager.get_tool(name)
+            if tool is not None:
+                allowed = set(tool.parameters.get("properties", {}))
+                unknown = sorted(set(arguments) - allowed)
+                if unknown:
+                    unknown_text = ", ".join(unknown)
+                    allowed_text = ", ".join(sorted(allowed)) or "(none)"
+                    raise ValueError(
+                        f"Unknown argument(s) for {name}: {unknown_text}. "
+                        f"Allowed arguments: {allowed_text}"
+                    )
             result = await super().call_tool(name, arguments)
             duration_ms = (time.perf_counter() - started_at) * 1000
             if self._log_tool_results:

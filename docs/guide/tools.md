@@ -1,6 +1,6 @@
 # Tools Reference
 
-The server currently registers **137 MCP tools**. This page is generated from the actual `@mcp.tool()` definitions in `src/freecad_mcp/tools` and is the exact inventory.
+The server currently registers **145 MCP tools**. This page is generated from the actual `@mcp.tool()` definitions in `src/freecad_mcp/tools` and is the exact inventory.
 
 Geometry-changing operations are transaction-backed where applicable. Use `history(action="undo")` for explicit recovery, `get_console_output` for console diagnostics, and `recompute_document` for document recomputation.
 
@@ -88,8 +88,16 @@ that behavior so a missing target can receive imported STEP/STL data.
 | `section_shape` | Create a cross-section of a shape at a standard plane. |
 | `make_compound` | Combine multiple shapes into a single compound. |
 | `explode_compound` | Separate a compound into individual shape objects. |
-| `fuse_all` | Fuse (union) multiple shapes into a single solid. |
-| `common_all` | Find the common (intersection) of multiple shapes. |
+| `fuse_all` | Controlled multi-shape fuse with fuzzy tolerance, refine, per-step diagnostics, and strict final validation. |
+| `common_all` | Transactional multi-shape intersection with per-step diagnostics and strict final validation. |
+| `group_feature_faces` | Split selected faces into edge-connected feature regions. |
+| `detect_rotational_pattern` | Test face groups for equal angular spacing about an axis. |
+| `defeature_faces` | Remove selected faces with OCCT defeaturing and store the healed support. |
+| `extract_feature_material` | Recover exact material or void components by differencing source and healed Shapes. |
+| `sew_shell` | Sew faces from one or more objects into a validated shell. |
+| `heal_shape` | Run OCCT shape fixing, tolerance control, and optional refinement. |
+| `make_solid` | Convert closed shells to positive-volume validated solids. |
+| `polar_pattern_shape` | Pattern exact Shape copies about an axis, optionally fuse with fuzzy tolerance and refine. |
 | `make_wire` | Create a wire (polyline) from a list of points. |
 | `make_face` | Create a face from a closed wire. |
 | `extrude_shape` | Extrude a wire or face by a fixed vector; use `pad_sketch` for target-aware end conditions. |
@@ -351,7 +359,7 @@ path without removing earlier valid bindings.
 | `compare_shape_checkpoint` | Report invariant metrics and exact added/removed B-rep regions after an edit. |
 | `validate_parametric_model` | Compact final diagnostic with expanded structure/full modes on request. |
 | `undo_if_invalid` | Check document health and undo the last operation if invalid objects exist. |
-| `safe_execute` | Execute Python code with automatic validation and rollback on failure. |
+| `safe_execute` | Execute Python transactionally with its own deadline and explicit timeout/continuation state. |
 
 The final validator is diagnostic, not a target for destructive model rewrites.
 It uses a proxy-specific contract for the Dynamic geometry properties of native
@@ -361,6 +369,13 @@ reject arbitrary custom metadata.
 Never bulk-delete/recreate an accepted sketch constraint graph merely to obtain
 a greener status; inspect the existing dependency path, bind the semantic
 feature owner, or report a tracing limitation.
+
+`safe_execute(timeout_ms=...)` cancels work that has not started. Python already
+running inside FreeCAD cannot be interrupted safely. In that case the response
+uses `rolled_back=null`, `operation_state="running"`, and
+`continues_running=true`; it also returns `error_type`, `stderr`, duration,
+transaction state, and the bridge request ID. Do not issue dependent mutations
+until the running request has completed and the document has been re-inspected.
 
 ## Export / Import
 

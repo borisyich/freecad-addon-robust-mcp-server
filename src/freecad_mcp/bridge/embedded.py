@@ -120,6 +120,8 @@ class EmbeddedBridge(FreecadBridge):
                 execution_time_ms=0,
                 error_type="ConnectionError",
                 error_traceback=None,
+                operation_state="unknown",
+                continues_running=None,
             )
 
         loop = asyncio.get_event_loop()
@@ -141,6 +143,9 @@ class EmbeddedBridge(FreecadBridge):
                 execution_time_ms=float(timeout_ms),
                 error_type="TimeoutError",
                 error_traceback=None,
+                operation_state="running",
+                continues_running=True,
+                transaction_state="unknown",
             )
 
         return result

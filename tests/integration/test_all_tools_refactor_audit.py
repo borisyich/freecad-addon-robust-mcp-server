@@ -71,6 +71,14 @@ TOOL_SCENARIOS: dict[str, str] = {
     "explode_compound": "objects",
     "fuse_all": "objects",
     "common_all": "objects",
+    "group_feature_faces": "objects",
+    "detect_rotational_pattern": "objects",
+    "defeature_faces": "objects",
+    "extract_feature_material": "objects",
+    "sew_shell": "objects",
+    "heal_shape": "objects",
+    "make_solid": "objects",
+    "polar_pattern_shape": "objects",
     "make_wire": "objects",
     "make_face": "objects",
     "extrude_shape": "objects",
@@ -386,13 +394,32 @@ _result_ = True
     )
 
 
-def test_runtime_registry_has_explicit_136_tool_coverage() -> None:
+def test_runtime_registry_has_explicit_145_tool_coverage() -> None:
     async def registered() -> set[str]:
         return {tool.name for tool in await production_mcp.list_tools()}
 
     actual = asyncio.run(registered())
-    assert len(actual) == 136
+    assert len(actual) == 145
     assert set(TOOL_SCENARIOS) == actual
+
+
+def test_runtime_contracts_are_strict_and_include_boolean_expectations() -> None:
+    async def schemas() -> dict[str, dict[str, Any]]:
+        return {
+            tool.name: tool.inputSchema for tool in await production_mcp.list_tools()
+        }
+
+    input_schemas = asyncio.run(schemas())
+    assert all(
+        schema.get("additionalProperties") is False for schema in input_schemas.values()
+    )
+    assert "expected_solid_count" in input_schemas["boolean_operation"]["properties"]
+    assert {
+        "fuzzy_tolerance",
+        "refine",
+        "expected_solid_count",
+        "timeout_ms",
+    }.issubset(input_schemas["fuse_all"]["properties"])
 
 
 def test_dedicated_measurement_runtime_schemas_are_operation_specific() -> None:

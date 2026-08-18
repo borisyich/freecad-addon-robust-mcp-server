@@ -8,7 +8,7 @@ may fail or create invalid geometry.
 """
 
 from collections.abc import Awaitable, Callable
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
@@ -1147,6 +1147,7 @@ else:
         doc_name: str | None = None,
         validate_after: bool = True,
         auto_undo_on_failure: bool = True,
+        timeout_ms: Annotated[int, Field(ge=1, le=600000)] = 30000,
     ) -> dict[str, Any]:
         """Execute Python code with automatic validation and rollback on failure.
 
@@ -1163,6 +1164,9 @@ else:
             doc_name: Target document. Uses active document if None.
             validate_after: Whether to validate objects after execution.
             auto_undo_on_failure: Whether to automatically undo if validation fails.
+            timeout_ms: Bridge execution deadline. A queued request is cancelled
+                before it starts. Python already running inside FreeCAD cannot be
+                interrupted safely, so a timeout reports that state explicitly.
 
         Returns:
             Dictionary containing:
@@ -1173,6 +1177,8 @@ else:
                 - execution_error: Any execution error message
                 - validation: Validation results (if validate_after is True)
                 - message: Human-readable summary
+                - diagnostics: Error type, stderr, duration, operation state,
+                  transaction state, and whether execution continues
 
         Example:
             Execute code with automatic rollback on failure::
@@ -1289,8 +1295,10 @@ else:
         doc.abortTransaction()
         doc.recompute()
         rolled_back = True
+        transaction_state = "aborted"
     else:
         doc.commitTransaction()
+        transaction_state = "committed"
 
     # Build message
     if execution_success and validation_passed:
@@ -1313,18 +1321,29 @@ else:
         "execution_success": execution_success,
         "execution_error": execution_error,
         "validation": validation,
-        "message": message
+        "message": message,
+        "transaction_state": transaction_state,
+        "operation_state": "completed",
+        "continues_running": False
     }}
 """
-        result = await bridge.execute_python(wrapper_code)
+        result = await bridge.execute_python(wrapper_code, timeout_ms=timeout_ms)
         if result.success and result.result:
             return result.result
+        message = result.failure_details("Safe execute failed")
+        rolled_back: bool | None = (
+            False if result.operation_state == "cancelled" else None
+        )
         return {
             "success": False,
             "result": None,
-            "rolled_back": False,
+            "rolled_back": rolled_back,
             "execution_success": False,
-            "execution_error": result.error_traceback or "Safe execute failed",
+            "execution_error": message,
             "validation": None,
-            "message": result.error_traceback or "Safe execute failed",
+            "message": message,
+            "transaction_state": result.transaction_state,
+            "operation_state": result.operation_state,
+            "continues_running": result.continues_running,
+            "diagnostics": result.diagnostics(),
         }
