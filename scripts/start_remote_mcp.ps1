@@ -1,3 +1,10 @@
+param(
+    [ValidateRange(10000, 50000000)]
+    [int]$ImageMaxBytes = 1000000,
+
+    [switch]$DisableImageLimit
+)
+
 $ErrorActionPreference = 'Stop'
 
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
@@ -74,6 +81,19 @@ $env:FREECAD_HTTP_HOST = '127.0.0.1'
 $env:FREECAD_HTTP_PORT = '8000'
 $env:FREECAD_HTTP_JSON_RESPONSE = 'true'
 $env:FREECAD_HTTP_UNSTRUCTURED_TOOL_RESULTS = 'true'
+
+# The SaaS connector used through this remote/Tailscale profile accepts only
+# bounded image payloads. This setting is process-local: ordinary local MCP
+# launches do not inherit a limit unless they set the variable themselves.
+if ($DisableImageLimit) {
+    $env:FREECAD_IMAGE_DELIVERY_MAX_BYTES = '0'
+    Write-Host 'Remote MCP image delivery limit: disabled'
+}
+else {
+    $env:FREECAD_IMAGE_DELIVERY_MAX_BYTES = [string]$ImageMaxBytes
+    Write-Host "Remote MCP image delivery limit: $ImageMaxBytes bytes per image"
+}
+
 $env:FREECAD_LOG_TOOL_ARGUMENTS = 'true'
 $env:FREECAD_LOG_TOOL_RESULTS = 'true'
 $env:FREECAD_LOG_VALUE_MAX_CHARS = '4000'

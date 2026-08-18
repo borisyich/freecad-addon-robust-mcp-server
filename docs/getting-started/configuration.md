@@ -14,6 +14,12 @@ Configure the FreeCAD Robust MCP Server using environment variables and MCP clie
 | `FREECAD_SOCKET_PORT` | JSON-RPC socket server port                          | `9876`      |
 | `FREECAD_XMLRPC_PORT` | XML-RPC server port                                  | `9875`      |
 | `FREECAD_TIMEOUT_MS`  | Execution timeout in ms                              | `30000`     |
+| `FREECAD_IMAGE_DELIVERY_MAX_BYTES` | Decoded byte cap for each returned MCP image; oversized images are downscaled; `0` disables | `0` |
+
+`FREECAD_IMAGE_DELIVERY_MAX_BYTES` is opt-in. It is `0`/disabled for normal
+local clients. The Internet/Tailscale startup profile sets it to `1000000` by
+default for SaaS compatibility; see
+[Internet-Accessible FreeCAD MCP Server](internet-mcp-quickstart.md#remote-image-size-limit).
 
 ---
 

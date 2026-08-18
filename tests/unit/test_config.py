@@ -27,6 +27,7 @@ class TestServerConfig:
         assert config.access_token is None
         assert config.http_json_response is True
         assert config.http_unstructured_tool_results is True
+        assert config.image_delivery_max_bytes == 0
         assert config.require_bounded_xmlrpc is False
         assert config.log_tool_arguments is False
         assert config.log_tool_results is False
@@ -71,6 +72,7 @@ class TestServerConfig:
                 "FREECAD_ACCESS_TOKEN": "x" * 64,
                 "FREECAD_HTTP_JSON_RESPONSE": "false",
                 "FREECAD_HTTP_UNSTRUCTURED_TOOL_RESULTS": "false",
+                "FREECAD_IMAGE_DELIVERY_MAX_BYTES": "1000000",
                 "FREECAD_REQUIRE_BOUNDED_XMLRPC": "true",
                 "FREECAD_LOG_TOOL_ARGUMENTS": "true",
                 "FREECAD_LOG_TOOL_RESULTS": "true",
@@ -90,6 +92,7 @@ class TestServerConfig:
         assert config.access_token == "x" * 64
         assert config.http_json_response is False
         assert config.http_unstructured_tool_results is False
+        assert config.image_delivery_max_bytes == 1_000_000
         assert config.require_bounded_xmlrpc is True
         assert config.log_tool_arguments is True
         assert config.log_tool_results is True

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import os
 from unittest.mock import MagicMock
 
 import pytest
@@ -32,6 +34,12 @@ def registered_tools():
 def _write_image(path, size=(320, 240), color="white"):
     """Create a test PNG."""
     PILImage.new("RGB", size, color).save(path, format="PNG")
+
+
+def _write_noisy_image(path, size=(900, 900)):
+    """Create a PNG that remains large after lossless compression."""
+    image = PILImage.frombytes("RGB", size, os.urandom(size[0] * size[1] * 3))
+    image.save(path, format="PNG")
 
 
 @pytest.mark.asyncio
@@ -67,6 +75,59 @@ async def test_open_image_resizes_large_image(registered_tools, tmp_path):
     assert result.structuredContent["width"] == 300
     assert result.structuredContent["height"] == 150
     assert result.structuredContent["resized"] is True
+
+
+@pytest.mark.asyncio
+async def test_open_image_has_no_delivery_byte_cap_by_default(
+    registered_tools, tmp_path, monkeypatch
+):
+    """Local/default image delivery should remain unlimited."""
+    monkeypatch.setenv("FREECAD_IMAGE_DELIVERY_MAX_BYTES", "0")
+    image_path = tmp_path / "noisy.png"
+    _write_noisy_image(image_path)
+
+    result = await registered_tools["open_image"](str(image_path))
+
+    image = next(item for item in result.content if isinstance(item, ImageContent))
+    assert len(base64.b64decode(image.data)) > 1_000_000
+    assert "image_delivery" not in result.structuredContent
+
+
+@pytest.mark.asyncio
+async def test_open_image_applies_configured_delivery_byte_cap(
+    registered_tools, tmp_path, monkeypatch
+):
+    """Opt-in remote profile should keep each returned image within its cap."""
+    monkeypatch.setenv("FREECAD_IMAGE_DELIVERY_MAX_BYTES", "1000000")
+    image_path = tmp_path / "noisy.png"
+    _write_noisy_image(image_path)
+
+    result = await registered_tools["open_image"](str(image_path))
+
+    image = next(item for item in result.content if isinstance(item, ImageContent))
+    delivered_bytes = len(base64.b64decode(image.data))
+    delivery = result.structuredContent["image_delivery"]
+    assert delivered_bytes <= 1_000_000
+    assert delivery["max_bytes"] == 1_000_000
+    assert delivery["original_bytes"] > 1_000_000
+    assert delivery["delivered_bytes"] == delivered_bytes
+    assert delivery["resized"] is True
+
+
+def test_image_result_caps_legacy_base64_metadata(monkeypatch):
+    """Remote delivery must not leave an oversized duplicate in metadata."""
+    from freecad_mcp.tools.images import _encode_png, image_tool_result
+
+    monkeypatch.setenv("FREECAD_IMAGE_DELIVERY_MAX_BYTES", "1000000")
+    image = PILImage.frombytes("RGB", (900, 900), os.urandom(900 * 900 * 3))
+    image_base64 = _encode_png(image)
+
+    result = image_tool_result(
+        {"success": True, "data": image_base64},
+        image_base64=image_base64,
+    )
+
+    assert len(base64.b64decode(result.structuredContent["data"])) <= 1_000_000
 
 
 @pytest.mark.asyncio
@@ -202,6 +263,29 @@ async def test_open_image_tiles_returns_overview_and_labelled_fragments(
     assert "visual_ack_required" not in metadata
     assert "submit_modeling_plan" not in str(metadata)
     assert "Inspect every returned fragment" in metadata["recommended_review"]
+
+
+@pytest.mark.asyncio
+async def test_open_image_tiles_caps_every_returned_image(
+    registered_tools, tmp_path, monkeypatch
+):
+    """The same remote cap must cover overview and every tile."""
+    monkeypatch.setenv("FREECAD_IMAGE_DELIVERY_MAX_BYTES", "200000")
+    drawing = tmp_path / "noisy.png"
+    _write_noisy_image(drawing, size=(1200, 800))
+
+    result = await registered_tools["open_image_tiles"](
+        str(drawing),
+        rows=2,
+        columns=2,
+        tile_max_dimension=1200,
+        save_to_disk=False,
+    )
+
+    images = [item for item in result.content if isinstance(item, ImageContent)]
+    assert len(images) == 5
+    assert all(len(base64.b64decode(item.data)) <= 200_000 for item in images)
+    assert len(result.structuredContent["image_delivery"]["images"]) == 5
 
 
 @pytest.mark.asyncio

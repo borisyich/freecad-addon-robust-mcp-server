@@ -60,6 +60,8 @@ The script:
 - reads the saved Bearer token;
 - detects the device's Tailscale DNS name;
 - allows that hostname in the MCP Host/Origin validation;
+- limits each image returned to the remote SaaS agent to `1,000,000` decoded
+  bytes by default, downscaling only when needed;
 - refuses to start if port `8000` is already occupied;
 - performs an XML-RPC transport ping;
 - verifies that FreeCAD's main-thread GUI execution queue responds;
@@ -77,6 +79,45 @@ again. This prevents timed-out cloud requests from remaining active for the
 legacy fixed 30-second XML-RPC window.
 
 The MCP server remains bound to localhost and must not be exposed by router port forwarding.
+
+### Remote image-size limit
+
+The `start_remote_mcp.ps1` profile enables a per-image delivery limit because
+some SaaS MCP clients reject images larger than 1 MB. The default is exactly
+`1,000,000` decoded image bytes per MCP `ImageContent` block. If an image is
+larger, the server downscales the delivered copy until it fits. The cap is per
+`ImageContent` block, not for the complete JSON-RPC response. Source drawings,
+screenshots saved to disk, and other local files are not modified.
+
+This limit is **not enabled by default for normal local MCP launches**. A local
+Codex/Cline/other stdio client started in the usual way therefore keeps the
+existing unrestricted image delivery behavior. The setting is applied only to
+the MCP server process started by this remote/Tailscale script.
+
+To disable the limit for the remote server:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\start_remote_mcp.ps1 `
+  -DisableImageLimit
+```
+
+To use a different limit, for example `750,000` bytes:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\start_remote_mcp.ps1 `
+  -ImageMaxBytes 750000
+```
+
+Internally this sets `FREECAD_IMAGE_DELIVERY_MAX_BYTES` only for the remote MCP
+server process. A value of `0` disables the limit; normal local launches default
+to `0`.
+
+!!! note
+    The limit is process-scoped, not request-IP-scoped. If a local client is
+    deliberately pointed at the same HTTP server on `127.0.0.1:8000` that is
+    also being published through Tailscale Funnel, it will see the same limit.
+    For unrestricted local work, use the normal local/stdin MCP configuration
+    rather than the remote HTTP process.
 
 If automatic hostname detection fails, save the hostname manually, without `https://` or `/mcp`:
 

@@ -20,6 +20,83 @@ MAX_IMAGE_BYTES = 25 * 1024 * 1024
 MAX_IMAGE_PIXELS = 100_000_000
 PILImage.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
 
+
+def _encode_png_bytes(image: PILImage.Image) -> bytes:
+    """Encode an image as optimized PNG bytes."""
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG", optimize=True)
+    return buffer.getvalue()
+
+
+def _constrain_image_delivery(
+    image_base64: str,
+    mime_type: str,
+    max_bytes: int | None,
+) -> tuple[str, str, dict[str, Any] | None]:
+    """Downscale one delivered MCP image when an explicit byte cap is enabled.
+
+    The cap applies only to the decoded binary image carried by ``ImageContent``.
+    Source files and screenshots saved to disk are not modified.
+    """
+    if max_bytes is None:
+        return image_base64, mime_type, None
+
+    raw = base64.b64decode(image_base64, validate=True)
+    delivery = {
+        "limit_enabled": True,
+        "max_bytes": max_bytes,
+        "original_bytes": len(raw),
+        "delivered_bytes": len(raw),
+        "resized": False,
+    }
+    if len(raw) <= max_bytes:
+        return image_base64, mime_type, delivery
+
+    try:
+        with PILImage.open(io.BytesIO(raw)) as source:
+            source.load()
+            image = ImageOps.exif_transpose(source).copy()
+    except (UnidentifiedImageError, OSError) as exc:
+        raise ValueError("Cannot decode MCP image for delivery resizing") from exc
+
+    if image.mode not in {"RGB", "RGBA"}:
+        image = image.convert("RGBA" if "A" in image.getbands() else "RGB")
+
+    original_width, original_height = image.size
+    candidate = image
+    encoded = _encode_png_bytes(candidate)
+
+    for _ in range(16):
+        if len(encoded) <= max_bytes:
+            delivered = base64.b64encode(encoded).decode("ascii")
+            delivery.update(
+                {
+                    "delivered_bytes": len(encoded),
+                    "resized": candidate.size != image.size,
+                    "original_width": original_width,
+                    "original_height": original_height,
+                    "delivered_width": candidate.width,
+                    "delivered_height": candidate.height,
+                }
+            )
+            return delivered, "image/png", delivery
+
+        scale = (max_bytes / len(encoded)) ** 0.5 * 0.98
+        scale = min(scale, 0.95)
+        new_size = (
+            max(1, int(candidate.width * scale)),
+            max(1, int(candidate.height * scale)),
+        )
+        if new_size == candidate.size:
+            break
+        candidate = candidate.resize(new_size, PILImage.Resampling.LANCZOS)
+        encoded = _encode_png_bytes(candidate)
+
+    raise ValueError(
+        f"Cannot reduce MCP image below configured limit of {max_bytes} bytes"
+    )
+
+
 def _json_text(payload: dict[str, Any]) -> TextContent:
     """Create compact, model-visible JSON metadata."""
     return TextContent(
@@ -36,18 +113,33 @@ def image_tool_result(
     is_error: bool = False,
 ) -> CallToolResult:
     """Build a tool result with metadata and optional MCP ImageContent."""
-    content: list[ContentBlock] = [_json_text(metadata)]
+    result_metadata = metadata
+    delivered_base64 = image_base64
+    delivered_mime_type = mime_type
     if image_base64 is not None:
+        config = get_config()
+        delivered_base64, delivered_mime_type, delivery = _constrain_image_delivery(
+            image_base64,
+            mime_type,
+            config.image_delivery_max_bytes or None,
+        )
+        if delivery is not None:
+            result_metadata = {**metadata, "image_delivery": delivery}
+            if metadata.get("data") == image_base64:
+                result_metadata["data"] = delivered_base64
+
+    content: list[ContentBlock] = [_json_text(result_metadata)]
+    if delivered_base64 is not None:
         content.append(
             ImageContent(
                 type="image",
-                data=image_base64,
-                mimeType=mime_type,
+                data=delivered_base64,
+                mimeType=delivered_mime_type,
             )
         )
     return CallToolResult(
         content=content,
-        structuredContent=metadata,
+        structuredContent=result_metadata,
         isError=is_error,
     )
 
@@ -63,19 +155,42 @@ def multi_image_tool_result(
     Each text block tells the model exactly which source region the following
     image represents. This is more reliable than returning anonymous crops.
     """
-    content: list[ContentBlock] = [_json_text(metadata)]
-    for label, image_base64 in labelled_images:
+    config = get_config()
+    delivered_images: list[tuple[str, str, str]] = []
+    delivery_items: list[dict[str, Any]] = []
+    for index, (label, image_base64) in enumerate(labelled_images, start=1):
+        delivered_base64, delivered_mime_type, delivery = _constrain_image_delivery(
+            image_base64,
+            mime_type,
+            config.image_delivery_max_bytes or None,
+        )
+        delivered_images.append((label, delivered_base64, delivered_mime_type))
+        if delivery is not None:
+            delivery_items.append({"index": index, **delivery})
+
+    result_metadata = metadata
+    if delivery_items:
+        result_metadata = {
+            **metadata,
+            "image_delivery": {
+                "max_bytes": config.image_delivery_max_bytes or None,
+                "images": delivery_items,
+            },
+        }
+
+    content: list[ContentBlock] = [_json_text(result_metadata)]
+    for label, image_base64, delivered_mime_type in delivered_images:
         content.append(TextContent(type="text", text=label))
         content.append(
             ImageContent(
                 type="image",
                 data=image_base64,
-                mimeType=mime_type,
+                mimeType=delivered_mime_type,
             )
         )
     return CallToolResult(
         content=content,
-        structuredContent=metadata,
+        structuredContent=result_metadata,
         isError=False,
     )
 
@@ -155,9 +270,7 @@ def _load_normalized_image(path: Path, max_dimension: int) -> tuple[PILImage.Ima
 
 def _encode_png(image: PILImage.Image) -> str:
     """Encode an image as base64 PNG."""
-    buffer = io.BytesIO()
-    image.save(buffer, format="PNG", optimize=True)
-    return base64.b64encode(buffer.getvalue()).decode("ascii")
+    return base64.b64encode(_encode_png_bytes(image)).decode("ascii")
 
 
 def _fit_on_panel(

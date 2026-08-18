@@ -49,6 +49,8 @@ class ServerConfig(BaseSettings):
         http_json_response: Return JSON bodies for Streamable HTTP POST requests.
         http_unstructured_tool_results: Disable outputSchema/structuredContent for
             HTTP tool calls to maximize compatibility with SaaS MCP clients.
+        image_delivery_max_bytes: Per-image MCP delivery limit in decoded bytes.
+            Zero disables the limit; oversized images are downscaled when enabled.
         require_bounded_xmlrpc: Require the updated timeout-aware bridge API.
         log_tool_arguments: Log sanitized tool arguments for remote debugging.
         log_tool_results: Log a compact summary of tool results.
@@ -140,6 +142,16 @@ class ServerConfig(BaseSettings):
             )
         ),
     ] = True
+    image_delivery_max_bytes: Annotated[
+        int,
+        Field(
+            ge=0,
+            description=(
+                "Maximum decoded byte size for each MCP ImageContent payload; "
+                "0 disables the limit"
+            ),
+        ),
+    ] = 0
     require_bounded_xmlrpc: Annotated[
         bool,
         Field(description="Require XML-RPC execute_with_timeout support"),

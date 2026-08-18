@@ -717,6 +717,9 @@ Environment Variables:
   FREECAD_HTTP_UNSTRUCTURED_TOOL_RESULTS
                          Disable structured tool output in HTTP mode for broad
                          SaaS compatibility (default: true)
+  FREECAD_IMAGE_DELIVERY_MAX_BYTES
+                         Decoded byte cap for each returned MCP image; 0 disables
+                         the limit (default: 0 / unlimited)
   FREECAD_LOG_TOOL_ARGUMENTS
                          Log sanitized parsed tool arguments (default: false)
   FREECAD_LOG_TOOL_RESULTS
