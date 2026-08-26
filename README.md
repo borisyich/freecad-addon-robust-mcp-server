@@ -83,7 +83,7 @@ An [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server that 
 
 ## Features
 
-- **131 MCP Tools**: Compact CAD operations including primitives, PartDesign, measurements, booleans, and export
+- **MCP CAD Toolset**: Compact operations for PartDesign, direct B-rep editing, measurements, SheetMetal, images, validation, and I/O
 - **Multiple Connection Modes**: XML-RPC (recommended), JSON-RPC socket, or embedded
 - **GUI & Headless Support**: Full modeling in headless mode, plus screenshots/colors in GUI mode
 - **Macro Development**: Create, edit, run, and template FreeCAD macros via MCP
@@ -348,7 +348,7 @@ FREECAD_MODE=embedded freecad-mcp
 
 ### Available Tools
 
-The server currently registers **131 MCP tools**. The tables below list common tools rather than duplicating the exact inventory. See the generated [Tools Overview](docs/guide/tools.md) or the MCP client's discovered tool list for the authoritative inventory; [MCP Tools Reference](docs/MCP_TOOLS_REFERENCE.md) provides detailed examples for core tools, while `freecad://capabilities` is a curated runtime overview. Tools marked with **GUI** require FreeCAD to be running in GUI mode; they return a structured error in headless mode.
+The server exposes a broad MCP tool set. The tables below list common tools rather than duplicating the exact inventory. See the generated [Tools Overview](docs/guide/tools.md) or the MCP client's discovered tool list for the authoritative inventory; [MCP Tools Reference](docs/MCP_TOOLS_REFERENCE.md) provides detailed examples for core tools, while `freecad://capabilities` is a curated runtime overview. Tools marked with **GUI** require FreeCAD to be running in GUI mode; they return a structured error in headless mode.
 
 #### Execution & Debugging (5 tools)
 
@@ -475,59 +475,15 @@ SheetMetal GUI ViewProvider, so the result remains visible and inspectable.
 
 ### Agent engineering guidance
 
-Detailed modeling policy lives in the repository Skill:
+The root `AGENTS.md` and protocol-level MCP instructions are intentionally short
+routers. The canonical engineering policy lives in
+`.agents/skills/freecad-engineering/SKILL.md` and its task references. MCP
+clients can read the same entrypoint at `freecad://skills/freecad-engineering`.
+Prompts and compatibility resources route to that source instead of duplicating
+its workflow policy.
 
-```text
-.agents/skills/freecad-engineering/SKILL.md
-```
-
-The root `AGENTS.md` is a short Codex router to `$freecad-engineering`; Cline
-uses `.clinerules/freecad-modeling.md`. When the server runs from the repository checkout, MCP clients can read the
-same Skill from `freecad://skills/freecad-engineering`. Prompts and
-`freecad://best-practices` provide routing/context rather than copied policies.
-
-The Skill classifies likely stock and manufacturing process, covers milling,
-turning, and sheet-metal strategies, and requires native editable parametric
-structure unless the user explicitly requests direct B-rep output.
-`execute_python`, `safe_execute`, and `run_macro` remain available.
-
-For drawing/sketch input, the Skill requires saving every explicit non-starred
-source dimension before modeling and classifying it as driving, verification, or
-unresolved. Driving identifiers control the model through named constraints or
-connected Spreadsheet aliases; verification identifiers retain deterministic
-measurement evidence without over-defining the model. `compare_images` is
-required after numerical checks for every major feature and before any pattern
-multiplies a seed element.
-
-After any model creation or geometry change, call `validate_parametric_model`
-immediately before the final response and summarize the actual Bodies, Tips,
-history, sketches, solver state, source-dimension usage, Spreadsheet connectivity,
-direct solids, and warnings. For drawing/sketch tasks, pass the complete driving
-identifier list as `required_dimension_names`. The report is informative and
-does not by itself prove drawing correspondence. Parameter references multiplied
-by zero are treated as non-driving rather than accepted as validation bridges.
-For a sketch-only deliverable, pass
-`target={"kind":"sketch","name":"SketchName"}`; required dimensions are then
-traced to non-construction geometry of that sketch, while Body/solid/Tip findings
-are outside scope. Sketch profile diagnostics classify outer loops and holes and
-reject intersecting or overlapping contours instead of relying on closed-wire
-count alone.
-
-Native parametric `Part::*` primitives and boolean chains are accepted as
-editable history even without a `PartDesign::Body`; static/imported
-`Part::Feature` shape snapshots remain explicit review findings.
-
-If an MCP client exposes tools and resources but no native prompt controls, use
-`get_freecad_prompt()` to list prompts and `get_freecad_prompt(name="...",
-arguments={...})` to render the same server-registered prompt. Agents should not
-read prompt source files as a substitute for protocol invocation.
-
-For flat-pattern sketches, the Skill gates coarse outer contour, radius
-transitions, holes, bend lines, and final parameterization separately. Each gate
-recomputes, checks topology and deterministic dimensions, performs same-view
-comparison, updates a discrepancy ledger, and may revise both the source
-interpretation and CAD. A source-backed tangency conflict blocks progress until
-endpoints, radius, arc side, datum, and the dimension chain are rechecked.
+See [FreeCAD Engineering Skill](docs/guide/freecad-engineering-skill.md) and
+[Agent Guidance Architecture](docs/guide/agent-guidance-architecture.md).
 
 #### Validation & diagnostics (7 tools)
 

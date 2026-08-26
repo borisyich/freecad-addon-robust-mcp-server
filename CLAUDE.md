@@ -1,12 +1,8 @@
 # CLAUDE.md - AI Assistant Guidelines for This Project
 
-> For tasks that operate FreeCAD on a mechanical model, the canonical engineering
-> policy is `.agents/skills/freecad-engineering/SKILL.md`. Root `AGENTS.md` and
-> `.clinerules/freecad-modeling.md` are short client routers, not duplicated
-> policy. After any geometry change, call `validate_parametric_model` before the
-> final user-facing response. For drawing/sketch input, save all explicit
-> non-starred dimensions, compare major features and pre-pattern seeds with
-> `compare_images`, and pass all dimension identifiers to final validation.
+> For FreeCAD engineering/modeling tasks, route through
+> `.agents/skills/freecad-engineering/SKILL.md`. Detailed modeling policy lives
+> there and must not be duplicated in this repository-development guide.
 
 ## Project Overview
 

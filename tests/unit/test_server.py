@@ -660,16 +660,12 @@ class TestMcpInstructions:
         required_clauses = (
             "$freecad-engineering",
             "freecad://skills/freecad-engineering",
-            "freecad://skills/freecad-engineering/bundle",
-            "get_freecad_prompt",
-            "ACT -> OBSERVE -> REACT",
-            "capture_shape_checkpoint",
-            "compare_shape_checkpoint",
+            "tool schemas",
             "validate_parametric_model",
         )
         for clause in required_clauses:
             assert clause in normalized_instructions
-        assert len(instructions.encode("utf-8")) < 800
+        assert len(instructions.encode("utf-8")) < 400
         assert "when a flat pattern is supplied" not in instructions
 
     def test_tool_description_preserves_complete_first_paragraph(self):

@@ -1,25 +1,7 @@
-"""MCP resource implementations for FreeCAD.
+"""Read-only MCP resources for FreeCAD state and engineering Skill routing.
 
-This package contains all MCP resource definitions for querying FreeCAD state.
-Resources provide read-only access to FreeCAD's current state via URI-addressable
-endpoints.
-
-Available resources:
-    - freecad://version - FreeCAD version information
-    - freecad://status - Connection and runtime status
-    - freecad://documents - List of open documents
-    - freecad://documents/{name} - Single document details
-    - freecad://documents/{name}/objects - Objects in a document
-    - freecad://objects/{doc_name}/{obj_name} - Object details
-    - freecad://workbenches - Available workbenches
-    - freecad://workbenches/active - Currently active workbench
-    - freecad://macros - Available macros
-    - freecad://console - Recent console output
-    - freecad://active-document - Currently active document
-    - freecad://skills/freecad-engineering - Canonical engineering Skill
-    - freecad://best-practices - Compact Skill/validator index
-    - freecad://workflows/drawing-reconstruction - Drawing-task Skill route
-    - freecad://workflows/model-modification - Existing-model Skill route
+Use ``resources/list`` for the runtime inventory. Detailed engineering policy is
+exposed through ``freecad://skills/freecad-engineering`` and its task references.
 """
 
 from freecad_mcp.resources.freecad import register_resources

@@ -16,65 +16,55 @@ MCP Resources are read-only endpoints that provide context about FreeCAD's curre
 
 ## Available Resources
 
-The server registers **24 resources**: state resources, lightweight workflow
-routes, and the complete canonical engineering Skill bundle.
+The server registers state resources, lightweight workflow routes, and the
+canonical engineering Skill bundle. Use `resources/list` as the authoritative
+runtime inventory.
 
 ### freecad://capabilities
 
-Returns a curated catalog of key tools, all registered resources/prompts, and common usage patterns. The MCP client tool list and [Tools Overview](tools.md) are authoritative for the exact tool inventory.
+Returns a compact discovery index: tool categories, all registered resource
+URIs, and prompt names. Exact tool contracts remain in `tools/list`.
 
 ### freecad://skills/freecad-engineering
 
-When the server runs from a repository checkout containing the Skill, returns the exact contents of:
-
-```text
-.agents/skills/freecad-engineering/SKILL.md
-```
-
-This is the single detailed modeling policy for stock/process classification,
-parametric construction, milling, turning, sheet metal, drawing reconstruction,
-model modification, and final validation.
+Returns the canonical engineering router at
+`.agents/skills/freecad-engineering/SKILL.md`.
 
 ### freecad://skills/freecad-engineering/bundle
 
-Returns a JSON manifest of every file in the canonical Skill bundle and the MCP
-URI that exposes it. This is the preferred discovery endpoint for clients that
-loaded the Skill through MCP rather than from the repository filesystem.
+Returns the URI manifest for the complete Skill bundle.
 
 ### freecad://skills/freecad-engineering/references/*.md
 
-Each file from `.agents/skills/freecad-engineering/references/` is exposed under
-the same relative path beneath the Skill URI. For example:
+The task references are exposed under the same filenames:
 
 ```text
-freecad://skills/freecad-engineering/references/drawing-reconstruction.md
-freecad://skills/freecad-engineering/references/manufacturing-strategies.md
-freecad://skills/freecad-engineering/references/sheet-metal-flat-patterns.md
-freecad://skills/freecad-engineering/references/sketch-construction.md
-freecad://skills/freecad-engineering/references/source-notes.md
-freecad://skills/freecad-engineering/references/validation-and-editability.md
+freecad://skills/freecad-engineering/references/model-from-text.md
+freecad://skills/freecad-engineering/references/model-from-drawing.md
+freecad://skills/freecad-engineering/references/machined-and-additive-parts.md
+freecad://skills/freecad-engineering/references/sheet-metal-parts.md
+freecad://skills/freecad-engineering/references/edit-without-history.md
+freecad://skills/freecad-engineering/references/edit-with-history.md
+freecad://skills/freecad-engineering/references/engineering-drawings.md
 ```
 
 ### freecad://skills/freecad-engineering/agents/openai.yaml
 
-Returns the Skill's OpenAI agent metadata from
-`.agents/skills/freecad-engineering/agents/openai.yaml`.
+Returns Skill routing metadata.
 
 ### freecad://best-practices
 
-Returns a compact JSON index containing the canonical Skill path/resource and
-the required final diagnostic tool. It intentionally does not duplicate the
-Skill.
+Compatibility pointer to the canonical Skill and final diagnostic tool.
 
 ### freecad://workflows/drawing-reconstruction
 
-Returns task-specific context that routes drawing reconstruction into the
-`$freecad-engineering` Skill. It is not a separate mandatory state machine.
+Compatibility route to `model-from-drawing.md` plus the applicable manufacturing
+reference.
 
 ### freecad://workflows/model-modification
 
-Returns task-specific context that routes existing-model changes into the same
-Skill.
+Compatibility route that chooses `edit-with-history.md` or
+`edit-without-history.md` after model inspection.
 
 ### freecad://version
 
@@ -307,7 +297,10 @@ Gets recent FreeCAD console output.
 
 ## Using Resources in Prompts
 
-When an MCP client connects, it can discover these resources. Discovery does not guarantee that every resource is automatically inserted into the model context. The user, client, or agent must read the relevant resource. Keep durable rules in the client-native repository instruction file (`AGENTS.md` for Codex and `.clinerules/` for Cline).
+When an MCP client connects, it can discover these resources. Discovery does not
+guarantee that every resource is automatically inserted into the model context.
+The client or agent must read the relevant resource. Repository-aware clients can
+route through `AGENTS.md`/the Skill; other clients can read the Skill through MCP.
 
 **Example conversation:**
 

@@ -341,7 +341,7 @@ final structural scan therefore no longer requires deleting verification
 artifacts by hand.
 
 The engineering workflow and panel/bend graph are documented in
-`.agents/skills/freecad-engineering/references/sheet-metal-flat-patterns.md`.
+`.agents/skills/freecad-engineering/references/sheet-metal-parts.md`.
 Upstream command semantics are tracked against the
 [SheetMetal repository](https://github.com/shaise/FreeCAD_SheetMetal),
 [FreeCAD SheetMetal wiki](https://wiki.freecad.org/SheetMetal_Workbench), and

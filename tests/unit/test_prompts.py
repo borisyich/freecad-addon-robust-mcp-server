@@ -1,4 +1,4 @@
-"""Tests for FreeCAD Robust MCP prompts."""
+"""Tests for compact FreeCAD MCP prompt routers."""
 
 import inspect
 from collections.abc import Callable
@@ -9,11 +9,8 @@ import pytest
 
 
 class TestFreecadPrompts:
-    """Tests for FreeCAD Robust MCP prompts."""
-
     @pytest.fixture
     def mock_mcp(self) -> MagicMock:
-        """Create a mock MCP server that captures prompt registrations."""
         mcp = MagicMock()
         mcp._registered_prompts = {}
 
@@ -28,287 +25,97 @@ class TestFreecadPrompts:
         return mcp
 
     @pytest.fixture
-    def mock_bridge(self) -> AsyncMock:
-        """Create a mock FreeCAD bridge."""
-        return AsyncMock()
-
-    @pytest.fixture
-    def register_prompts(
-        self, mock_mcp: MagicMock, mock_bridge: AsyncMock
-    ) -> dict[str, Callable[..., Any]]:
-        """Register prompts and return the registered functions."""
+    def register_prompts(self, mock_mcp: MagicMock) -> dict[str, Callable[..., Any]]:
         from freecad_mcp.prompts.freecad import register_prompts
 
         async def get_bridge() -> AsyncMock:
-            return mock_bridge
+            return AsyncMock()
 
         register_prompts(mock_mcp, get_bridge)
         return mock_mcp._registered_prompts
 
-    # =========================================================================
-    # freecad_startup prompt tests
-    # =========================================================================
-
-    @pytest.mark.asyncio
-    async def test_freecad_startup_returns_guidance(
+    def test_all_compatibility_prompt_names_are_registered(
         self, register_prompts: dict[str, Callable[..., Any]]
     ) -> None:
-        """freecad_startup should return essential startup guidance."""
-        prompt_startup = register_prompts["freecad_startup"]
-        result = await prompt_startup()
-
-        # Should be a non-empty string
-        assert isinstance(result, str)
-        assert len(result) > 100
-
-        # Should contain key sections
-        assert "Session Checklist" in result or "Session Initialized" in result
-        assert "Critical Rules" in result
-        assert "Quick Reference" in result
+        assert set(register_prompts) == {
+            "freecad_startup",
+            "reproduce_from_drawing",
+            "modify_existing_model",
+            "freecad_guidance",
+            "design_part",
+            "create_sketch_guide",
+            "boolean_operations_guide",
+            "export_guide",
+            "import_guide",
+            "analyze_shape",
+            "debug_model",
+            "macro_development",
+            "python_api_reference",
+            "troubleshooting",
+        }
 
     @pytest.mark.asyncio
-    async def test_freecad_startup_contains_validation_guidance(
+    async def test_startup_is_minimal_skill_router(
         self, register_prompts: dict[str, Callable[..., Any]]
     ) -> None:
-        """freecad_startup should mention validation tools."""
-        prompt_startup = register_prompts["freecad_startup"]
-        result = await prompt_startup()
-
-        # Should mention validation
-        assert "validate" in result.lower()
-        assert "safe_execute" in result or "undo" in result
+        result = await register_prompts["freecad_startup"]()
+        assert "freecad://skills/freecad-engineering" in result
+        assert "ACT → OBSERVE → REACT" in result
         assert "validate_parametric_model" in result
-        assert "$freecad-engineering" in result
-        assert "required_dimension_names" in result
-        assert "compare_images" in result
+        assert len(result.encode("utf-8")) < 1_000
 
     @pytest.mark.asyncio
-    async def test_freecad_startup_contains_partdesign_guidance(
+    async def test_drawing_prompt_routes_to_new_reference(
         self, register_prompts: dict[str, Callable[..., Any]]
     ) -> None:
-        """freecad_startup should contain PartDesign workflow guidance."""
-        prompt_startup = register_prompts["freecad_startup"]
-        result = await prompt_startup()
-
-        # Should mention PartDesign workflow
-        assert "Body" in result
-        assert "create_sketch" in result or "sketch" in result.lower()
-        assert "PartDesign" in result
-
-    @pytest.mark.asyncio
-    async def test_freecad_startup_mentions_gui_headless(
-        self, register_prompts: dict[str, Callable[..., Any]]
-    ) -> None:
-        """freecad_startup should mention GUI vs headless modes."""
-        prompt_startup = register_prompts["freecad_startup"]
-        result = await prompt_startup()
-
-        # Should mention GUI/headless considerations
-        assert "GUI" in result or "gui" in result
-        assert "headless" in result.lower() or "screenshot" in result.lower()
-
-    # =========================================================================
-    # freecad_guidance prompt tests
-    # =========================================================================
-
-    @pytest.mark.asyncio
-    async def test_freecad_guidance_general(
-        self, register_prompts: dict[str, Callable[..., Any]]
-    ) -> None:
-        """freecad_guidance with task_type='general' should return general guidance."""
-        prompt_guidance = register_prompts["freecad_guidance"]
-        result = await prompt_guidance(task_type="general")
-
-        assert isinstance(result, str)
-        assert len(result) > 100
-        # Should have general guidance content
-        assert "Before Starting" in result or "Key Principles" in result
-
-    @pytest.mark.asyncio
-    async def test_freecad_guidance_partdesign(
-        self, register_prompts: dict[str, Callable[..., Any]]
-    ) -> None:
-        """freecad_guidance with task_type='partdesign' should return PartDesign guidance."""
-        prompt_guidance = register_prompts["freecad_guidance"]
-        result = await prompt_guidance(task_type="partdesign")
-
-        assert isinstance(result, str)
-        # Should have PartDesign-specific content
-        assert "Body" in result
-        assert "create_partdesign_body" in result or "PartDesign" in result
-
-    @pytest.mark.asyncio
-    async def test_freecad_guidance_sketching(
-        self, register_prompts: dict[str, Callable[..., Any]]
-    ) -> None:
-        """freecad_guidance with task_type='sketching' should return sketch guidance."""
-        prompt_guidance = register_prompts["freecad_guidance"]
-        result = await prompt_guidance(task_type="sketching")
-
-        assert isinstance(result, str)
-        # Should have sketching-specific content
-        assert "sketch" in result.lower()
-        assert "rectangle" in result.lower() or "circle" in result.lower()
-        assert "endpoints_radius" in result
-        assert "tangent_fillet" in result
-        assert "50%" in result
-
-    @pytest.mark.asyncio
-    async def test_freecad_guidance_boolean(
-        self, register_prompts: dict[str, Callable[..., Any]]
-    ) -> None:
-        """freecad_guidance with task_type='boolean' should return boolean guidance."""
-        prompt_guidance = register_prompts["freecad_guidance"]
-        result = await prompt_guidance(task_type="boolean")
-
-        assert isinstance(result, str)
-        # Should have boolean-specific content
-        assert "fuse" in result.lower() or "cut" in result.lower()
-        assert "boolean" in result.lower()
-
-    @pytest.mark.asyncio
-    async def test_freecad_guidance_export(
-        self, register_prompts: dict[str, Callable[..., Any]]
-    ) -> None:
-        """freecad_guidance with task_type='export' should return export guidance."""
-        prompt_guidance = register_prompts["freecad_guidance"]
-        result = await prompt_guidance(task_type="export")
-
-        assert isinstance(result, str)
-        # Should have export-specific content
-        assert "STEP" in result or "STL" in result
-        assert "export" in result.lower()
-
-    @pytest.mark.asyncio
-    async def test_freecad_guidance_debugging(
-        self, register_prompts: dict[str, Callable[..., Any]]
-    ) -> None:
-        """freecad_guidance with task_type='debugging' should return debug guidance."""
-        prompt_guidance = register_prompts["freecad_guidance"]
-        result = await prompt_guidance(task_type="debugging")
-
-        assert isinstance(result, str)
-        # Should have debugging-specific content
-        assert "console" in result.lower() or "error" in result.lower()
-        assert "validate" in result.lower() or "inspect" in result.lower()
-
-    @pytest.mark.asyncio
-    async def test_freecad_guidance_validation(
-        self, register_prompts: dict[str, Callable[..., Any]]
-    ) -> None:
-        """freecad_guidance with task_type='validation' should return validation guidance."""
-        prompt_guidance = register_prompts["freecad_guidance"]
-        result = await prompt_guidance(task_type="validation")
-
-        assert isinstance(result, str)
-        # Should have validation-specific content
-        assert "validate_object" in result or "validate_document" in result
-        assert "safe_execute" in result or "undo" in result.lower()
-
-    @pytest.mark.asyncio
-    async def test_freecad_guidance_unknown_type_falls_back_to_general(
-        self, register_prompts: dict[str, Callable[..., Any]]
-    ) -> None:
-        """freecad_guidance with unknown task_type should fall back to general."""
-        prompt_guidance = register_prompts["freecad_guidance"]
-        result = await prompt_guidance(task_type="unknown_type")
-
-        # Should return the general guidance as fallback
-        general_result = await prompt_guidance(task_type="general")
-        assert result == general_result
-
-    @pytest.mark.asyncio
-    async def test_freecad_guidance_default_is_general(
-        self, register_prompts: dict[str, Callable[..., Any]]
-    ) -> None:
-        """freecad_guidance with no task_type should default to general."""
-        prompt_guidance = register_prompts["freecad_guidance"]
-        result = await prompt_guidance()
-
-        general_result = await prompt_guidance(task_type="general")
-        assert result == general_result
-
-
-    @pytest.mark.asyncio
-    async def test_drawing_reconstruction_prompt_routes_to_skill(
-        self, register_prompts: dict[str, Callable[..., Any]]
-    ) -> None:
-        prompt = register_prompts["reproduce_from_drawing"]
-        result = await prompt(reference_path="drawing.png", target_document="Part")
-
-        assert "$freecad-engineering" in result
-        assert "Reconstruct from drawings or images" in result
-        assert "validate_parametric_model" in result
-        assert "non-starred" in result
-        assert "compare_images" in result
+        result = await register_prompts["reproduce_from_drawing"](
+            reference_path="drawing.png", target_document="Part"
+        )
         assert "drawing.png" in result
+        assert "model-from-drawing.md" in result
+        assert "manufacturing reference" in result
 
     @pytest.mark.asyncio
-    async def test_model_modification_prompt_preserves_design_intent(
+    async def test_modification_prompt_routes_by_history(
         self, register_prompts: dict[str, Callable[..., Any]]
     ) -> None:
-        prompt = register_prompts["modify_existing_model"]
-        result = await prompt(model_path="part.FCStd", change_request="add pocket")
-
-        assert "$freecad-engineering" in result
-        assert "Modify existing models" in result
-        assert "validate_parametric_model" in result
-        assert "part.FCStd" in result
-
-    # =========================================================================
-    # Test that all expected prompts are registered
-    # =========================================================================
-
-    def test_startup_prompt_is_registered(
-        self, register_prompts: dict[str, Callable[..., Any]]
-    ) -> None:
-        """freecad_startup prompt should be registered."""
-        assert "freecad_startup" in register_prompts
-
-    def test_guidance_prompt_is_registered(
-        self, register_prompts: dict[str, Callable[..., Any]]
-    ) -> None:
-        """freecad_guidance prompt should be registered."""
-        assert "freecad_guidance" in register_prompts
-
-    def test_design_part_prompt_is_registered(
-        self, register_prompts: dict[str, Callable[..., Any]]
-    ) -> None:
-        """design_part prompt should be registered."""
-        assert "design_part" in register_prompts
-
-    def test_create_sketch_guide_prompt_is_registered(
-        self, register_prompts: dict[str, Callable[..., Any]]
-    ) -> None:
-        """create_sketch_guide prompt should be registered."""
-        assert "create_sketch_guide" in register_prompts
+        result = await register_prompts["modify_existing_model"](
+            model_path="part.step", change_request="move wall"
+        )
+        assert "edit-with-history.md" in result
+        assert "edit-without-history.md" in result
+        assert "part.step" in result
 
     @pytest.mark.asyncio
-    async def test_create_sketch_guide_uses_typed_origin_support(
+    async def test_guidance_routes_task_categories(
         self, register_prompts: dict[str, Callable[..., Any]]
     ) -> None:
-        """Sketch guidance must not expose the removed tool argument."""
+        guidance = register_prompts["freecad_guidance"]
+        assert "model-from-text.md" in await guidance("text_modeling")
+        assert "sheet-metal-parts.md" in await guidance("sheet_metal")
+        assert "edit-without-history.md" in await guidance("edit_without_history")
+        assert await guidance("unknown") == await guidance("general")
+
+    @pytest.mark.asyncio
+    async def test_create_sketch_guide_keeps_typed_origin_support(
+        self, register_prompts: dict[str, Callable[..., Any]]
+    ) -> None:
         prompt = register_prompts["create_sketch_guide"]
         parameters = inspect.signature(prompt).parameters
-
         assert "plane" not in parameters
         assert "origin_plane" in parameters
         result = await prompt(origin_plane="XZ_Plane")
         assert '"kind": "origin_plane"' in result
         assert '"plane": "XZ_Plane"' in result
 
-    def test_boolean_operations_guide_prompt_is_registered(
+    @pytest.mark.asyncio
+    async def test_legacy_guides_are_compact_operation_pointers(
         self, register_prompts: dict[str, Callable[..., Any]]
     ) -> None:
-        """boolean_operations_guide prompt should be registered."""
-        assert "boolean_operations_guide" in register_prompts
-
-    def test_drawing_reconstruction_prompt_is_registered(
-        self, register_prompts: dict[str, Callable[..., Any]]
-    ) -> None:
-        assert "reproduce_from_drawing" in register_prompts
-
-    def test_model_modification_prompt_is_registered(
-        self, register_prompts: dict[str, Callable[..., Any]]
-    ) -> None:
-        assert "modify_existing_model" in register_prompts
+        boolean = await register_prompts["boolean_operations_guide"]()
+        export = await register_prompts["export_guide"]("STEP")
+        debug = await register_prompts["debug_model"]()
+        assert "boolean_operation" in boolean
+        assert "`export` tool schema" in export
+        assert "get_console_output" in debug
+        assert all(len(text.encode("utf-8")) < 1_000 for text in (boolean, export, debug))

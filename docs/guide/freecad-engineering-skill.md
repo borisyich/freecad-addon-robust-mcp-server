@@ -1,74 +1,68 @@
 # FreeCAD engineering Skill
 
-The repository includes a Codex Skill at:
+The canonical engineering workflow is the repository Skill bundle:
 
 ```text
-.agents/skills/freecad-engineering/SKILL.md
+.agents/skills/freecad-engineering/
+├── SKILL.md
+├── agents/openai.yaml
+└── references/
+    ├── model-from-text.md
+    ├── model-from-drawing.md
+    ├── machined-and-additive-parts.md
+    ├── sheet-metal-parts.md
+    ├── edit-without-history.md
+    ├── edit-with-history.md
+    └── engineering-drawings.md
 ```
 
-It is the single source of detailed engineering guidance for creating,
-reconstructing, modifying, repairing, and validating mechanical models in
-FreeCAD.
+`SKILL.md` is deliberately a router plus common engineering contract. Detailed
+workflow guidance belongs in the task reference files.
 
 ## Activation
 
-For Codex, open the repository root and start a new session after changing the
-Skill or `AGENTS.md`. The root `AGENTS.md` requires `$freecad-engineering` for
-FreeCAD model tasks. The Skill's front-matter description also supports implicit
-routing.
-
-For clients that do not implement Codex Skills, read the same file directly.
-The MCP server exposes the complete Skill bundle even when installed from a
-wheel, with the entrypoint at:
+For repository-aware agents, activate `$freecad-engineering` for FreeCAD
+engineering tasks. Clients without repository Skill support can read the same
+entrypoint through MCP:
 
 ```text
 freecad://skills/freecad-engineering
 ```
 
-The bundle manifest is available at:
+The complete URI manifest is available at:
 
 ```text
 freecad://skills/freecad-engineering/bundle
 ```
 
-All relative Skill files preserve their repository paths beneath that URI, for
-example:
+## Routing model
+
+The routes are composable. Input source and manufacturing family are separate
+classification dimensions. For example, a bent part reconstructed from a
+drawing uses both:
 
 ```text
-freecad://skills/freecad-engineering/references/drawing-reconstruction.md
-freecad://skills/freecad-engineering/references/sketch-construction.md
-freecad://skills/freecad-engineering/agents/openai.yaml
+references/model-from-drawing.md
+references/sheet-metal-parts.md
 ```
 
-## Contents
+Existing-model edits choose exactly one history route after inspecting the
+model:
 
-The Skill covers:
+```text
+references/edit-with-history.md
+references/edit-without-history.md
+```
 
-- selective MCP prompt/resource discovery without dumping the global client
-  tool registry;
-- stock and dominant-process classification;
-- milling, turning, and sheet-metal modeling strategies, including flat-pattern/developed-blank reconstruction;
-- editable Body/Sketch/PartDesign structure;
-- feature dependency/order guidance;
-- drawing-view identification, FreeCAD plane/axis mapping, and dimension-axis evidence;
-- saved inventories of every explicit non-starred source dimension, classified
-  as driving, verification, or unresolved;
-- ordinate/baseline datum preservation and a mandatory control dimension-chain
-  check before global-coordinate conversion;
-- mandatory same-view `compare_images` checkpoints after major features and
-  before patterning a seed;
-- sketch arc construction by endpoints/radius and by tangent fillet between lines;
-- straight-lines-first sketch construction, semantic constraint selection,
-  explicit B-spline gating, and outer/hole/intersection topology checks;
-- flat-pattern feature-group gates with numerical checks before visual checks,
-  a mutable interpretation manifest, and a blocking tangency-conflict rule;
-- coordinate provenance audits separating source-backed, derived, and
-  solver-lock point coordinates;
-- the 50% ceiling for Fix/Block constraints;
-- existing-model modification;
-- lightweight intermediate validation;
-- mandatory final `validate_parametric_model` reporting for driving dimensions,
-  separate measured evidence for verification dimensions, sketch-target scope,
-  and Spreadsheet connectivity/cleanliness.
+Engineering-drawing development has a reserved route but remains explicitly
+marked TODO until a dedicated drawing toolchain exists.
 
-Detailed content is intentionally not copied into this documentation page.
+## Common contract
+
+All geometry-changing workflows use ACT → OBSERVE → REACT, verify deterministic
+geometry evidence before relying on screenshots, and call
+`validate_parametric_model` before the final response. Imported/direct B-rep
+edits additionally use shape checkpoints when required by their reference.
+
+Detailed policy is not duplicated in prompts, resources, `AGENTS.md`, or this
+documentation page.

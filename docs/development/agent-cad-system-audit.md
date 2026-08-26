@@ -16,17 +16,17 @@ under-constrained construction sketch is not automatically a failed part.
 ## Current guidance architecture
 
 ```text
-Codex/Cline project bootstrap
+Repository-aware client or MCP connection
         ↓
-AGENTS.md or .clinerules (short routing rules)
+short router (`AGENTS.md` and/or MCP instructions)
         ↓
 .agents/skills/freecad-engineering/SKILL.md
         ↓
-optional Skill references for process-specific detail
+only the task reference(s) selected by the router
         ↓
-MCP tools + FreeCAD document
+MCP tool schemas + FreeCAD document
         ↓
-validate_parametric_model final structural report
+task checks + validate_parametric_model
 ```
 
 ### Single source of detailed policy
@@ -37,10 +37,11 @@ The canonical engineering guidance is:
 .agents/skills/freecad-engineering/SKILL.md
 ```
 
-The root `AGENTS.md` is intentionally short. It tells Codex when the Skill is
-mandatory and requires the final diagnostic. Cline receives the same routing
-through `.clinerules/freecad-modeling.md`. MCP prompts and resources also point
-to the Skill rather than maintaining independent copies of the workflow.
+The root `AGENTS.md` and protocol-level MCP instructions are intentionally short.
+MCP prompts and resources point to the Skill rather than maintaining independent
+copies of the workflow. Clients that understand repository Skills can activate it
+directly; other clients can read the same entrypoint through the MCP Skill
+resource.
 
 This reduces drift, but the delivery mechanisms are not equivalent:
 
@@ -61,9 +62,9 @@ all detailed engineering content lives in the Skill.
 
 The current policy is deliberately **not** a rigid state machine. The agent may
 choose standard tools, `execute_python`, `safe_execute`, or `run_macro` according
-to the task. The required outcome is normally a native editable FreeCAD model
-with a meaningful Body/Sketch/PartDesign history, unless the user explicitly
-requests a disposable direct B-rep/imported-shape workflow.
+to the task. The required representation depends on the task: new models and history-preserving
+edits should retain native design intent when practical, while local edits to
+history-less imported solids may correctly remain direct B-rep geometry.
 
 The Skill first classifies:
 

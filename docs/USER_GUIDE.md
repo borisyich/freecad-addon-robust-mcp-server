@@ -816,7 +816,7 @@ Next, use freecad-mcp and 3D model the part.
 IMPORTANT:
 1. The 3D model must be parametric for easy editing.
 2. Use the "act-observe-reaction" engineering cycle.
-For a full description of the work and available skills, please refer to the file path\to\freecad-addon-robust-mcp-server\AGENTS.md.
+For the engineering workflow router, see `.agents/skills/freecad-engineering/SKILL.md`.
 Also, use the MCP resources and prompts – they describe many useful and important things for a design engineer.
 3. Verify every step of your work.
 4. The default safe_execute and execute_python tools are not required. Use them only in cases where you cannot complete the task using other standard mcp tools.

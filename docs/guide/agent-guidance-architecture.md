@@ -1,105 +1,62 @@
 # Agent guidance architecture
 
-The project uses one detailed engineering policy and small client-specific
-routers. This prevents the same workflow from drifting across prompts,
-resources, and instruction files.
+The project uses one engineering Skill bundle and thin delivery layers. The goal
+is to keep workflow policy out of MCP initialization and tool metadata.
 
 ## Source of truth
 
 ```text
 .agents/skills/freecad-engineering/
-├── SKILL.md
-├── references/
-└── agents/openai.yaml
+├── SKILL.md                 # router + common contract
+├── references/              # one workflow file per target task
+└── agents/openai.yaml       # routing metadata
 ```
 
-`SKILL.md` contains the modeling policy: stock/process classification,
-parametric structure, milling, turning, sheet-metal strategy, drawing
-reconstruction, model modification, validation, and completion criteria.
+## What the MCP server sends at initialization
+
+With this repository's current `mcp>=1.25,<2` protocol path, the MCP `initialize`
+response contains only the short `MCP_INSTRUCTIONS` string from
+`src/freecad_mcp/server.py`. It points to the engineering Skill and the final
+validator; it does not embed the Skill or any reference file. Revisit this
+section when migrating to a newer MCP protocol/SDK discovery model.
+
+Prompts and resources are registered capabilities. Their contents are returned
+only when a client explicitly reads/invokes them. Likewise, tool schemas are
+returned through `tools/list`; many clients choose to load that list early, but
+that is client behavior rather than part of the Skill payload.
 
 ## Delivery layers
 
-1. **`AGENTS.md`** — short Codex router. Codex reads it before work and it tells
-   the agent to activate `$freecad-engineering` for FreeCAD model tasks.
-2. **`.clinerules/freecad-modeling.md`** — short Cline router to the same Skill.
-3. **Skill metadata** — the `name` and `description` route relevant tasks into
-   the full Skill without loading the full policy for unrelated repository work.
-4. **`freecad://skills/freecad-engineering`** — MCP resource that reads the same
-   repository `SKILL.md` when that file is available; it is not a copied second policy.
-5. **Prompts** — lightweight task context plus a route to the Skill.
-6. **Tools** — perform deterministic operations and diagnostics. In particular,
-   `validate_parametric_model` reports the actual FreeCAD document structure.
+1. **`MCP_INSTRUCTIONS`** — minimal protocol-level router.
+2. **`AGENTS.md`** — minimal repository-aware router.
+3. **Skill metadata** — allows implicit task routing where supported.
+4. **`freecad://skills/freecad-engineering`** — same canonical `SKILL.md` through MCP.
+5. **Skill reference resources** — loaded only for the selected task.
+6. **Prompts** — compact compatibility routers; no duplicate engineering policy.
+7. **Tool schemas** — authoritative operation contracts.
+8. **`freecad://capabilities`** — compact discovery index, not a second tool manual.
 
-Protocol-level `MCP_INSTRUCTIONS` is a minimal router. The MCP protocol delivers
-it once during initialization, but some clients flatten or repeat it alongside
-each selected tool. Keeping it below 800 bytes prevents that client behavior from
-multiplying a full engineering policy across tool declarations. Tool descriptions
-contain only the first concise purpose paragraph. Exact typed arguments remain in
-JSON Schema, while cosmetic schema `title` fields are removed to keep
-`tools/list` within a practical context budget. Full workflows and
-large-response warnings belong in documentation, resources, prompts, and the
-Skill.
+## Selective loading
 
-## Selective client discovery
+For a CAD task:
 
-Client-side discovery must not print every entry matching broad terms such as
-`resource`, `prompt`, or `mcp` from a global `ALL_TOOLS` registry. Such a query
-includes unrelated platform tools and can be much larger than FreeCAD's own
-`tools/list` response.
+1. read/activate `freecad://skills/freecad-engineering`;
+2. classify the task using its router;
+3. read only the selected reference file(s);
+4. inspect exact tool schemas only when needed.
 
-Use the canonical server ID `freecad-mcp`, list prompt/resource names first,
-then read or invoke only the item required for the current workflow. Start with
-`freecad://skills/freecad-engineering`; use a workflow resource or
-`freecad_guidance(task_type=...)` only when the task needs that narrower
-guidance. When inspecting tools in a client registry, filter by an exact tool
-name or the `mcp__freecad_mcp__` namespace and output a compact count/size
-summary instead of complete schemas.
+Do not preload the complete Skill bundle, all prompts, the capability index, and
+all workflow resources at once. They overlap by purpose and waste context.
 
-If a client does not expose native `prompts/list` or `prompts/get` controls, use
-the discoverable `get_freecad_prompt` tool. It delegates to the same registered
-FastMCP prompts; it does not maintain a second prompt catalog or read source files.
+## Compatibility prompts/resources
 
-## Regression budgets
+Legacy prompt names and workflow resources remain registered so existing clients
+do not break, but they now route to the canonical Skill instead of carrying
+large standalone guides.
 
-The server does not truncate tool descriptions at runtime. Instead, tests guard
-the actual protocol and compact-response sizes:
+## Tool-registry budget
 
-- protocol-level `MCP_INSTRUCTIONS`: less than 800 bytes;
-- complete compact `tools/list` payload: less than 113 KB;
-- aggregate tool descriptions: less than 10 KB;
-- largest single serialized tool definition: less than 8 KB;
-- representative compact `inspect_object` and `get_sketch_info` responses: less
-  than 4 KB;
-- representative compact `validate_parametric_model` and
-  `edit_sketch_constraints` responses: less than 8 KB.
-
-These are regression budgets for compact/default modes, not clipping rules.
-Explicit topology, full validation, and paged sketch detail may be larger.
-
-## What is mandatory
-
-For any task that creates or changes FreeCAD geometry:
-
-- activate/read the Skill before modeling;
-- follow the first rule for every engineer: feedback loop (ACT → OBSERVE → REACT);
-- use any appropriate tool, including `execute_python`, `safe_execute`, or
-  `run_macro`, while preserving the Skill's editable/parametric expectations;
-- call `validate_parametric_model` immediately before the final user-facing
-  response and summarize its significant findings.
-
-This is an instruction-level requirement. MCP cannot prevent a client from
-emitting a premature final text response, so the server also makes the final
-validator easy to discover through tool descriptions, prompts, resources, and
-capabilities.
-
-## Avoiding duplication
-
-Detailed policy belongs only in the Skill. Other files may contain:
-
-- a path/URI to the Skill;
-- a one-sentence activation rule;
-- tool-specific contracts;
-- factual diagnostics or API documentation.
-
-Do not copy complete process descriptions into `AGENTS.md`, prompts, resources,
-or general documentation.
+The server keeps tool descriptions to the concise purpose paragraph, removes
+cosmetic schema titles, and leaves exact typed arguments in JSON Schema. This is
+important because clients often load `tools/list` eagerly and the tool registry
+is typically a larger startup-context cost than `MCP_INSTRUCTIONS` itself.

@@ -1,33 +1,7 @@
-"""MCP prompt templates for FreeCAD.
+"""Compact MCP prompt routers for FreeCAD engineering tasks.
 
-This package contains reusable prompt templates for common FreeCAD tasks.
-Prompts guide users through complex workflows and provide best practices.
-
-Available prompts:
-    Session and Engineering Workflows:
-        - freecad_startup: Session bootstrap and task router
-        - reproduce_from_drawing: Route drawing-to-model tasks to the engineering Skill
-        - modify_existing_model: Existing-model modification workflow
-
-    Design Workflows:
-        - design_part: Guided parametric part design
-        - create_sketch_guide: 2D sketch creation
-        - boolean_operations_guide: Shape combination
-
-    Export/Import:
-        - export_guide: Export to various formats
-        - import_guide: Import from various formats
-
-    Analysis:
-        - analyze_shape: Shape geometry analysis
-        - debug_model: Model troubleshooting
-
-    Macro Development:
-        - macro_development: Macro creation guide
-        - python_api_reference: API quick reference
-
-    Troubleshooting:
-        - troubleshooting: General issue resolution
+Detailed engineering workflow policy lives in the ``freecad-engineering`` Skill;
+registered prompts provide compatibility entrypoints and operation pointers.
 """
 
 from freecad_mcp.prompts.freecad import register_prompts

@@ -1,9 +1,8 @@
-"""Shared MCP guidance identifiers and checkpoint vocabulary.
+"""Shared identifiers and compact routing text for FreeCAD engineering guidance.
 
-Detailed engineering policy lives in the repository skill at
-``.agents/skills/freecad-engineering/SKILL.md``. This module intentionally keeps
-only short routing text and machine-consumed checkpoint constants so prompts,
-resources, and client instruction files do not maintain duplicate workflows.
+Detailed engineering policy lives only in the canonical repository skill bundle
+under ``.agents/skills/freecad-engineering``. MCP instructions, prompts and
+resources should route to that bundle rather than duplicate its workflows.
 """
 
 from __future__ import annotations
@@ -23,12 +22,13 @@ ENGINEERING_SKILL_BUNDLE_RESOURCE_URI: Final[str] = (
 )
 ENGINEERING_SKILL_AGENT_METADATA_FILE: Final[str] = "agents/openai.yaml"
 ENGINEERING_SKILL_REFERENCE_FILES: Final[tuple[str, ...]] = (
-    "drawing-reconstruction.md",
-    "manufacturing-strategies.md",
-    "sheet-metal-flat-patterns.md",
-    "sketch-construction.md",
-    "source-notes.md",
-    "validation-and-editability.md",
+    "model-from-text.md",
+    "model-from-drawing.md",
+    "machined-and-additive-parts.md",
+    "sheet-metal-parts.md",
+    "edit-without-history.md",
+    "edit-with-history.md",
+    "engineering-drawings.md",
 )
 FINAL_PARAMETRIC_VALIDATION_TOOL: Final[str] = "validate_parametric_model"
 
@@ -74,53 +74,33 @@ DISCREPANCY_LEDGER_FIELDS: Final[tuple[str, ...]] = (
     "proposed_reaction",
 )
 
-_SKILL_ROUTER = f"""# Canonical FreeCAD engineering policy
+_SKILL_ROUTER: Final[str] = f"""Use `${ENGINEERING_SKILL_NAME}` for FreeCAD
+engineering work. Read `{ENGINEERING_SKILL_RESOURCE_URI}` first, then only the
+reference file(s) selected by its task router. Detailed workflow policy belongs
+in the Skill bundle, not in MCP prompts.
 
-Use the `${ENGINEERING_SKILL_NAME}` repository skill before operating FreeCAD on
-a mechanical model. Its canonical file is `{ENGINEERING_SKILL_RELATIVE_PATH}`;
-the same text is available through `{ENGINEERING_SKILL_RESOURCE_URI}`.
-
-The skill covers stock/process classification, native editable parametric
-structure, milling/turning/sheet-metal strategies, drawing reconstruction,
-model modification, lightweight verification, and completion criteria.
-
-After any model creation or geometry change, call
-`{FINAL_PARAMETRIC_VALIDATION_TOOL}` immediately before the final user-facing
-response and summarize its significant findings. The report is informative, not
-a rigid pass/fail workflow. For drawing/sketch reconstruction, first save every
-explicit non-starred source dimension under a stable identifier and classify it
-as driving, verification, or unresolved. Pass only the complete
-driving-identifier list as `required_dimension_names`; check every verification
-dimension deterministically and retain its evidence.
-
-When the deliverable is a sketch rather than a final solid, pass
-`target={{"kind":"sketch","name":"..."}}` so required dimensions are traced to
-that sketch's non-construction geometry and Body/solid/Tip state is out of scope.
-
-`execute_python`, `safe_execute`, and `run_macro` remain available. Their use
-does not waive editable/parametric model expectations.
+After geometry changes, verify the requested result and run
+`{FINAL_PARAMETRIC_VALIDATION_TOOL}` before the final response. For imported or
+direct B-rep edits, use shape checkpoints as specified by the selected reference.
 """
 
 DRAWING_RECONSTRUCTION_WORKFLOW: Final[str] = (
-    _SKILL_ROUTER + "\nFor drawing reconstruction, also read the skill section "
-    "'Reconstruct from drawings or images' and its referenced guidance. "
-    "Use `compare_images` after every major feature and before patterning a "
-    "single seed element.\n"
+    _SKILL_ROUTER
+    + "\nFor drawing reconstruction read "
+    f"`{ENGINEERING_SKILL_RESOURCE_URI}/references/model-from-drawing.md` and "
+    "the applicable manufacturing reference.\n"
 )
 
 MODEL_MODIFICATION_WORKFLOW: Final[str] = (
-    _SKILL_ROUTER + "\nFor an existing model, also read the skill section "
-    "'Modify existing models' and inspect the current history before editing.\n"
+    _SKILL_ROUTER
+    + "\nFor model modification, inspect whether editable history exists, then read "
+    f"`{ENGINEERING_SKILL_RESOURCE_URI}/references/edit-with-history.md` or "
+    f"`{ENGINEERING_SKILL_RESOURCE_URI}/references/edit-without-history.md`.\n"
 )
 
 VISUAL_CHECKPOINT_PROTOCOL: Final[str] = (
     _SKILL_ROUTER
-    + "\nFollow the Skill's ACT → OBSERVE → REACT loop. Before modeling from a "
-    "drawing, establish the front/top/side view map and its FreeCAD XZ/XY/YZ "
-    "plane and normal-axis correspondence. After every major feature, compare "
-    "the equivalent source and candidate views with `compare_images`; creating "
-    "a screenshot alone is not a completed visual checkpoint. Compare a single "
-    "seed feature before applying any pattern. If one pair is uncertain, compare "
-    "every principal target view available before continuing; a formal checkpoint "
-    "ledger remains optional.\n"
+    + "\nUse visual comparison only where geometry/orientation/source correspondence "
+    "cannot be established deterministically. Drawing reconstruction has its own "
+    "mandatory view-comparison rules in `model-from-drawing.md`.\n"
 )

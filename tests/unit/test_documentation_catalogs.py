@@ -124,50 +124,26 @@ def test_every_sheet_metal_reference_example_is_live_tested() -> None:
     }
 
 
-def test_freecad_engineering_skill_covers_flat_pattern_reconstruction() -> None:
+def test_freecad_engineering_skill_routes_target_task_files() -> None:
     skill_path = ROOT / ".agents/skills/freecad-engineering/SKILL.md"
-    reference_path = (
-        ROOT
-        / ".agents/skills/freecad-engineering/references"
-        / "sheet-metal-flat-patterns.md"
-    )
-
     skill = skill_path.read_text(encoding="utf-8")
-    reference = reference_path.read_text(encoding="utf-8")
-    normalized_skill = " ".join(skill.split())
-    normalized_reference = " ".join(reference.split())
+    reference_dir = skill_path.parent / "references"
+    expected = {
+        "model-from-text.md",
+        "model-from-drawing.md",
+        "machined-and-additive-parts.md",
+        "sheet-metal-parts.md",
+        "edit-without-history.md",
+        "edit-with-history.md",
+        "engineering-drawings.md",
+    }
 
-    assert reference_path.exists()
-    assert "references/sheet-metal-flat-patterns.md" in skill
-
-    # The main Skill must route the agent through the essential reconstruction
-    # decisions, not merely mention sheet metal as a supported process.
-    for concept in (
-        "manufacturing representation rather than an orthographic view",
-        "panel regions",
-        "fixed/moving panels",
-        "relative to the viewed blank face",
-        "profile radii",
-        "rotate with those panels",
-        "apply bend compensation twice",
-        "formed state",
-        "unfolded state",
-    ):
-        assert concept in normalized_skill
-
-    # The detailed reference must provide enough information to derive a formed
-    # model from a blank without conflating flat and world coordinates.
-    for concept in (
-        "Separate flat and formed dimension domains",
-        "Build a panel-and-bend graph",
-        "neutral radius Rn = Ri + K * t",
-        "bend allowance BA = theta * (Ri + K * t)",
-        "A hole belongs to a panel",
-        "constant-thickness quarter-annular",
-        "Deep drawing, stretch forming",
-        "Never claim a manufacturing-correct flat pattern",
-    ):
-        assert concept in normalized_reference
+    assert {path.name for path in reference_dir.glob("*.md")} == expected
+    for filename in expected:
+        assert f"references/{filename}" in skill
+    assert "Creation routes are composable" in skill
+    assert "model-from-drawing.md` and" in skill
+    assert "sheet-metal-parts.md" in skill
 
 
 def test_freecad_engineering_skill_has_codex_routing_metadata() -> None:
@@ -178,67 +154,59 @@ def test_freecad_engineering_skill_has_codex_routing_metadata() -> None:
         ROOT / ".agents/skills/freecad-engineering/agents/openai.yaml"
     ).read_text(encoding="utf-8")
     assert skill.startswith("---\nname: freecad-engineering\n")
+    assert "ACT → OBSERVE → REACT" in skill
     assert "validate_parametric_model" in skill
     assert "allow_implicit_invocation: true" in metadata
     assert 'value: "freecad"' in metadata
 
 
-def test_freecad_engineering_skill_requires_universal_local_edit_feedback() -> None:
-    skill = (ROOT / ".agents/skills/freecad-engineering/SKILL.md").read_text(
-        encoding="utf-8"
-    )
-    normalized_skill = " ".join(skill.split())
+def test_historyless_edit_reference_requires_local_delta_verification() -> None:
+    reference = (
+        ROOT
+        / ".agents/skills/freecad-engineering/references/edit-without-history.md"
+    ).read_text(encoding="utf-8")
 
     for concept in (
-        "Local edit feedback pattern",
-        "OBSERVE → EDIT → RE-OBSERVE → RESTORE/REWORK",
-        "holes and bores, bosses, pocket",
+        "capture_shape_checkpoint",
+        "compare_shape_checkpoint",
+        "select_subshapes",
         "inspect_subshape_neighborhood",
-        "at least one face-adjacency hop",
-        "A selected face is only the edit handle",
-        "Reselect transient `FaceN` references",
-        "Undo/abort the causal operation",
-        "imported STEP/static B-reps",
-    ):
-        assert concept in normalized_skill
-
-
-def test_freecad_engineering_skill_covers_sketch_design_intent() -> None:
-    skill = (ROOT / ".agents/skills/freecad-engineering/SKILL.md").read_text(
-        encoding="utf-8"
-    )
-    reference_path = (
-        ROOT / ".agents/skills/freecad-engineering/references/sketch-construction.md"
-    )
-    reference = reference_path.read_text(encoding="utf-8")
-
-    assert "references/sketch-construction.md" in skill
-    assert 'target={"kind":"sketch"' in skill
-    for concept in (
-        "0 DoF",
-        "absolute X/Y coordinates",
-        "source_backed",
-        "verification",
-        "add_bspline",
-        "datum/reference",
-        "control dimension chain",
-        "fake geometry",
-    ):
-        assert concept in skill
-    for concept in (
-        "straight segments first",
-        "tangent_fillet",
-        "Tangent + current geometry conflicts",
-        "coarse external contour",
-        "deterministic dimension checks",
-        "measure_bounding_box",
-        'detail_level="geometry"',
-        '"role": "verification"',
-        '"role": "driving"',
-        "solver_lock",
-        "close at least one control chain",
-        "outer_wire_count == 1",
-        "fully_constrained",
-        "Never add fake geometry",
+        "defeature_faces",
+        "move_faces",
+        "Do not reconstruct fake history",
+        "smallest local geometric change",
     ):
         assert concept in reference
+
+
+def test_drawing_and_sheet_metal_references_preserve_key_reasoning() -> None:
+    drawing = (
+        ROOT / ".agents/skills/freecad-engineering/references/model-from-drawing.md"
+    ).read_text(encoding="utf-8")
+    sheet = (
+        ROOT / ".agents/skills/freecad-engineering/references/sheet-metal-parts.md"
+    ).read_text(encoding="utf-8")
+
+    for concept in (
+        "view ↔ model-axis contract",
+        "Front/Rear | XZ",
+        "Top/Bottom | XY",
+        "Left/Right | YZ",
+        "driving",
+        "verification",
+        "compare_images",
+        "first valid dominant-form candidate",
+    ):
+        assert concept in drawing
+
+    for concept in (
+        "flat domain",
+        "formed domain",
+        "panel-and-bend plan",
+        "K-factor",
+        "create_sheet_metal_base",
+        "unfold_sheet_metal",
+        "deep-drawn",
+    ):
+        assert concept in sheet
+

@@ -426,14 +426,15 @@ class TestFreecadResources:
 
         assert "name: freecad-engineering" in result
         assert "validate_parametric_model" in result
-        assert "Milling" in result
-        assert "Turning" in result
-        assert "Sheet-metal" in result
-        assert "flat pattern/developed blank" in result
-        assert "fixed/moving panels" in result
+        assert "references/model-from-text.md" in result
+        assert "references/model-from-drawing.md" in result
+        assert "references/machined-and-additive-parts.md" in result
+        assert "references/sheet-metal-parts.md" in result
+        assert "references/edit-without-history.md" in result
+        assert "references/edit-with-history.md" in result
+        assert "references/engineering-drawings.md" in result
+        assert "Creation routes are composable" in result
         assert "required_dimension_names" in result
-        assert "compare_images" in result
-        assert "tangent_fillet" in result
 
     @pytest.mark.asyncio
     async def test_resource_engineering_skill_bundle_exposes_all_files(
@@ -476,7 +477,7 @@ class TestFreecadResources:
         assert 'display_name: "FreeCAD Engineering"' in metadata
 
         drawing_reference = await register_resources[
-            f"{ENGINEERING_SKILL_RESOURCE_URI}/references/drawing-reconstruction.md"
+            f"{ENGINEERING_SKILL_RESOURCE_URI}/references/model-from-drawing.md"
         ]()
         assert "drawing" in drawing_reference.lower()
 
@@ -499,10 +500,9 @@ class TestFreecadResources:
         result = await resource()
 
         assert "$freecad-engineering" in result
-        assert "Reconstruct from drawings or images" in result
+        assert "model-from-drawing.md" in result
+        assert "manufacturing reference" in result
         assert "validate_parametric_model" in result
-        assert "non-starred" in result
-        assert "compare_images" in result
 
     @pytest.mark.asyncio
     async def test_resource_model_modification_workflow(
@@ -512,7 +512,8 @@ class TestFreecadResources:
         result = await resource()
 
         assert "$freecad-engineering" in result
-        assert "Modify existing models" in result
+        assert "edit-with-history.md" in result
+        assert "edit-without-history.md" in result
 
     @pytest.mark.asyncio
     async def test_resource_capabilities(

@@ -59,18 +59,10 @@ logger = logging.getLogger(__name__)
 # This ID is stable for the lifetime of this server process
 INSTANCE_ID: str = str(uuid.uuid4())
 
-MCP_INSTRUCTIONS = """For mechanical-modeling tasks, use the canonical
-`$freecad-engineering` Skill (`freecad://skills/freecad-engineering`); its full
-MCP bundle is indexed at `freecad://skills/freecad-engineering/bundle`. Discover
-only the FreeCAD prompt/resource needed for the task and request compact or paged
-tool detail first. Use native MCP prompts when the client exposes them; otherwise
-call `get_freecad_prompt`.
-
-For geometry changes, follow the Skill's ACT -> OBSERVE -> REACT loop, use
-`capture_shape_checkpoint` and `compare_shape_checkpoint` around direct or
-imported-BRep edits, and call `validate_parametric_model` immediately before the
-final response. Tool contracts, prompts, resources, and the Skill contain the
-operation-specific policy.
+MCP_INSTRUCTIONS = """Use `$freecad-engineering` (`freecad://skills/freecad-engineering`) for
+FreeCAD engineering tasks and load only the references selected by its router.
+Use tool schemas for operation contracts. After geometry changes, verify the
+requested result and run `validate_parametric_model` before the final response.
 """
 
 
