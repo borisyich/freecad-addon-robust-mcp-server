@@ -87,11 +87,18 @@ model modification, lightweight verification, and completion criteria.
 After any model creation or geometry change, call
 `{FINAL_PARAMETRIC_VALIDATION_TOOL}` immediately before the final user-facing
 response and summarize its significant findings. The report is informative, not
-a rigid pass/fail workflow. For drawing/sketch reconstruction, first save every
-explicit non-starred source dimension under a stable identifier and classify it
-as driving, verification, or unresolved. Pass only the complete
-driving-identifier list as `required_dimension_names`; check every verification
-dimension deterministically and retain its evidence.
+a rigid pass/fail workflow. For any task that uses a drawing/sketch as geometry
+evidence, including reconstruction or an edit, first inventory every source
+view/detail/section that depicts part geometry, including apparently
+redundant/corroborative views, and save every explicit source dimension under
+a stable identifier. Preserve and interpret drafting markers such as an
+asterisk, parentheses, REF, or TYP; they never make an annotation optional. Each
+dimension must map to its source view and semantic geometric references and be
+classified as driving or verification; `source_issue` is exceptional and
+requires concrete source evidence. Never use `unresolved` as a terminal manifest
+role. Pass only the complete driving-ID list
+as `required_dimension_names`, then measure every driving and verification item
+between the same semantic elements in its reproduced source-view context.
 
 When the deliverable is a sketch rather than a final solid, pass
 `target={{"kind":"sketch","name":"..."}}` so required dimensions are traced to
@@ -103,24 +110,30 @@ does not waive editable/parametric model expectations.
 
 DRAWING_RECONSTRUCTION_WORKFLOW: Final[str] = (
     _SKILL_ROUTER + "\nFor drawing reconstruction, also read the skill section "
-    "'Reconstruct from drawings or images' and its referenced guidance. "
-    "Use `compare_images` after every major feature and before patterning a "
-    "single seed element.\n"
+    "'Reconstruct from drawings or images' and its referenced guidance. Before "
+    "modeling, inventory every source view and dimension. Use `compare_images` "
+    "after every major feature against the source views that expose that feature, "
+    "and before patterning a single seed element. Before final acceptance, "
+    "reproduce and compare every source-view manifest record one-to-one, including "
+    "sections/details/opposite-side views when present.\n"
 )
 
 MODEL_MODIFICATION_WORKFLOW: Final[str] = (
     _SKILL_ROUTER + "\nFor an existing model, also read the skill section "
-    "'Modify existing models' and inspect the current history before editing.\n"
+    "'Modify existing models' and inspect the current history before editing. "
+    "When a drawing/image supplies geometry evidence for the edit, also apply the "
+    "complete source-view/dimension manifest and final one-to-one view validation "
+    "rules from 'Reconstruct from drawings or images' to the edited model.\n"
 )
 
 VISUAL_CHECKPOINT_PROTOCOL: Final[str] = (
     _SKILL_ROUTER
     + "\nFollow the Skill's ACT → OBSERVE → REACT loop. Before modeling from a "
-    "drawing, establish the front/top/side view map and its FreeCAD XZ/XY/YZ "
-    "plane and normal-axis correspondence. After every major feature, compare "
-    "the equivalent source and candidate views with `compare_images`; creating "
-    "a screenshot alone is not a completed visual checkpoint. Compare a single "
-    "seed feature before applying any pattern. If one pair is uncertain, compare "
-    "every principal target view available before continuing; a formal checkpoint "
-    "ledger remains optional.\n"
+    "drawing, establish a complete manifest for every source view, including its "
+    "FreeCAD camera/section recipe and plane/normal correspondence when applicable. "
+    "After every major feature, compare the equivalent source/candidate views that "
+    "can expose that feature; creating a screenshot alone is not a completed visual "
+    "checkpoint. Compare a single seed feature before applying any pattern. Before "
+    "final acceptance, reproduce and compare every source-view manifest record "
+    "one-to-one. A formal checkpoint ledger remains optional.\n"
 )

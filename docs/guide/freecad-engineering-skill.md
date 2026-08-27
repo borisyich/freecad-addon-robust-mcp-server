@@ -50,13 +50,18 @@ The Skill covers:
 - milling, turning, and sheet-metal modeling strategies, including flat-pattern/developed-blank reconstruction;
 - editable Body/Sketch/PartDesign structure;
 - feature dependency/order guidance;
-- drawing-view identification, FreeCAD plane/axis mapping, and dimension-axis evidence;
-- saved inventories of every explicit non-starred source dimension, classified
-  as driving, verification, or unresolved;
+- complete source-view inventory, including opposite-side views, sections,
+  details, auxiliary/non-standard views, and their FreeCAD camera/section recipes;
+- saved inventories of every explicit source dimension, including annotations
+  with drafting markers such as an asterisk, parentheses, `REF`, or `TYP`, mapped
+  to source view and semantic geometry, classified as driving/verification or the
+  exceptional evidence-backed `source_issue` role; `unresolved` is not a terminal
+  manifest classification;
 - ordinate/baseline datum preservation and a mandatory control dimension-chain
   check before global-coordinate conversion;
-- mandatory same-view `compare_images` checkpoints after major features and
-  before patterning a seed;
+- same-view `compare_images` checkpoints for feature-relevant views during
+  modeling, plus exhaustive one-to-one comparison of every source-view manifest
+  record before final acceptance;
 - sketch arc construction by endpoints/radius and by tangent fillet between lines;
 - straight-lines-first sketch construction, semantic constraint selection,
   explicit B-spline gating, and outer/hole/intersection topology checks;
@@ -68,7 +73,8 @@ The Skill covers:
 - existing-model modification;
 - lightweight intermediate validation;
 - mandatory final `validate_parametric_model` reporting for driving dimensions,
-  separate measured evidence for verification dimensions, sketch-target scope,
-  and Spreadsheet connectivity/cleanliness.
+  plus same-view semantic measured evidence for every driving/verification
+  dimension, source-issue auditing, sketch-target scope, and Spreadsheet
+  connectivity/cleanliness.
 
 Detailed content is intentionally not copied into this documentation page.

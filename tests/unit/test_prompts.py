@@ -81,6 +81,10 @@ class TestFreecadPrompts:
         assert "$freecad-engineering" in result
         assert "required_dimension_names" in result
         assert "compare_images" in result
+        assert "every source-view manifest" in result
+        assert "source_issue" in result
+        assert "unresolved" in result
+        assert "terminal structured role" in result
 
     @pytest.mark.asyncio
     async def test_freecad_startup_contains_partdesign_guidance(
@@ -239,8 +243,12 @@ class TestFreecadPrompts:
         assert "$freecad-engineering" in result
         assert "Reconstruct from drawings or images" in result
         assert "validate_parametric_model" in result
-        assert "non-starred" in result
+        assert "every explicit source dimension" in result
+        assert "asterisk" in result
         assert "compare_images" in result
+        assert "every source view" in result
+        assert "one-to-one" in result
+        assert "source_issue" in result
         assert "drawing.png" in result
 
     @pytest.mark.asyncio
@@ -253,6 +261,8 @@ class TestFreecadPrompts:
         assert "$freecad-engineering" in result
         assert "Modify existing models" in result
         assert "validate_parametric_model" in result
+        assert "complete source-view/dimension manifest" in result
+        assert "one-to-one view validation" in result
         assert "part.FCStd" in result
 
     # =========================================================================

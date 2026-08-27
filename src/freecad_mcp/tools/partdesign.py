@@ -2284,6 +2284,21 @@ else:
         For PartDesign objects the source must be the current Body Tip. Passing
         the Body container itself is rejected; the tool never falls back to a
         standalone ``Part::Chamfer`` for a PartDesign source.
+
+        Args:
+            object_name: Name of the object to chamfer.
+            size: Equal-distance chamfer size.
+            edges: List of edge names to chamfer (e.g., ["Edge1", "Edge2"]).
+                Chamfers all edges if None.
+            name: Chamfer feature name. Auto-generated if None.
+            doc_name: Document containing the object. Uses active document if None.
+
+        Returns:
+            Success evidence, or a structured ``success=false`` diagnostic after
+            rollback. Failure diagnostics mirror ``fillet_edges`` and include
+            source shape type/solid count, selected edges, adjacent face surface
+            types, requested size, result state, per-edge trials, and suspect
+            edge/group information.
         """
         if size <= 0:
             raise ValueError("Chamfer size must be positive")
@@ -2312,6 +2327,57 @@ if body is None and str(getattr(obj, "TypeId", "")).startswith("PartDesign::"):
         " The tool will not switch to Part::Chamfer."
     )
 selected_edges = _validated_shape_subelement_names(obj, {edges!r}, "Edge")
+
+def _same_shape(first, second):
+    try:
+        return bool(first.isSame(second))
+    except Exception:
+        return first.isEqual(second)
+
+def _edge_context(shape, edge_names):
+    evidence = []
+    for edge_name in edge_names:
+        edge_index = int(edge_name[4:]) - 1
+        edge = shape.Edges[edge_index]
+        adjacent_faces = []
+        for face_index, face in enumerate(shape.Faces, 1):
+            if any(_same_shape(edge, face_edge) for face_edge in face.Edges):
+                adjacent_faces.append({{
+                    "name": f"Face{{face_index}}",
+                    "surface_type": type(getattr(face, "Surface", None)).__name__,
+                }})
+        evidence.append({{
+            "edge": edge_name,
+            "curve_type": type(getattr(edge, "Curve", None)).__name__,
+            "adjacent_faces": adjacent_faces,
+            "adjacent_face_types": [
+                item["surface_type"] for item in adjacent_faces
+            ],
+        }})
+    return evidence
+
+source_shape = getattr(obj, "Shape", None)
+source_shape_type = (
+    "Null" if source_shape is None or source_shape.isNull() else str(source_shape.ShapeType)
+)
+source_solid_count = (
+    0 if source_shape is None or source_shape.isNull() else len(source_shape.Solids)
+)
+edge_context = (
+    [] if source_shape is None or source_shape.isNull()
+    else _edge_context(source_shape, selected_edges)
+)
+base_diagnostic = {{
+    "source_feature": obj.Name,
+    "source_shape_type": source_shape_type,
+    "source_solid_count": source_solid_count,
+    "selected_edges": selected_edges,
+    "edge_context": edge_context,
+    "adjacent_face_types": {{
+        item["edge"]: item["adjacent_face_types"] for item in edge_context
+    }},
+    "requested_size": float({size!r}),
+}}
 if body is not None:
     if not _is_valid_single_solid_feature(obj):
         raise ValueError(f"Chamfer source is not one valid solid: {{obj.Name}}")
@@ -2319,6 +2385,7 @@ if body is not None:
 
 original_tip_name = getattr(body.Tip, "Name", None) if body is not None else None
 created_name = None
+validation = None
 doc.openTransaction("Chamfer Edges")
 try:
     chamfer_name = {name!r} or "Chamfer"
@@ -2341,32 +2408,93 @@ try:
     if not validation["ok"]:
         raise ValueError("Chamfer failed: " + "; ".join(validation["reasons"]))
     doc.commitTransaction()
-except Exception:
+except Exception as exc:
     try:
         doc.abortTransaction()
     finally:
         _cleanup_failed_partdesign_feature(
             doc, body, created_name, original_tip_name
         )
-    raise
+    try:
+        doc.recompute()
+    except Exception:
+        pass
 
-_result_ = {{
-    "name": chamfer.Name,
-    "label": chamfer.Label,
-    "type_id": chamfer.TypeId,
-    "validated": validation["ok"],
-    "shape_valid": validation["shape_valid"],
-    "solid_count": validation["solid_count"],
-    "tip_matches": validation["tip_matches"],
-    "status": validation["status"],
-    "result_volume": validation["result_volume"],
-    "source_feature": obj.Name,
-    "edges": selected_edges,
-}}
+    edge_trials = []
+    for edge_name in selected_edges:
+        edge_index = int(edge_name[4:]) - 1
+        trial = {{"edge": edge_name, "ok": False, "reason": None}}
+        try:
+            if not hasattr(obj.Shape, "makeChamfer"):
+                raise RuntimeError("Shape.makeChamfer is unavailable in this FreeCAD build")
+            trial_shape = obj.Shape.makeChamfer(
+                {size!r}, [obj.Shape.Edges[edge_index]]
+            )
+            trial["shape_valid"] = bool(
+                not trial_shape.isNull() and trial_shape.isValid()
+            )
+            trial["solid_count"] = (
+                0 if trial_shape.isNull() else len(trial_shape.Solids)
+            )
+            trial["ok"] = bool(
+                trial["shape_valid"] and trial["solid_count"] == 1
+            )
+            if not trial["ok"]:
+                trial["reason"] = "individual edge produced no valid single solid"
+        except Exception as trial_exc:
+            trial["reason"] = str(trial_exc)
+        edge_trials.append(trial)
+
+    failing_edges = [item["edge"] for item in edge_trials if not item["ok"]]
+    failing_edge_groups = []
+    if len(selected_edges) > 1 and not failing_edges:
+        failing_edge_groups.append({{
+            "edges": selected_edges,
+            "reason": "edges pass individually but fail as a combined chamfer group",
+        }})
+    result_state = validation or {{
+        "ok": False,
+        "reasons": [str(exc)],
+        "status": [],
+        "shape_valid": False,
+        "solid_count": 0,
+        "result_volume": None,
+        "tip_matches": body is None or body.Tip is obj,
+    }}
+    _result_ = {{
+        "success": False,
+        "operation": "chamfer_edges",
+        "failure": str(exc),
+        "rolled_back": True,
+        **base_diagnostic,
+        "result_state": result_state,
+        "edge_trials": edge_trials,
+        "failing_edges": failing_edges,
+        "failing_edge_groups": failing_edge_groups,
+    }}
+else:
+    _result_ = {{
+        "success": True,
+        "name": chamfer.Name,
+        "label": chamfer.Label,
+        "type_id": chamfer.TypeId,
+        "validated": validation["ok"],
+        "shape_valid": validation["shape_valid"],
+        "solid_count": validation["solid_count"],
+        "tip_matches": validation["tip_matches"],
+        "status": validation["status"],
+        "result_volume": validation["result_volume"],
+        "edges": selected_edges,
+        **base_diagnostic,
+        "result_state": validation,
+    }}
 """
         result = await bridge.execute_python(code)
         if result.success:
-            return require_valid_feature_result(result.result, "Chamfer")
+            payload = _validation_payload(result.result, "Chamfer")
+            if payload.get("success") is False:
+                return payload
+            return require_valid_feature_result(payload, "Chamfer")
         raise ValueError(result.error_traceback or "Chamfer failed")
 
     @mcp.tool()

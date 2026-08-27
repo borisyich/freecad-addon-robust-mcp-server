@@ -242,3 +242,59 @@ def test_freecad_engineering_skill_covers_sketch_design_intent() -> None:
         "Never add fake geometry",
     ):
         assert concept in reference
+
+
+def test_drawing_reconstruction_requires_complete_view_and_dimension_evidence() -> None:
+    """The canonical Skill must not regress to a few assumed views or unresolved IDs."""
+    skill = (ROOT / ".agents/skills/freecad-engineering/SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    reference = (
+        ROOT
+        / ".agents/skills/freecad-engineering/references/drawing-reconstruction.md"
+    ).read_text(encoding="utf-8")
+    sketch_reference = (
+        ROOT / ".agents/skills/freecad-engineering/references/sketch-construction.md"
+    ).read_text(encoding="utf-8")
+
+    normalized_skill = " ".join(skill.split())
+    normalized_reference = " ".join(reference.split())
+    normalized_sketch = " ".join(sketch_reference.split())
+
+    for text in (normalized_skill, normalized_reference, normalized_sketch):
+        assert "non-starred" not in text
+        assert "except dimensions marked with an asterisk" not in text
+
+    for concept in (
+        "every graphical source view that carries geometric evidence",
+        "stable `view_id`",
+        "every record in the source view manifest",
+        "opposite-side views",
+        "same semantic elements",
+        "Every non-`source_issue` dimension",
+        "never use `unresolved` as a terminal dimension classification",
+        "a marker is not a reason to omit the dimension",
+        "not** a whitelist of drawing views",
+    ):
+        assert concept in normalized_skill
+
+    for concept in (
+        "Inventory every source view before interpreting dimensions",
+        "Every view-manifest record remains a required final validation target",
+        "measure between the same semantic model elements",
+        "Before final acceptance, iterate through **every view-manifest record**",
+        "The only exceptional terminal role is `source_issue`",
+        "it is not a reason to omit the annotation",
+        "It is not a whitelist of source views",
+    ):
+        assert concept in normalized_reference
+
+    for concept in (
+        "Do not use `unresolved`, `unknown`, or a similar terminal bucket",
+        '"source_view_id": "V2"',
+        '"target_elements"',
+        '"measurement_semantics"',
+        "every non-`source_issue` item, including driving items",
+        "they do not make the dimension optional",
+    ):
+        assert concept in normalized_sketch

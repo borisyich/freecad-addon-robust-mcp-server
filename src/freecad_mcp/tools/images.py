@@ -333,11 +333,11 @@ def _tile_boxes(
 
 
 def _resize_tile(image: PILImage.Image, target_long_side: int) -> tuple[PILImage.Image, float]:
-    """Resize a crop so its long side receives a predictable visual budget."""
+    """Downscale a crop to the requested long-side cap without upscaling it."""
     current = max(image.size)
     if current <= 0:
         raise ValueError("Tile has invalid dimensions")
-    scale = target_long_side / current
+    scale = min(1.0, target_long_side / current)
     new_size = (
         max(1, round(image.width * scale)),
         max(1, round(image.height * scale)),
@@ -462,12 +462,12 @@ def register_image_tools(mcp: Any) -> None:
         save_to_disk: bool = True,
         output_dir: str | None = None,
     ) -> CallToolResult:
-        """Deliver a drawing overview plus enlarged, labelled, overlapping tiles.
+        """Deliver a drawing overview plus labelled, overlapping source-resolution tiles.
 
         Use this before reconstructing a part from a dense drawing. Whole-sheet
         images are often downscaled by a VLM, making dimensions and small features
-        occupy too few visual tokens. Cropping does not invent information, but it
-        gives each source region a much larger share of the model's visual budget.
+        occupy too few visual tokens. Cropping does not invent information. Tiles
+        retain their native crop resolution unless they exceed the configured cap.
 
         The result contains an optional numbered overview followed by ordered
         text/image pairs. Every text block identifies the tile number, grid
@@ -480,8 +480,9 @@ def register_image_tools(mcp: Any) -> None:
             rows: Grid rows, from 1 to 4.
             columns: Grid columns, from 1 to 4. Total tiles may not exceed 9.
             overlap_percent: Shared context around adjacent cells, from 0 to 25.
-            tile_max_dimension: Long-side pixel size delivered for every tile,
-                from 512 to 2048. Smaller crops are upscaled; larger crops downscaled.
+            tile_max_dimension: Maximum long-side pixel size for every tile,
+                from 512 to 2048. Larger crops are downscaled; smaller crops are
+                never upscaled.
             include_overview: Include a numbered whole-image overview first.
             save_to_disk: Save overview and tiles so later `compare_images` calls
                 can use an exact reference fragment. Defaults to True.
@@ -544,7 +545,7 @@ def register_image_tools(mcp: Any) -> None:
                 labelled_images.append(
                     (
                         "REFERENCE OVERVIEW. Red numbered rectangles identify the "
-                        f"{len(boxes)} enlarged fragments that follow. Inspect the "
+                        f"{len(boxes)} source fragments that follow. Inspect the "
                         "overview for global layout only; read dimensions and local "
                         "features from the detail images.",
                         _encode_png(overview),
@@ -575,7 +576,7 @@ def register_image_tools(mcp: Any) -> None:
                     saved_path = _normalize_path_for_metadata(target)
 
                 instruction = (
-                    f"ENLARGED FRAGMENT {index}/{len(boxes)} from "
+                    f"SOURCE FRAGMENT {index}/{len(boxes)} from "
                     f"{resolved.name}; grid row {row + 1}/{rows}, column "
                     f"{column + 1}/{columns}; source rectangle "
                     f"x={left}:{right}, y={top}:{bottom}; overlap="
@@ -630,7 +631,7 @@ def register_image_tools(mcp: Any) -> None:
                     "indices before choosing the modeling strategy."
                 ),
                 "limitations": [
-                    "Upscaling does not recover detail absent from the source pixels.",
+                    "Tiles are never upscaled; insufficient source detail remains insufficient.",
                     "Grid crops improve visual allocation but do not provide OCR or CAD semantics.",
                     "Features crossing tile boundaries must be reconciled using overlap and overview.",
                 ],
@@ -657,18 +658,19 @@ def register_image_tools(mcp: Any) -> None:
 
         This does not claim pixel-perfect alignment or compute a correctness score;
         it gives the vision model both images in one unambiguous visual context.
-        When reconstructing from a drawing, use it after every major feature and
-        before accepting a seed feature for any linear, polar, mirror, or combined
+        When reconstructing from a drawing, use it after every major feature
+        against the source view(s) that directly expose that feature and before
+        accepting a seed feature for any linear, polar, mirror, or combined
         pattern. A pattern multiplies a seed error, so verify the single element
         first and only then create the repetition.
-        If the reference is a complete drawing sheet, crop the matching target
-        view first; comparing a full sheet with one model screenshot is weak evidence.
-        One apparently good pair does not prove depth or axis orientation. If the
-        similarity is uncertain, or the current projection may hide a mismatch,
-        repeat the comparison for every principal target view available: front,
-        matching left/right side, top, then isometric. Describe concrete
-        discrepancies and rework the causal feature. ``evaluate_model_checkpoint``
-        remains available when a formal ledger is useful, but is not mandatory.
+        If the reference is a complete drawing sheet, use the matching target view;
+        comparing a full sheet with one model screenshot is weak evidence. One
+        apparently good pair does not prove depth, opposite-face geometry, or axis
+        orientation. Before final acceptance, reproduce and compare every source
+        view/detail/section recorded in the drawing view manifest one-to-one.
+        Describe concrete discrepancies and rework the causal feature.
+        ``evaluate_model_checkpoint`` remains available when a formal ledger is
+        useful, but is not mandatory.
 
         Args:
             reference_path: Drawing or expected reference image.
@@ -766,10 +768,11 @@ def register_image_tools(mcp: Any) -> None:
                         "dimensions_supported_by_this_view",
                     ],
                     "when_uncertain": (
-                        "Do not accept the model from this pair alone. Repeat "
-                        "same-view comparisons for every principal target view "
-                        "available: front, matching left/right side, top, then "
-                        "isometric. Reconcile all views before continuing."
+                        "Do not accept the model from this pair alone. Compare "
+                        "every additional source view/detail/section that can "
+                        "expose the suspected mismatch. Before final acceptance, "
+                        "reproduce and compare every source-view manifest record "
+                        "one-to-one, regardless of whether earlier pairs looked correct."
                     ),
                     "optional_ledger_fields": list(DISCREPANCY_LEDGER_FIELDS),
                     "optional_decision_values": ["continue", "rework"],

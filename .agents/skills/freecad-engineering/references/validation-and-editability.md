@@ -73,11 +73,26 @@ creating the pattern.
 ## Source dimensions and Spreadsheet cleanliness
 
 For drawing/sketch input, call the final validator with the complete saved list
-of non-starred source-dimension identifiers. Each identifier must be used by a
-named driving sketch constraint or by a Spreadsheet alias that connects directly
-or transitively to an expression that influences the active final solid. A link
-to construction-only geometry, an inactive sketch, a datum/helper object, or
-metadata is not sufficient.
+of `driving` source-dimension identifiers. Each driving identifier must be used
+by a named driving sketch constraint or by a Spreadsheet alias that connects
+directly or transitively to an expression that influences the active final
+solid. A link to construction-only geometry, an inactive sketch, a datum/helper
+object, or metadata is not sufficient.
+
+This structural trace is only one half of dimension validation. The saved source
+manifest must also contain every dimension. For every `driving` and
+`verification` item, reproduce its recorded source view/section/detail context
+and measure the finished model between the same semantic elements using the same
+dimension semantics. Retain expected, observed, tolerance, pass/fail, and tool
+evidence. A parameter path that drives the model does not prove that the final
+geometry matches the source relationship.
+
+`source_issue` is an exceptional source-data classification, not a convenience
+bucket. It is allowed only with concrete source evidence, attempted
+interpretations, and a specific reason such as irreconcilable source conflict,
+malformed/orphaned annotation, missing geometric referents, or persistent
+illegibility at the best useful source resolution. Do not use `unresolved` as a
+terminal dimension role.
 
 Do not add construction points or other non-profile geometry solely to bind
 otherwise unused aliases. Such a model may look structurally connected while

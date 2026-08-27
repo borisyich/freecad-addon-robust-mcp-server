@@ -1263,10 +1263,53 @@ class TestPartDesignTools:
 
         assert result["name"] == "Chamfer"
         generated_code = mock_bridge.execute_python.await_args.args[0]
+        assert '"source_shape_type": source_shape_type' in generated_code
+        assert '"source_solid_count": source_solid_count' in generated_code
+        assert '"adjacent_face_types": {' in generated_code
+        assert '"requested_size": float(1.0)' in generated_code
+        assert "obj.Shape.makeChamfer" in generated_code
+        assert '"failing_edge_groups": failing_edge_groups' in generated_code
         assert '_require_current_body_tip(body, obj, "Chamfer")' in generated_code
         assert "_validate_single_solid_feature" in generated_code
         assert "_cleanup_failed_partdesign_feature" in generated_code
         mock_bridge.execute_python.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_chamfer_edges_returns_structured_failure_diagnostics(
+        self, register_tools, mock_bridge
+    ):
+        mock_bridge.execute_python = AsyncMock(
+            return_value=ExecutionResult(
+                success=True,
+                result={
+                    "success": False,
+                    "failure": "Chamfer failed: result shape is null",
+                    "rolled_back": True,
+                    "source_shape_type": "Solid",
+                    "source_solid_count": 1,
+                    "selected_edges": ["Edge4"],
+                    "adjacent_face_types": {"Edge4": ["Plane", "Cylinder"]},
+                    "requested_size": 2.0,
+                    "result_state": {"shape_valid": False, "solid_count": 0},
+                    "edge_trials": [{"edge": "Edge4", "ok": False}],
+                    "failing_edges": ["Edge4"],
+                    "failing_edge_groups": [],
+                },
+                stdout="",
+                stderr="",
+                execution_time_ms=10.0,
+            )
+        )
+
+        result = await register_tools["chamfer_edges"](
+            object_name="Pad", size=2.0, edges=["Edge4"]
+        )
+
+        assert result["success"] is False
+        assert result["rolled_back"] is True
+        assert result["source_shape_type"] == "Solid"
+        assert result["adjacent_face_types"]["Edge4"] == ["Plane", "Cylinder"]
+        assert result["failing_edges"] == ["Edge4"]
 
     @pytest.mark.asyncio
     async def test_create_hole(self, register_tools, mock_bridge):

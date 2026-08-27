@@ -62,7 +62,9 @@ def register_checkpoint_tools(mcp: Any) -> None:
             solid_count: Current number of solids when known.
             expected_solid_count: Intended number of solids; usually one.
             visual_comparison_performed: Whether screenshot/open/compare was completed.
-            unresolved_dimensions: Required values that remain unreadable or ambiguous.
+            unresolved_dimensions: Transient checkpoint values that still need
+                autonomous interpretation. This is not a permitted terminal role
+                in the drawing source-dimension manifest.
             discrepancies: Ledger entries containing category, severity, expected,
                 observed, evidence, and proposed_reaction.
 

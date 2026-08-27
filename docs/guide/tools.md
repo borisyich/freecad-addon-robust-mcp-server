@@ -84,7 +84,7 @@ that behavior so a missing target can receive imported STEP/STL data.
 | `shell_object` | Create a shell (hollow) version of a solid by removing faces. |
 | `move_faces` | Rebuild recognized planar feature boundaries and explicitly report prism fallback. |
 | `offset_3d` | Create a 3D offset of a shape. |
-| `slice_shape` | Slice a shape with a plane, returning the cross-section. |
+| `slice_shape` | Create an arbitrary planar section or an unfolded offset/aligned section from a broken cutting path. |
 | `section_shape` | Create a cross-section of a shape at a standard plane. |
 | `make_compound` | Combine multiple shapes into a single compound. |
 | `explode_compound` | Separate a compound into individual shape objects. |
@@ -324,7 +324,7 @@ path without removing earlier valid bindings.
 | Tool | Description |
 |---|---|
 | `open_image` | Open a local PNG/JPEG/WebP and return its pixels as MCP ImageContent. |
-| `open_image_tiles` | Deliver a drawing overview plus enlarged, labelled, overlapping tiles. |
+| `open_image_tiles` | Deliver a drawing overview plus labelled, overlapping tiles without upscaling source crops. |
 | `compare_images` | Return a labelled side-by-side comparison; mandatory after major drawing-reconstruction features and before patterning a seed. |
 
 ## Checkpoints

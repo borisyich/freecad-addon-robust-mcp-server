@@ -1626,7 +1626,82 @@ class TestObjectTools:
         )
 
         assert result["name"] == "Slice"
+        generated_code = mock_bridge.execute_python.await_args.args[0]
+        assert 'mode = "plane"' in generated_code
+        assert "obj.Shape.slice" in generated_code
         mock_bridge.execute_python.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_slice_shape_supports_aligned_broken_path(
+        self, register_tools, mock_bridge
+    ):
+        mock_bridge.execute_python = AsyncMock(
+            return_value=ExecutionResult(
+                success=True,
+                result={
+                    "name": "AlignedSection",
+                    "label": "AlignedSection",
+                    "type_id": "Part::Feature",
+                    "mode": "aligned_path",
+                    "edge_count": 8,
+                    "segment_count": 2,
+                    "segments": [],
+                    "path_length": 20.0,
+                    "aligned": True,
+                },
+                stdout="",
+                stderr="",
+                execution_time_ms=15.0,
+            )
+        )
+
+        result = await register_tools["slice_shape"](
+            object_name="Box",
+            section_path=[[0, 5, 0], [10, 5, 0], [10, 15, 0]],
+            section_depth_direction=[0, 0, 1],
+            align_segments=True,
+        )
+
+        assert result["mode"] == "aligned_path"
+        assert result["segment_count"] == 2
+        generated_code = mock_bridge.execute_python.await_args.args[0]
+        assert "obj.Shape.section(cutting_face)" in generated_code
+        assert "transformGeometry(transform)" in generated_code
+        assert "section_depth_direction must be perpendicular" in generated_code
+
+    @pytest.mark.asyncio
+    async def test_slice_shape_rejects_mixed_plane_and_path_modes(
+        self, register_tools, mock_bridge
+    ):
+        with pytest.raises(ValueError, match="either plane_point/plane_normal or section_path"):
+            await register_tools["slice_shape"](
+                object_name="Box",
+                plane_point=[0, 0, 0],
+                plane_normal=[0, 0, 1],
+                section_path=[[0, 0, 0], [1, 0, 0]],
+                section_depth_direction=[0, 0, 1],
+            )
+        mock_bridge.execute_python.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_slice_shape_rejects_invalid_path_geometry_before_freecad(
+        self, register_tools, mock_bridge
+    ):
+        with pytest.raises(ValueError, match="zero length"):
+            await register_tools["slice_shape"](
+                object_name="Box",
+                section_path=[[0, 0, 0], [0, 0, 0]],
+                section_depth_direction=[0, 0, 1],
+            )
+        mock_bridge.execute_python.assert_not_awaited()
+
+        with pytest.raises(ValueError, match="perpendicular"):
+            await register_tools["slice_shape"](
+                object_name="Box",
+                section_path=[[0, 0, 0], [0, 0, 5]],
+                section_depth_direction=[0, 0, 1],
+            )
+        mock_bridge.execute_python.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_section_shape(self, register_tools, mock_bridge):

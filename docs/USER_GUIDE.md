@@ -403,20 +403,33 @@ The agent should use `get_screenshot(view_angle="Isometric", return_image=True)`
 alignment and `fitAll`, while processing GUI events and redraws. This is
 important when an agent sets a standard view and immediately captures it.
 
-For drawing reconstruction, identify the view-to-plane map before modeling:
-Front/Rear → XZ with depth along Y; Top/Bottom → XY with depth along Z;
-Left/Right → YZ (ZOY) with depth along X. Select a sketch plane from the view
-that shows the feature's true profile, and obtain extrusion depth from another
-view or an explicit callout.
+For drawing reconstruction, inventory every graphical source view before
+modeling: all present orthographic/opposite-side views, sections, details,
+auxiliary/non-standard views, and isometric/axonometric views. Assign each a
+stable view ID and an equivalent FreeCAD camera/section recipe. For standard
+orthographic cameras the coordinate mapping remains Front/Rear → XZ with depth
+along Y; Top/Bottom → XY with depth along Z; Left/Right → YZ (ZOY) with depth
+along X. Select a sketch plane from the view that shows the feature's true
+profile, and obtain extrusion depth from another source view/detail/section or an
+explicit callout.
 
 Call `open_image(path)` for the overview and use `open_image_tiles` when local
-dimensions/features are too small. Before creating geometry, save every explicit
-dimension except dimensions marked with an asterisk and assign each a stable
-identifier. Compare only equivalent views and pass a short `view_context` to
-`compare_images`. During drawing reconstruction, run it after every major
-feature; a screenshot alone is not a completed visual checkpoint. Compare the
-single seed before any pattern. If one pair is uncertain, compare all principal
-target views that exist—front, matching side, top, then isometric.
+dimensions/features are too small. Tiles are never upscaled beyond the source
+crop resolution; `tile_max_dimension` is only a downscale cap. If the drawing has
+a section view, reproduce it with `section_shape`/`slice_shape` and compare the
+candidate section to that view. Use `slice_shape(section_path=...,
+section_depth_direction=..., align_segments=True)` for a broken/aligned cutting
+line. Before creating geometry, save every explicit dimension and assign each
+a stable identifier, its source view ID, and the semantic elements it spans or
+controls. Preserve and interpret drafting markers such as an asterisk,
+parentheses, `REF`, or `TYP`; they do not make an annotation optional.
+Compare only equivalent source/candidate view records and pass a short
+`view_context` to `compare_images`. During drawing reconstruction, run it after
+every major feature for the source view(s) that directly expose that feature; a
+screenshot alone is not a completed visual checkpoint. Compare the single seed
+before any pattern. Before final acceptance, reproduce and compare **every**
+source-view manifest record one-to-one, including opposite-side views,
+sections/details, auxiliary views, and isometric/axonometric views when present.
 `compare_images` is visual assistance rather than an automatic correctness
 metric; use formal checkpoints only when the task benefits from them.
 
@@ -433,11 +446,13 @@ metric; use formal checkpoints only when the task benefits from them.
   count different from `expected_solid_count` (default `1`). Successful results
   return Shape/type/count plus base, tool, result, and delta volumes. Set the
   expectation to `None` only for an intentional multi-solid result.
-- A failed `fillet_edges` rolls back and returns structured source/selection,
-  adjacent-face, radius, result-state, and per-edge trial evidence. When every
-  edge succeeds individually but the group fails, inspect `failing_edge_groups`.
+- Failed `fillet_edges` and `chamfer_edges` calls roll back and return structured
+  source/selection, adjacent-face, requested radius/size, result-state, and
+  per-edge trial evidence. When every edge succeeds individually but the group
+  fails, inspect `failing_edge_groups`.
 - `thread_helix` creates native additive or subtractive helical geometry from an editable profile sketch.
 - `spreadsheet_apply_batch` stages numeric/structured-Quantity values, aliases, alias-dependent formulas, and property bindings in one transaction. Use `{"value":40,"unit":"mm"}` for a Quantity, `formula="=..."` for a formula, and `text="..."` for literal text; ambiguous raw string values such as `"40 mm"` are rejected. After recompute it evaluates every non-empty formula cell on the sheet, including unchanged formulas that depend on a modified cell or alias. Any formula failure restores affected cells, aliases, and expressions. Report View formula errors are surfaced as `FreeCADReportError` rather than success.
+- `spreadsheet_set_cell` and `spreadsheet_get_cell` convert wrapped FreeCAD cell values to bridge-safe primitives/strings before returning them, preventing XML-RPC marshalling failures from Quantity/proxy values.
 - A unitless spreadsheet number bound to an angle property is interpreted in degrees, so `360` can safely drive `PolarPattern.Angle`. Supply an explicit angle to batch as `{"value":360,"unit":"deg"}`.
 - Around direct edits, call `capture_shape_checkpoint` before mutation and `compare_shape_checkpoint` after it. The comparison always reports solid/topology counts, validity, and bounding-box/volume/area deltas. Its default `difference_mode="auto"` localizes added/removed regions with OCCT only below the configured face-product complexity limit; use `metrics` for imported B-reps when no booleans are wanted, or `exact` with an explicit timeout when localization is essential.
 - Shape checkpoints serialize the original Shape directly so OCCT preserves the
@@ -465,12 +480,16 @@ For intentional edits of imported STEP/BRep geometry, pass
 `DirectEditOperation` plus `SourceObject` are then informational, while broken
 shapes remain errors. Keep the default `native_parametric` workflow for models
 expected to have native editable history.
-For drawing/sketch input, save every non-starred dimension but classify it as
-driving, verification, or unresolved. Pass the complete driving list as
-`required_dimension_names`; retain deterministic measured evidence for every
-verification item. The final report also flags Spreadsheet aliases that
-do not drive the feature tree directly or through other cells; connect intended
-parameters or delete redundant ones.
+For drawing/sketch input, save every dimension with its source view,
+semantic source references, and corresponding model elements. Classify it as
+`driving` or `verification`; use exceptional `source_issue` only with concrete
+source evidence and attempted interpretations, and never use `unresolved` as a
+terminal manifest role. Pass the complete driving list as
+`required_dimension_names`. Separately measure every driving and verification
+item between the same semantic elements in its reproduced source-view context.
+The final report also flags Spreadsheet aliases that do not drive the feature
+tree directly or through other cells; connect intended parameters or delete
+redundant ones.
 
 For a sketch-only deliverable, call
 `validate_parametric_model(target={"kind":"sketch","name":"SketchName"}, ...)`.

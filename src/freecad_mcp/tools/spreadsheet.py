@@ -440,11 +440,14 @@ try:
     sheet.set(cell, str(value))
     doc.recompute()
 
-    # Get the computed value
+    # Get the computed value. FreeCAD may return Quantity/proxy objects or,
+    # on some builds, builtin method wrappers that XML-RPC cannot marshal.
     try:
         computed = sheet.get(cell)
     except Exception:
         computed = value
+    if computed is not None and not isinstance(computed, (bool, int, float, str)):
+        computed = str(computed)
 
     doc.commitTransaction()
 
@@ -507,11 +510,14 @@ if sheet is None:
 
 cell = {cell!r}
 
-# Get computed value
+# Get computed value. Normalize FreeCAD proxy/Quantity values before they
+# cross the bridge because XML-RPC cannot marshal arbitrary wrapped objects.
 try:
     computed = sheet.get(cell)
 except Exception:
     computed = None
+if computed is not None and not isinstance(computed, (bool, int, float, str)):
+    computed = str(computed)
 
 # Get raw content (formula or value)
 try:

@@ -648,6 +648,60 @@ mirror_object(
 ) -> dict
 ```
 
+### Section and Slice Operations
+
+#### slice_shape
+
+Create either an ordinary planar cross-section or an offset/aligned section whose
+cutting line consists of multiple straight segments.
+
+```python
+# Arbitrary planar section
+slice_shape(
+    object_name="Part",
+    plane_point=[0, 0, 12],
+    plane_normal=[0, 0, 1],
+    result_name="Section",
+)
+
+# Broken/aligned cutting line, for example A-A on an engineering drawing
+slice_shape(
+    object_name="Part",
+    section_path=[[0, 20, 0], [35, 20, 0], [35, 45, 0]],
+    section_depth_direction=[0, 0, 1],
+    align_segments=True,
+    result_name="Section_AA",
+)
+```
+
+Exactly one mode is accepted. In path mode, `section_path` contains the ordered
+3D points of the cutting line in the source drawing-view plane.
+`section_depth_direction` is the axis normal to that drawing view and must be
+perpendicular to every path segment. Each segment creates a finite cutting face
+spanning the source Shape bounding box. With `align_segments=True`, the segment
+sections are rigidly unfolded in path order into one XY plane, preserving lengths
+and curve geometry while making the result directly inspectable as an aligned
+engineering-drawing section. Set `align_segments=False` only when the original
+3D placement of the segment sections is required.
+
+The response reports `mode`, total `edge_count`, `segment_count`, `path_length`,
+and per-segment start/end, length, edge count, and cutting-plane normal. Empty
+sections and invalid/degenerate paths fail without leaving a result object.
+
+#### section_shape
+
+Convenience wrapper for standard XY/XZ/YZ sections. For an arbitrary plane or a
+broken/aligned cutting line, use `slice_shape`.
+
+```python
+section_shape(
+    object_name="Part",
+    plane="XZ",
+    offset=15.0,
+    result_name="SectionXZ",
+)
+```
+
 ### Selection (GUI Mode)
 
 #### selection
@@ -1434,8 +1488,11 @@ interaction.
 
 #### chamfer_edges
 
-Add beveled edges. The same current-Tip, `EdgeN`, post-recompute, and rollback
-contract used by `fillet_edges` applies.
+Add beveled edges. The same current-Tip, `EdgeN`, post-recompute, rollback, and
+structured-failure contract used by `fillet_edges` applies. On failure the tool
+returns source Shape/solid evidence, adjacent face surface types, requested size,
+per-edge trials, `failing_edges`, and a group-level diagnostic when edges succeed
+individually but fail together.
 
 ```python
 chamfer_edges(
@@ -1825,6 +1882,12 @@ the public schema.
 
 ## Spreadsheet Tools
 
+`spreadsheet_set_cell` and `spreadsheet_get_cell` normalize FreeCAD wrapped cell
+values (for example `Quantity` objects and method/proxy wrappers) to bridge-safe
+primitive/string values before returning them. This prevents XML-RPC marshalling
+failures such as `cannot marshal <class 'builtin_function_or_method'> objects`.
+
+
 ### spreadsheet_apply_batch
 
 Apply literals/quantities, aliases, dependent formulas, and object-property bindings to an existing Spreadsheet in that order, inside one transaction with one final document recompute. Use this instead of dozens of independent setter calls when creating a parameter table. Binding targets accept FreeCAD expression paths such as `Length`, `Placement.Base.x`, and `AttachmentOffset.Base.z`; FreeCAD validates the leaf path through `setExpression`. Aliases, duplicate entries, and alias collisions are validated before mutation. Because FreeCAD 1.0 does not roll Spreadsheet mutations back on `abortTransaction()`, the tool snapshots and explicitly restores affected cells, aliases, and expressions if any operation fails.
@@ -1997,7 +2060,8 @@ server working directory. Local file access must be enabled.
 
 #### open_image_tiles
 
-Return a numbered overview and ordered, enlarged, overlapping fragments.
+Return a numbered overview and ordered, labelled, overlapping fragments without
+upscaling source crops.
 
 ```python
 open_image_tiles(
@@ -2005,7 +2069,7 @@ open_image_tiles(
     rows: int = 2,
     columns: int = 3,
     overlap_percent: float = 12.0,
-    tile_max_dimension: int = 1600,
+    tile_max_dimension: int = 1600,  # maximum; smaller crops keep native size
     include_overview: bool = True,
     save_to_disk: bool = True,
     output_dir: str | None = None,
@@ -2016,8 +2080,9 @@ The result contains one text block before every image, identifying the fragment
 number, grid position, source pixel rectangle, overlap, and resize scale. The
 overview preserves global context while every fragment is delivered as a separate
 MCP image block with an explicit prompt describing what region it represents.
-Cropping gives small drawing details a larger visual budget; upscaling does not
-recover information absent from the source. A maximum of nine tiles is allowed.
+Cropping gives small drawing details a larger visual budget without synthesizing
+pixels: crops smaller than `tile_max_dimension` stay at native size, while larger
+crops are downscaled. A maximum of nine tiles is allowed.
 Tiles are saved by default under
 `./image_tiles/<source>_<grid>` so `compare_images` can use an exact reference
 fragment instead of the whole sheet.
@@ -2047,10 +2112,12 @@ sheet versus one model screenshot is weak evidence. Use
 `view_context`, for example `"Left / YZ plane / normal X"`, so the panel labels
 carry the active view/plane contract.
 
-A match in one projection does not prove depth or feature-axis orientation. If
-similarity is uncertain, repeat same-view comparisons for every principal target
-view available: front, matching left/right side, top, then isometric. A formal
-discrepancy ledger and `evaluate_model_checkpoint` remain optional.
+A match in one projection does not prove depth, opposite-face geometry, or
+feature-axis orientation. During modeling, compare the source view(s) that can
+expose the current feature. Before final acceptance, reproduce and compare every
+source-view manifest record one-to-one, including opposite-side views,
+sections/details/auxiliary views, and isometric/axonometric views when present.
+A formal discrepancy ledger and `evaluate_model_checkpoint` remain optional.
 
 Before `linear_pattern`, `polar_pattern`, `mirrored_feature`, or
 `multi_transform_pattern`, compare the single seed element first. A pattern
@@ -2073,7 +2140,7 @@ evaluate_model_checkpoint(
 ) -> dict
 ```
 
-The decision is `continue`, `rework`. The tool does not inspect pixels; it enforces stop criteria against the agent-authored evidence. Do not create the next feature unless `can_continue=true`.
+The decision is `continue`, `rework`. The tool does not inspect pixels; it enforces stop criteria against the agent-authored evidence. `unresolved_dimensions` is only transient checkpoint state while the agent is still interpreting evidence; it is not a permitted terminal role in the saved source-dimension manifest. Do not create the next feature unless `can_continue=true`.
 
 ### View Control
 
@@ -2302,16 +2369,22 @@ validate_parametric_model(
 ) -> dict
 ```
 
-When the input is a drawing or sketch, first extract and save every explicit
-source dimension except dimensions marked with an asterisk. Assign stable unique
-identifiers and classify each item as `driving`, `verification`, or `unresolved`
-from source evidence and the dimension-chain plan. Implement driving dimensions
-as named sketch constraints or connected Spreadsheet aliases and pass the
-complete driving list through `required_dimension_names`. Check verification
-dimensions with deterministic measurements and retain expected, observed,
-tolerance, pass/fail, and tool evidence separately. The validator can verify only
-identifiers supplied by the caller; it cannot discover an omitted dimension or
-infer its role from source pixels.
+When the input is a drawing or sketch, first inventory every source
+view/detail/section and extract every explicit source dimension. Preserve and
+interpret drafting markers such as an asterisk, parentheses, `REF`, or `TYP`;
+they do not make a dimension optional. Assign each dimension a stable identifier,
+source view, semantic source references, corresponding model elements, and validation
+measurement recipe. Classify it as `driving` or `verification`; exceptional
+`source_issue` requires concrete source evidence plus attempted interpretations,
+and `unresolved` is not a permitted terminal manifest role. Implement driving
+dimensions as named sketch constraints or connected Spreadsheet aliases and pass
+the complete driving list through `required_dimension_names`. Separately check
+every driving and verification dimension by reproducing its source-view context
+and measuring between the same semantic elements with matching dimension
+semantics. Retain expected, observed, tolerance, pass/fail, and tool evidence.
+The validator can verify only identifiers supplied by the caller; it cannot
+discover an omitted dimension, inspect source pixels, or replace the separate
+same-view geometric measurement.
 
 Omit `target` for the existing whole-model/final-solid diagnostic. When the
 deliverable is a sketch, pass for example

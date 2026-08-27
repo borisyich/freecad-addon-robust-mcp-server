@@ -433,6 +433,10 @@ class TestFreecadResources:
         assert "fixed/moving panels" in result
         assert "required_dimension_names" in result
         assert "compare_images" in result
+        assert "every record in the source view manifest" in result
+        assert "source_issue" in result
+        assert "never use `unresolved` as a terminal" in result
+        assert "same-view semantic measurement" in result
         assert "tangent_fillet" in result
 
     @pytest.mark.asyncio
@@ -501,8 +505,12 @@ class TestFreecadResources:
         assert "$freecad-engineering" in result
         assert "Reconstruct from drawings or images" in result
         assert "validate_parametric_model" in result
-        assert "non-starred" in result
+        assert "every explicit source dimension" in result
+        assert "asterisk" in result
         assert "compare_images" in result
+        assert "inventory every source view" in result
+        assert "every source-view manifest record" in result
+        assert "source_issue" in result
 
     @pytest.mark.asyncio
     async def test_resource_model_modification_workflow(
@@ -513,6 +521,8 @@ class TestFreecadResources:
 
         assert "$freecad-engineering" in result
         assert "Modify existing models" in result
+        assert "complete source-view/dimension manifest" in result
+        assert "one-to-one view validation" in result
 
     @pytest.mark.asyncio
     async def test_resource_capabilities(
@@ -527,6 +537,12 @@ class TestFreecadResources:
         assert "tools" in data
         assert "execution" in data["tools"]
         assert "documents" in data["tools"]
+        compare_tool = next(
+            tool
+            for tool in data["tools"]["images_and_checkpoints"]["tools"]
+            if tool["name"] == "compare_images"
+        )
+        assert "exhaustive across all source views" in compare_tool["description"]
 
         # Should have resources section - list of dicts with uri/description
         assert "resources" in data

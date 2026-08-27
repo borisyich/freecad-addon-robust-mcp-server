@@ -226,7 +226,9 @@ Before completion verify:
 - holes/cutouts remain attached to the correct panels and their axes match final
   panel normals;
 - no panel overlap, self-intersection, gap, or missing bend relief;
-- formed views agree with the reference isometrics/orthographic views;
+- every supplied formed-state source view agrees with the corresponding
+  reproduced model view, including orthographic, opposite-side, auxiliary,
+  detail, section, and isometric/axonometric views when present;
 - when native unfolding is available, the unfolded result agrees with the
   supplied flat contour, bend lines, and feature locations.
 

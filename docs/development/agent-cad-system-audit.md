@@ -80,7 +80,7 @@ not a claim that the CAD tree must reproduce the literal shop-floor sequence.
 `open_image_tiles` returns:
 
 - a numbered whole-image overview;
-- up to nine overlapping enlarged fragments;
+- up to nine overlapping source-resolution fragments, downscaled only when they exceed the configured cap;
 - a text block before every fragment identifying its grid location, source pixel
   rectangle, overlap, and resize scale;
 - optional saved files for later same-view comparison.
@@ -111,7 +111,7 @@ or modification. It reports:
   expressions, constraint-type counts, named constraints, and solver-reported
   conflicting/redundant indices where available;
 - standalone sketches, Spreadsheets, and solid objects outside Bodies;
-- the supplied non-starred drawing-dimension inventory and whether every stable
+- the supplied drawing-dimension inventory and whether every stable
   identifier is used by a named dimensional constraint or a connected
   Spreadsheet alias;
 - Spreadsheet dependency chains, including parameters that do not directly or

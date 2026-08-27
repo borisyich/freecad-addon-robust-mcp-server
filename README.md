@@ -491,13 +491,20 @@ turning, and sheet-metal strategies, and requires native editable parametric
 structure unless the user explicitly requests direct B-rep output.
 `execute_python`, `safe_execute`, and `run_macro` remain available.
 
-For drawing/sketch input, the Skill requires saving every explicit non-starred
-source dimension before modeling and classifying it as driving, verification, or
-unresolved. Driving identifiers control the model through named constraints or
-connected Spreadsheet aliases; verification identifiers retain deterministic
-measurement evidence without over-defining the model. `compare_images` is
-required after numerical checks for every major feature and before any pattern
-multiplies a seed element.
+For drawing/sketch input, the Skill requires inventorying every source
+view/detail/section and every explicit dimension before modeling. Drafting
+markers such as an asterisk, parentheses, `REF`, or `TYP` are preserved and
+interpreted rather than used to omit an annotation. Each dimension maps to its
+source view and the semantic elements it spans or
+controls, then ends as `driving` or `verification`; exceptional `source_issue`
+requires concrete source evidence and attempted interpretations, while
+`unresolved` is not a terminal manifest role. Driving identifiers control the
+model through named constraints or connected Spreadsheet aliases. Every driving
+and verification dimension also receives deterministic measurement evidence
+between the same semantic elements in its reproduced source-view context.
+`compare_images` is required for feature-relevant views after major features,
+before a pattern multiplies a seed element, and exhaustively for every source
+view before final acceptance.
 
 After any model creation or geometry change, call `validate_parametric_model`
 immediately before the final response and summarize the actual Bodies, Tips,

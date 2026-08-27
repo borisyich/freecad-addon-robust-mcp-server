@@ -318,6 +318,17 @@
   solid-count, fuzzy-tolerance, refine, and rollback checks.
 - Rejected unknown root tool arguments, advertised strict schemas, and added
   registry-contract coverage for API drift.
+- Hardened drawing reconstruction around a complete source-view manifest: every
+  drawing view/detail/section is read before modeling, feature checkpoints compare
+  only relevant equivalent views, and final acceptance reproduces and compares
+  every source view one-to-one. Source dimensions now map to source view plus
+  semantic geometry and end as driving/verification; exceptional `source_issue`
+  requires concrete source evidence, while `unresolved` is not a terminal manifest
+  role. Every explicit dimension is inventoried, including annotations carrying
+  drafting markers such as an asterisk/REF/TYP; those markers are interpreted, not
+  used as exclusion rules. Final dimension evidence measures the same semantic
+  elements in the reproduced source-view context.
+- `open_image_tiles`: tiles are never upscaled beyond their source crop resolution.
 
 This project uses **component-specific versioning**. Each component has its own
 release notes and version history.

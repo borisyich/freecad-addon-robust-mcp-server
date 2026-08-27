@@ -19,7 +19,7 @@ agent workflow.
 | Prompt | Parameters | Purpose |
 | --- | --- | --- |
 | `freecad_startup` | none | Session bootstrap; routes mechanical modeling tasks to `$freecad-engineering` and requires final `validate_parametric_model` reporting. |
-| `reproduce_from_drawing` | `reference_path`, `target_document` | Adds drawing-task context and routes to the canonical Skill. |
+| `reproduce_from_drawing` | `reference_path`, `target_document` | Routes to the canonical Skill, including complete source-view/dimension inventory and exhaustive final one-to-one view validation. |
 | `modify_existing_model` | `model_path`, `change_request`, `reference_path` | Adds existing-model context and routes to the canonical Skill. |
 | `freecad_guidance` | `task_type` | Returns compact guidance for general, PartDesign, sketching, boolean, export, debugging, validation, drawing, modification, or visual-check tasks. |
 

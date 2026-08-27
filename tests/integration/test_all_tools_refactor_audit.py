@@ -770,6 +770,19 @@ async def test_generic_part_object_workflow(live_tools: dict[str, Any]) -> None:
         result_name="Slice",
         doc_name=doc,
     )
+    aligned_section = await _call(
+        tools,
+        "slice_shape",
+        object_name="Extrusion",
+        section_path=[[0, 4, 0], [6, 4, 0], [6, 8, 0]],
+        section_depth_direction=[0, 0, 1],
+        align_segments=True,
+        result_name="AlignedSlice",
+        doc_name=doc,
+    )
+    assert aligned_section["mode"] == "aligned_path"
+    assert aligned_section["segment_count"] == 2
+    assert aligned_section["edge_count"] > 0
     for plane, offset in (("XY", 3), ("XZ", 4), ("YZ", 6)):
         await _call(
             tools,

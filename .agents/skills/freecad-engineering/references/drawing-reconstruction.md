@@ -1,28 +1,36 @@
 # Drawing reconstruction guidance
 
-## 1. Identify the view system before interpreting dimensions
+## 1. Inventory every source view before interpreting dimensions
 
-Start from the whole sheet. Identify the principal/front view first, then every
-available top, left/right side, section, detail, and isometric view. A view may
-be unlabeled or placed non-standardly, so do not infer its identity from page
-position alone.
+Start from the whole sheet and identify **every graphical region that carries
+geometric evidence**, not only the view that appears principal. This includes
+all present orthographic directions and opposite-side views, sections, aligned
+or offset sections, details, auxiliary views, isometric/axonometric views, and
+applicable formed/unfolded manufacturing views. Assign each one a stable
+`view_id`. Even an apparently redundant or merely corroborative depiction remains
+a source view and final validation target. A view may be unlabeled, duplicated,
+or placed non-standardly, so do not infer its identity from page position alone
+and do not skip it because another projection looks more informative.
 
 Use geometry and annotation evidence:
 
 - shared centerlines and repeated hole centers;
-- matching outer silhouettes and feature counts;
-- dimensions that must be shared between adjacent projections;
+- matching outer silhouettes, through-features, and feature counts;
+- dimensions that must reconcile between projections;
 - section arrows, detail callouts, hidden lines, and symmetry marks;
-- isometric views only as supporting spatial evidence.
+- which local features are visible on one face but absent on the opposite face;
+- isometric/axonometric views as spatial evidence and as final visual targets.
 
+Explicitly test whether two similar projected outlines are opposite sides of the
+same part when their through-features align but face-local geometry differs.
 Determine whether the sheet follows first-angle, third-angle, or a deliberately
 non-standard arrangement. When the convention is unclear, classify views from
 feature correspondence rather than layout.
 
 ## 2. Treat flat patterns as manufacturing views
 
-A flat pattern/developed blank does not belong to the front/top/side camera
-system. Identify it before constructing the orthographic view map.
+A flat pattern/developed blank does not belong to the ordinary orthographic
+camera system. Identify it before constructing the orthographic view map.
 
 Evidence includes a single planar blank contour, all holes shown in one plane,
 straight bend lines, `BEND UP`/`BEND DOWN` callouts, and notes for thickness,
@@ -48,6 +56,10 @@ Unless the model has an explicitly different global coordinate system, use:
 | Left / Right side | YZ (ZOY) | ±X | `YZ_Plane` |
 | Isometric | no single true-shape plane | none | verification only |
 
+This table only maps standard cameras to the global frame. It is not a whitelist
+of source views: custom, auxiliary, opposite-side, detail, and section views must
+still be inventoried and reproduced when present.
+
 The sketch plane is selected from the view that shows the feature's true
 profile, not from the camera angle that merely looks visually convenient.
 
@@ -63,45 +75,67 @@ This rule prevents a common failure: reproducing the correct circular outline on
 the wrong plane, producing a plausible isometric model whose axis is rotated by
 90 degrees.
 
-## 4. Build a view map before the feature plan
+## 4. Build a complete view manifest before the feature plan
 
-Create a compact table such as:
+Create one record for **every identified source view**. A compact schema is:
 
-| Source region | Identified view | FreeCAD camera | Projection plane | Normal axis | Proves | Does not prove |
+| view_id | Source region | Drawing role/type | Physical side/look direction | Candidate camera/section recipe | Projection plane / normal | Proves |
 |---|---|---|---|---|---|---|
-| crop A | principal/front | Front | XZ | Y | height, X position, front profile | Y depth |
-| crop B | side | Left/Right | YZ | X | depth, Z profile, cylindrical true shape | X thickness |
-| crop C | top | Top | XY | Z | width, depth, planform | Z height |
-| iso | isometric | Isometric | — | — | spatial arrangement | exact dimensions |
+| V1 | crop A | orthographic | identified from evidence | matching FreeCAD camera | mapped plane/axis | listed features/dimensions |
+| V2 | crop B | opposite-side orthographic | identified from evidence | matching FreeCAD camera | mapped plane/axis | face-local geometry |
+| S1 | section A-A | aligned section | cutting-line evidence | `slice_shape(...)` recipe | section-defined | internal steps/radii |
+| I1 | isometric | isometric | spatial camera | matching camera state | — | spatial arrangement |
+
+For non-standard cameras, preserve enough `get_camera_state` information to
+reproduce the candidate view. For a section, preserve the exact
+`section_shape`/`slice_shape` parameters. For a detail, preserve the parent
+view, target region, and equivalent candidate framing.
 
 For every planned feature state:
 
-- source view/crop;
+- source `view_id` that supplies the profile or placement evidence;
 - sketch or datum plane;
 - normal/extrusion axis and sign;
 - controlling in-plane dimensions;
-- depth/offset source from another view;
-- FreeCAD view used for the checkpoint screenshot.
+- depth/offset source from another view/detail/section;
+- candidate view(s) that can expose an error in this feature.
 
 Do not proceed with a feature whose profile plane and normal axis are still
-implicit.
+implicit. Every view-manifest record remains a required final validation target,
+even when it contributed no driving feature.
 
-## 5. Assign dimensions to model axes
+## 5. Assign every dimension to semantic geometry and model axes
 
-Create an axis-aware evidence table:
+Before any modeling, create a complete dimension inventory containing every
+explicit source dimension. A numeric value alone is not a parsed dimension. An
+asterisk, parentheses, `REF`, `TYP`, or another drafting marker is source
+metadata to preserve and interpret; it is not a reason to omit the annotation
+from the inventory. For each item record:
 
-- feature or requirement;
-- dimension/value/count;
-- source view/detail;
-- controlled axis or plane;
-- explicit, derived, or assumed status;
-- confidence and alternatives.
+- stable `dimension_id`, raw annotation, value, and unit;
+- `source_view_id` and source location;
+- source extension lines/leaders/centerlines or other geometric references;
+- the corresponding semantic model elements it spans or controls;
+- controlled axis/plane and dimension semantics (distance, projected distance,
+  radius, diameter, angle, thickness, etc.);
+- `driving` or `verification` role;
+- candidate validation view/section and measurement recipe;
+- confidence and rejected alternatives when interpretation was ambiguous.
 
-Before any modeling, also create and save a complete dimension inventory. It
-must include every explicit source dimension except dimensions marked with an
-asterisk. Give each item a stable unique identifier that can become a named
-driving sketch constraint or Spreadsheet alias. Do not discard apparently
-redundant values silently; use them as cross-checks or record a real conflict.
+Do not discard apparently redundant values silently; use them as verification
+checks. Do not use `unresolved`, `unknown`, or an equivalent terminal role just
+because interpretation is difficult. Reinspect all applicable views/details and
+the dimension chain, choose the best-supported semantic interpretation, and
+record its confidence.
+
+The only exceptional terminal role is `source_issue`, and it requires concrete
+source evidence: the annotation remains illegible at the best useful source
+resolution; its extension/leader targets cannot be identified; independent
+source dimensions contradict each other beyond stated/drafting tolerance under
+every plausible interpretation; or the annotation is demonstrably malformed or
+orphaned. Record the raw source token, source view/location, attempted
+interpretations, conflict evidence, and exact reason. A disagreement with the
+current CAD hypothesis is never sufficient.
 
 For every ordinate or baseline item, the inventory must preserve the
 datum/reference, controlled axis, signed direction, and target feature in
@@ -125,20 +159,38 @@ Rules:
    inner diameter to derive an outer envelope.
 5. Shared coordinates and overall dimensions must reconcile across all views
    before they become driving constraints.
+6. During validation, reproduce the dimension's `source_view_id` (or its
+   section/detail context) and measure between the same semantic model elements
+   with the same dimension semantics. A different projection, bounding-box
+   extent, or convenient surrogate is not equivalent unless the source dimension
+   itself is defined that way. Driving-expression linkage does not replace this
+   geometric measurement.
 
 ## 6. Evidence extraction
 
-1. Inspect the full sheet to identify views, sections, details, notes, units, and
-   scale relationships.
-2. Use `open_image_tiles` or focused crops for local dimensions and small
-   geometry.
-3. Record features, counts, radii/diameters, center locations, thicknesses,
-   offsets, hidden boundaries, section evidence, and every non-starred dimension
-   in the saved inventory.
-4. Reconcile every feature across all applicable views before committing it to
+1. Inspect the full sheet and enumerate every geometric view/detail/section into
+   the view manifest before modeling.
+2. Use `open_image_tiles` for local dimensions and small geometry. Tiles are
+   cropped at source resolution and only downscaled when they exceed the
+   configured long-side limit.
+3. For every drawing section, save a matching candidate-section recipe before
+   modeling is considered complete. Use `section_shape` for standard XY/XZ/YZ
+   sections, `slice_shape(plane_point=..., plane_normal=...)` for arbitrary
+   planar sections, and `slice_shape(section_path=...,
+   section_depth_direction=..., align_segments=True)` for offset/aligned sections
+   with a broken cutting line. In path mode, provide the ordered 3D cutting-line
+   points in the drawing-view plane and the axis normal to that view; the tool
+   unfolds the segment sections into one XY-plane result for section-to-section
+   inspection.
+4. Extract every dimension from every view and assign its semantic
+   references and role before geometry creation. No dimension may disappear from
+   the manifest because it is redundant, inconvenient, or difficult to map.
+5. Record features, counts, radii/diameters, center locations, thicknesses,
+   offsets, hidden boundaries, and section/detail evidence per `view_id`.
+6. Reconcile every feature across all applicable views before committing it to
    the feature plan.
-5. Treat isometric views as a spatial cross-check, not the source of exact
-   orthographic dimensions unless explicitly annotated.
+7. Treat isometric views as spatial evidence and final visual comparison targets;
+   use their dimensions as exact inputs only when explicitly annotated.
 
 ## 7. Planning
 
@@ -156,11 +208,12 @@ A feature plan that says only “draw this outline and extrude” is incomplete.
 must also say **which view supplied the outline** and **which view supplied the
 extrusion depth**.
 
-## 8. Visual checking and multi-view fallback
+## 8. Visual checking and complete view-set validation
 
-Use same-view comparisons. A whole drawing sheet compared with an isometric
-screenshot is weak evidence. Crop the relevant drawing view and orient FreeCAD
-to the same projection.
+Use one-to-one equivalent-view comparisons. A whole drawing sheet compared with
+one model screenshot is weak evidence. Use the source view record and orient or
+section FreeCAD to reproduce the same projection, physical side, cutting recipe,
+detail context, or non-standard camera.
 
 For non-standard candidate views, use `set_camera_position` with explicit
 `look_at`, `up_direction`, orthographic projection, and (when scale must remain
@@ -178,23 +231,21 @@ or compute correctness. Explicitly inspect:
 - openings, pockets, bends, and local radii;
 - whether a match in one view hides a mismatch in another.
 
-Despite being qualitative, this comparison is mandatory after every major
-feature in drawing reconstruction. A screenshot that was merely captured or
-opened is not a completed visual checkpoint. Before any linear, polar, mirrored,
-or multi-transform pattern, compare the single seed element first; repeating an
-unverified seed multiplies its error.
+During modeling, comparison is mandatory after every major feature, but use the
+smallest set of source views that directly exposes that feature; repeatedly
+rendering unrelated views adds cost without evidence. A screenshot that was
+merely captured or opened is not a completed visual checkpoint. Before any
+linear, polar, mirrored, or multi-transform pattern, compare the single seed
+element first; repeating an unverified seed multiplies its error.
 
-When one pair is inconclusive or suspicious, compare every principal target view
-that exists:
-
-1. front/principal;
-2. matching left or right side;
-3. top;
-4. isometric.
-
-Do not accept a model because its isometric image merely “looks similar.” The
-orthographic set must agree on width, height, depth, axis orientation, and
-feature placement.
+Before final acceptance, iterate through **every view-manifest record** and
+reproduce its candidate view from the finished model. Compare every pair,
+including opposite-side orthographic views, all sections/details/auxiliary
+views, and isometric/axonometric or manufacturing views when present and
+applicable. This exhaustive final pass is required even if earlier feature
+checkpoints were conclusive. Do not accept a model because one projection or an
+isometric image merely “looks similar.” The complete source-view set must agree
+on the geometry each record is able to prove.
 
 ## 9. ACT → OBSERVE → REACT with a view contract
 
@@ -207,12 +258,13 @@ normal axis, and reference view.
 
 - recompute and validate geometry;
 - inspect Body Tip, solid count, volume/bounds, and sketch status;
-- capture a settled screenshot in the matching candidate view, passing that
-  view explicitly to `get_screenshot` rather than relying on a previous camera
-  command or the default isometric view;
-- compare against the corresponding target crop;
+- reproduce the source view(s) that directly expose the current feature, passing
+  the camera/section recipe explicitly rather than relying on prior GUI state;
+- compare against the corresponding source record(s);
+- measure any dimensions affected by the feature between the same semantic
+  elements in their recorded source-view context;
 - state expected versus observed changes;
-- broaden to the full available view set when similarity is uncertain.
+- broaden to any additional source views that can expose an uncertainty.
 
 ### REACT
 
@@ -221,15 +273,18 @@ normal axis, and reference view.
 
 ## 10. Autonomous ambiguity handling
 
-When a value is unreadable or ambiguous:
+When a value or its semantic target is initially unreadable or ambiguous:
 
-1. inspect all views/details and nearby dimensions;
-2. derive constraints from overall dimensions and repeated geometry;
-3. choose the interpretation with the fewest unsupported assumptions;
-4. record the assumption and confidence;
-5. model it parametrically so it can be revised;
-6. revisit the assumption when later evidence conflicts.
+1. inspect all views/details/sections and nearby dimensions;
+2. trace extension lines, leaders, centerlines, datums, and repeated geometry;
+3. derive and close applicable dimension chains;
+4. choose the interpretation with the fewest unsupported assumptions and the
+   strongest cross-view consistency;
+5. record the interpretation, confidence, and rejected alternatives;
+6. model it parametrically so it can be revised;
+7. revisit the interpretation when later evidence conflicts.
 
-Do not silently invent a convenient dimension. Do not stop the entire task merely
-because one noncritical value is uncertain; use the best-supported interpretation
-and report it.
+Do not silently invent a convenient dimension and do not park it indefinitely as
+`unresolved`. If the source itself is demonstrably defective, use `source_issue`
+only with the evidence required in Section 5. Otherwise choose and document the
+best-supported semantic interpretation and continue.

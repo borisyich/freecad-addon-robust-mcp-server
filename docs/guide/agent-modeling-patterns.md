@@ -34,9 +34,13 @@ edge treatments should normally be delayed until the supporting form is stable.
 
 Use `select_subshapes` before face-supported sketches, Fillet/Chamfer/Draft/Thickness operations, and topology measurements; inspect the returned semantic records before consuming the `FaceN`/`EdgeN`/`VertexN` references.
 
-For drawing/sketch input, extract and save every explicit non-starred dimension
-before modeling. Give each value a stable identifier and realize it as a named
-driving constraint or a Spreadsheet alias connected to the feature tree.
+For drawing/sketch input, extract and save every explicit dimension before
+modeling, preserving drafting markers rather than using them as exclusion rules.
+Give each value a stable identifier, source view, and semantic target. Classify
+it as `driving` or `verification`: only driving dimensions must become named
+constraints or connected Spreadsheet aliases, while both classes must be
+measured against the same semantic elements in the reproduced source-view
+context.
 
 ## Verification
 
@@ -48,8 +52,11 @@ machine after every operation:
 - `compare_images` after every major feature in drawing reconstruction; a saved
   screenshot alone is not a completed visual checkpoint;
 - comparison of one accepted seed element before any pattern operation;
-- a drawing view map: Front=XZ/normal Y, Top=XY/normal Z, Side=YZ/normal X;
-- multi-view fallback when one visual comparison is uncertain;
+- a complete drawing view manifest containing every source view/detail/section,
+  with standard camera/plane mappings where applicable and explicit recipes for
+  non-standard cameras or sections;
+- feature-relevant same-view checks during modeling and exhaustive one-to-one
+  comparison of every source-view manifest record before final acceptance;
 - `validate_parametric_model(required_dimension_names=[...])` for the mandatory
   final structural report when a source dimension inventory exists.
 

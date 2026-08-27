@@ -23,17 +23,29 @@ topology, dimensions, datum interpretation, or design intent.
 
 ## 1. Build a source-dimension manifest
 
-Before creating geometry, save every explicit non-starred source dimension.
-Never omit a value because it appears redundant or is inconvenient for the
-current hypothesis. Give each item a stable ID, value, unit, source view/crop,
-and source location.
+Before creating geometry, save every explicit source dimension. Preserve and
+interpret drafting markers such as an asterisk, parentheses, `REF`, or `TYP`;
+they do not make the dimension optional. Never omit a value because it appears
+redundant or is inconvenient for the current hypothesis. Give each item a
+stable ID, raw annotation, value, unit, source view/crop, and source location.
 
 Classify its modeling role from drafting evidence and the dimension-chain plan:
 
 - `driving`: an independent source dimension that should control geometry;
 - `verification`: an explicit overall, repeated, reference, or check dimension
   that should verify the solved model without over-defining it;
-- `unresolved`: the evidence is not yet sufficient to choose either role.
+- `source_issue`: exceptional terminal classification for a demonstrably
+  defective source annotation, with concrete evidence and attempted
+  interpretations recorded.
+
+Do not use `unresolved`, `unknown`, or a similar terminal bucket. If the role or
+semantic target is initially ambiguous, reinspect every applicable view/detail,
+trace the dimension references, reconcile the dimension chain, and choose the
+best-supported interpretation with confidence and rejected alternatives. Use
+`source_issue` only when the source remains illegible at the best useful
+resolution, has no identifiable extension/leader targets, is irreconcilably
+contradictory with independent source dimensions beyond drafting tolerance, or
+is demonstrably malformed/orphaned. A solver or CAD conflict is not enough.
 
 Do not classify a dimension as `verification` merely because adding it creates a
 solver conflict. A conflict makes the current interpretation suspect, not the
@@ -48,8 +60,11 @@ Use records similar to:
   "value": 70.0,
   "unit": "mm",
   "role": "verification",
-  "measurement": "bbox_x",
-  "source": "dimension_view_crop_02",
+  "source_view_id": "V2",
+  "source_references": ["LEFT_OUTER_EDGE", "RIGHT_OUTER_EDGE"],
+  "target_elements": ["BODY.LEFT_OUTER_FACE", "BODY.RIGHT_OUTER_FACE"],
+  "measurement_semantics": "projected_distance_x",
+  "validation_view_id": "V2",
   "status": "pending"
 }
 ```
@@ -64,7 +79,11 @@ Use records similar to:
   "target": "HOLE_BOTTOM.CENTER",
   "axis": "Y",
   "direction": "+Y",
-  "source": "dimension_view_crop_02"
+  "source_view_id": "V2",
+  "source_references": ["BOTTOM_EDGE", "HOLE_BOTTOM.CENTER"],
+  "target_elements": ["BODY.BOTTOM_EDGE", "HOLE_BOTTOM.CENTER"],
+  "measurement_semantics": "projected_distance_y",
+  "validation_view_id": "V2"
 }
 ```
 
@@ -85,11 +104,14 @@ If the signed chain does not close within the documented tolerance or drawing
 precision, record `dimension_chain_mismatch`, reinspect the crop/view mapping,
 and revise the interpretation. Do not average conflicting values.
 
-Pass only all `driving` IDs to `required_dimension_names`. Check every
-`verification` item numerically and save observed value, tolerance, pass/fail,
-and tool evidence in the manifest or discrepancy ledger. A FreeCAD reference
-constraint may display a solved value but must not silently become a second
-driving constraint.
+Pass only all `driving` IDs to `required_dimension_names`. Independently check
+every non-`source_issue` item, including driving items, by reproducing its
+recorded source-view/section context and measuring between the same semantic
+model elements with the same distance/radius/diameter/angle/thickness semantics.
+Save observed value, tolerance, pass/fail, and tool evidence in the manifest or
+discrepancy ledger. A FreeCAD reference constraint may display a solved value
+but must not silently become a second driving constraint, and a driving
+expression does not replace geometric measurement.
 
 ## 2. Keep interpretation mutable
 
@@ -273,7 +295,9 @@ validate_parametric_model(
 ```
 
 Confirm that every required item is `sketch_driving` for non-construction
-geometry of that sketch. Separately confirm that every verification dimension
-has deterministic observed evidence and no unresolved discrepancy. Body, Tip,
-and solid findings are outside sketch scope. The validator cannot infer omitted
-source dimensions, visual correspondence, or coordinate provenance from pixels.
+geometry of that sketch. Separately confirm that every driving and verification
+dimension has deterministic same-view semantic measurement evidence, and audit
+any exceptional `source_issue` record against its retained source evidence.
+Body, Tip, and solid findings are outside sketch scope. The validator cannot
+infer omitted source dimensions, visual correspondence, or coordinate provenance
+from pixels.

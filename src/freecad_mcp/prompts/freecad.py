@@ -84,22 +84,30 @@ mechanical model, activate `$freecad-engineering`. The canonical policy is
 - Validate FreeCAD geometry and requirement correspondence separately. A valid
   solid can still be the wrong part.
 - Follow the Skill's ACT → OBSERVE → REACT loop after each major feature.
-  Establish the drawing-view/FreeCAD-plane contract before modeling, capture a
-  settled screenshot in the equivalent view, and for drawing reconstruction run
-  `compare_images` after every major feature. A screenshot alone is not a
-  completed comparison. Compare and accept one seed element before any pattern,
-  then rework the causal feature when the available views disagree. A formal
-  discrepancy ledger/checkpoint is optional rather than a universal gate.
+  Before drawing reconstruction, inventory every source view/detail/section that
+  depicts part geometry, including apparently redundant/corroborative views, and
+  store the equivalent FreeCAD camera/section recipe. Compare each major feature
+  only against the source views that expose it; a screenshot alone is not a
+  completed comparison. Compare and accept one seed element before any pattern.
+  Before final acceptance, reproduce and compare every source-view manifest
+  record one-to-one, then rework the causal feature when any view disagrees. A
+  formal discrepancy ledger/checkpoint is optional rather than a universal gate.
 - Preserve native editable design intent: Body, sketches, constraints, and
   semantic PartDesign history unless the user explicitly asks for direct B-rep.
 - `execute_python`, `safe_execute`, and `run_macro` are always available. Using
   them does not waive the parametric/editability expectations in the Skill.
 - Resolve drawing ambiguity autonomously using the most consistent evidence and
   disclose assumptions.
-- Before modeling from a drawing/sketch, save every explicit non-starred source
-  dimension with a stable identifier. Classify it as driving, verification, or
-  unresolved. Implement driving IDs as named constraints/connected aliases and
-  measure every verification ID deterministically.
+- Before modeling from a drawing/sketch, save every explicit source dimension
+  with a stable identifier, source `view_id`, and the semantic elements it spans
+  or controls. Preserve and interpret drafting markers such as an asterisk,
+  parentheses, REF, or TYP; they do not make an annotation optional. Classify it
+  as driving or verification. Never use
+  `unresolved` as a terminal structured role; use exceptional `source_issue`
+  only with concrete source evidence and attempted interpretations. Implement
+  driving IDs as named constraints/connected aliases, then measure every driving
+  and verification ID between the same semantic elements in the reproduced
+  source-view context.
 - Immediately before the final user-facing response after any geometry change,
   call `{FINAL_PARAMETRIC_VALIDATION_TOOL}` and summarize significant findings.
   For drawing/sketch input, pass the complete driving-identifier list as
@@ -225,7 +233,8 @@ local drawings or screenshots without changing the FreeCAD camera.""",
 ## Critical Rules
 1. Create or select one explicit document.
 2. Create or reuse one PartDesign Body.
-3. Establish drawing-view to FreeCAD-plane correspondence before sketching.
+3. For drawing input, inventory every source view and establish each view's
+   FreeCAD camera/section and plane/axis correspondence before sketching.
 4. Use one profile sketch per feature.
 
 ## Correct Workflow
@@ -291,7 +300,8 @@ significant findings.""",
 5. For flat patterns, checkpoint coarse external contour, radius transitions,
    holes, bend lines, then final parameterization separately. At each checkpoint
    recompute, check topology, run deterministic dimension checks, compare the
-   source view, update the discrepancy ledger, and only then continue.
+   applicable source view(s), update the discrepancy ledger, and only then
+   continue.
 
 If source-backed tangency conflicts, do not delete Tangent merely to satisfy the
 solver. Reinspect the drawing crop and revise endpoints, radius, arc side, datum,

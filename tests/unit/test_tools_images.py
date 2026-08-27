@@ -227,7 +227,7 @@ async def test_compare_images_returns_optional_review_guidance(registered_tools,
     assert review["action"] == "describe_concrete_discrepancies_and_rework_if_needed"
     assert "observed" in review["optional_ledger_fields"]
     assert review["optional_decision_values"] == ["continue", "rework"]
-    assert "every principal target view" in review["when_uncertain"]
+    assert "every source-view manifest record" in review["when_uncertain"]
     assert "profile_plane_and_axis_direction" in review["inspect"]
 
 
@@ -263,6 +263,30 @@ async def test_open_image_tiles_returns_overview_and_labelled_fragments(
     assert "visual_ack_required" not in metadata
     assert "submit_modeling_plan" not in str(metadata)
     assert "Inspect every returned fragment" in metadata["recommended_review"]
+
+
+@pytest.mark.asyncio
+async def test_open_image_tiles_never_upscales_source_crops(registered_tools, tmp_path):
+    """Small source crops should keep native resolution instead of being enlarged."""
+    drawing = tmp_path / "small.png"
+    PILImage.new("RGB", (600, 400), "white").save(drawing, format="PNG")
+
+    result = await registered_tools["open_image_tiles"](
+        str(drawing),
+        rows=2,
+        columns=2,
+        overlap_percent=0,
+        tile_max_dimension=1600,
+        include_overview=False,
+        save_to_disk=False,
+    )
+
+    assert result.isError is False
+    for tile in result.structuredContent["tiles"]:
+        assert tile["resize_scale"] == 1.0
+        # delivered_height includes the label header, but image content itself
+        # must not have been enlarged. Width is unchanged by the header.
+        assert tile["delivered_width"] == tile["source_width"]
 
 
 @pytest.mark.asyncio

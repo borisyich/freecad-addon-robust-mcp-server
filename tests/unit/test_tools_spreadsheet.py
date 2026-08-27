@@ -302,6 +302,9 @@ class TestSpreadsheetTools:
         assert result["cell"] == cell
         assert result["value"] == value
         assert result["computed"] == computed
+        generated_code = mock_bridge.execute_python.await_args.args[0]
+        assert "not isinstance(computed, (bool, int, float, str))" in generated_code
+        assert "computed = str(computed)" in generated_code
 
     @pytest.mark.asyncio
     async def test_spreadsheet_set_cell_not_found(
@@ -390,6 +393,9 @@ class TestSpreadsheetTools:
         assert result["cell"] == "A1"
         assert result["computed"] == 100
         assert result["alias"] == "Length"
+        generated_code = mock_bridge.execute_python.await_args.args[0]
+        assert "XML-RPC cannot marshal arbitrary wrapped objects" in generated_code
+        assert "computed = str(computed)" in generated_code
 
     @pytest.mark.asyncio
     async def test_spreadsheet_get_cell_empty(

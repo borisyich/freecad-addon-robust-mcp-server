@@ -437,6 +437,10 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                 "notes": [
                     "The Skill is the single source of detailed modeling policy.",
                     "execute_python, safe_execute, and run_macro remain available.",
+                    "Drawing reconstruction inventories every source view that depicts part geometry, including redundant/corroborative views, and every dimension before modeling.",
+                    "Final drawing acceptance requires one-to-one candidate comparison for every source-view manifest record.",
+                    "Every explicit source dimension is inventoried; drafting markers are preserved and interpreted rather than used to skip an annotation.",
+                    "Source dimensions end as driving/verification, or exceptional source_issue with concrete source evidence; unresolved is not a terminal manifest role.",
                     "The final validator is informative and does not prove drawing correspondence.",
                 ],
             },
@@ -745,8 +749,18 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                         },
                         {
                             "name": "slice_shape",
-                            "description": "Slice object with a plane",
-                            "key_params": ["object_name", "plane"],
+                            "description": (
+                                "Create an arbitrary planar or broken/aligned "
+                                "cross-section"
+                            ),
+                            "key_params": [
+                                "object_name",
+                                "plane_point",
+                                "plane_normal",
+                                "section_path",
+                                "section_depth_direction",
+                                "align_segments",
+                            ],
                         },
                         {
                             "name": "section_shape",
@@ -1030,7 +1044,9 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                         },
                         {
                             "name": "chamfer_edges",
-                            "description": "Add chamfers to edges",
+                            "description": (
+                                "Add validated chamfers with structured failure diagnostics"
+                            ),
                             "key_params": ["object_name", "size", "edges"],
                         },
                         {
@@ -1269,7 +1285,7 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                         },
                         {
                             "name": "open_image_tiles",
-                            "description": "Return indexed overview plus enlarged overlapping drawing fragments",
+                            "description": "Return indexed overview plus overlapping drawing fragments without upscaling",
                             "key_params": [
                                 "path",
                                 "rows",
@@ -1279,7 +1295,7 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                         },
                         {
                             "name": "compare_images",
-                            "description": "Mandatory major-feature and pre-pattern seed comparison for drawing reconstruction",
+                            "description": "Equivalent-view comparison for drawing reconstruction; feature-relevant during modeling and exhaustive across all source views before final acceptance",
                             "key_params": [
                                 "reference_path",
                                 "candidate_path",
@@ -1594,7 +1610,7 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                 },
                 {
                     "name": "reproduce_from_drawing",
-                    "description": "Drawing reconstruction route to the canonical engineering Skill; visual checks are risk-based, not a rigid gate",
+                    "description": "Drawing reconstruction route to the canonical engineering Skill; inventories every source view/dimension and requires exhaustive final one-to-one view validation",
                     "key_params": ["reference_path", "target_document"],
                 },
                 {

@@ -3067,28 +3067,95 @@ except Exception:
     @mcp.tool()
     async def slice_shape(
         object_name: str,
-        plane_point: list[float],
-        plane_normal: list[float],
+        plane_point: list[float] | None = None,
+        plane_normal: list[float] | None = None,
+        section_path: list[list[float]] | None = None,
+        section_depth_direction: list[float] | None = None,
+        align_segments: bool = True,
         result_name: str | None = None,
         doc_name: str | None = None,
     ) -> dict[str, Any]:
-        """Slice a shape with a plane, returning the cross-section.
+        """Create a planar or broken-path cross-section of a shape.
+
+        Use ``plane_point`` + ``plane_normal`` for an ordinary infinite planar
+        section. For an offset/aligned drawing section, pass ``section_path`` as
+        the 3D points of the cutting line and ``section_depth_direction`` as the
+        direction perpendicular to the drawing view. Each path segment defines
+        a finite cutting plane. With ``align_segments=True`` (default), segment
+        sections are unfolded into one XY plane in path order so the result can
+        be inspected like an aligned engineering-drawing section.
+
+        Exactly one mode must be supplied: a plane pair or a section path.
 
         Args:
-            object_name: Name of the object to slice.
-            plane_point: A point on the cutting plane [x, y, z].
-            plane_normal: Normal vector of the cutting plane [x, y, z].
+            object_name: Name of the object to section.
+            plane_point: Point on an ordinary cutting plane ``[x, y, z]``.
+            plane_normal: Normal of an ordinary cutting plane ``[x, y, z]``.
+            section_path: Two or more 3D points describing a broken cutting line.
+            section_depth_direction: Direction through the part for path mode; it
+                must be perpendicular to every non-zero path segment.
+            align_segments: Unfold path-mode segments into one XY plane. Set False
+                to keep the section curves on their original cutting planes.
             result_name: Name for result object. Auto-generated if None.
             doc_name: Document containing the object. Uses active document if None.
 
         Returns:
-            Dictionary with result object information:
-                - name: Result object name
-                - label: Result object label
-                - type_id: Result object type
+            Result object metadata plus mode, edge count, and per-segment evidence.
         """
-        bridge = await get_bridge()
+        plane_mode = plane_point is not None or plane_normal is not None
+        path_mode = section_path is not None
+        if plane_mode and path_mode:
+            raise ValueError(
+                "Use either plane_point/plane_normal or section_path, not both"
+            )
+        if not plane_mode and not path_mode:
+            raise ValueError(
+                "Provide plane_point/plane_normal or section_path"
+            )
+        if plane_mode:
+            if plane_point is None or plane_normal is None:
+                raise ValueError(
+                    "plane_point and plane_normal must be provided together"
+                )
+            if len(plane_point) != 3 or len(plane_normal) != 3:
+                raise ValueError("plane_point and plane_normal must contain 3 values")
+            if not all(math.isfinite(float(value)) for value in [*plane_point, *plane_normal]):
+                raise ValueError("plane_point and plane_normal must be finite")
+            if math.sqrt(sum(float(value) ** 2 for value in plane_normal)) <= 1e-9:
+                raise ValueError("plane_normal must be non-zero")
+        else:
+            if section_path is None or len(section_path) < 2:
+                raise ValueError("section_path must contain at least 2 points")
+            if any(len(point) != 3 for point in section_path):
+                raise ValueError("Every section_path point must contain 3 values")
+            if section_depth_direction is None or len(section_depth_direction) != 3:
+                raise ValueError(
+                    "section_depth_direction with 3 values is required for section_path"
+                )
+            flat_values = [value for point in section_path for value in point]
+            flat_values.extend(section_depth_direction)
+            if not all(math.isfinite(float(value)) for value in flat_values):
+                raise ValueError("section_path and section_depth_direction must be finite")
+            depth = [float(value) for value in section_depth_direction]
+            depth_length = math.sqrt(sum(value * value for value in depth))
+            if depth_length <= 1e-9:
+                raise ValueError("section_depth_direction must be non-zero")
+            for index, (start, end) in enumerate(zip(section_path, section_path[1:]), start=1):
+                segment = [float(end[i]) - float(start[i]) for i in range(3)]
+                segment_length = math.sqrt(sum(value * value for value in segment))
+                if segment_length <= 1e-9:
+                    raise ValueError(f"section_path segment {index} has zero length")
+                normalized_dot = abs(sum(segment[i] * depth[i] for i in range(3))) / (
+                    segment_length * depth_length
+                )
+                if normalized_dot > 1e-6:
+                    raise ValueError(
+                        "section_depth_direction must be perpendicular to every "
+                        f"section_path segment; segment {index} has abs(dot)="
+                        f"{normalized_dot:.6g}"
+                    )
 
+        bridge = await get_bridge()
         code = f"""
 import Part
 
@@ -3099,32 +3166,151 @@ if doc is None:
 obj = doc.getObject({object_name!r})
 if obj is None:
     raise ValueError(f"Object not found: {object_name!r}")
+if not hasattr(obj, "Shape") or obj.Shape is None or obj.Shape.isNull():
+    raise ValueError("Object has no valid shape")
 
-if not hasattr(obj, "Shape"):
-    raise ValueError("Object has no shape")
+plane_point_data = {plane_point!r}
+plane_normal_data = {plane_normal!r}
+section_path_data = {section_path!r}
+depth_direction_data = {section_depth_direction!r}
+align_segments = {align_segments!r}
 
-# Wrap in transaction for undo support
+def _vector(values, label):
+    if values is None or len(values) != 3:
+        raise ValueError(f"{{label}} must contain exactly 3 values")
+    vector = FreeCAD.Vector(float(values[0]), float(values[1]), float(values[2]))
+    if vector.Length <= 1e-9:
+        raise ValueError(f"{{label}} must be non-zero")
+    return vector
+
+def _bbox_corners(bound_box):
+    return [
+        FreeCAD.Vector(x, y, z)
+        for x in (bound_box.XMin, bound_box.XMax)
+        for y in (bound_box.YMin, bound_box.YMax)
+        for z in (bound_box.ZMin, bound_box.ZMax)
+    ]
+
+def _aligned_transform(segment_origin, tangent, depth, plane_axis, distance):
+    matrix = FreeCAD.Matrix()
+    matrix.A11, matrix.A12, matrix.A13 = tangent.x, tangent.y, tangent.z
+    matrix.A21, matrix.A22, matrix.A23 = depth.x, depth.y, depth.z
+    matrix.A31, matrix.A32, matrix.A33 = plane_axis.x, plane_axis.y, plane_axis.z
+    matrix.A14 = float(distance - tangent.dot(segment_origin))
+    matrix.A24 = 0.0
+    matrix.A34 = float(-plane_axis.dot(segment_origin))
+    matrix.A44 = 1.0
+    return matrix
+
 doc.openTransaction("Slice Shape")
 try:
-    point = FreeCAD.Vector({plane_point[0]}, {plane_point[1]}, {plane_point[2]})
-    normal = FreeCAD.Vector({plane_normal[0]}, {plane_normal[1]}, {plane_normal[2]})
-
-    # Create section
-    wires = obj.Shape.slice(normal, point.dot(normal))
-
-    if not wires:
-        raise ValueError("Slice produced no result - plane may not intersect shape")
-
-    # Make a compound of the wires
-    if len(wires) == 1:
-        section_shape = wires[0]
+    segment_evidence = []
+    if section_path_data is None:
+        point = FreeCAD.Vector(*[float(value) for value in plane_point_data])
+        normal = _vector(plane_normal_data, "plane_normal")
+        normal.normalize()
+        sections = obj.Shape.slice(normal, point.dot(normal))
+        if not sections:
+            raise ValueError(
+                "Slice produced no result - plane may not intersect shape"
+            )
+        section_shape = (
+            sections[0] if len(sections) == 1 else Part.makeCompound(sections)
+        )
+        mode = "plane"
+        path_length = None
+        segment_evidence.append({{
+            "index": 1,
+            "edge_count": len(section_shape.Edges),
+            "normal": [float(normal.x), float(normal.y), float(normal.z)],
+        }})
     else:
-        section_shape = Part.makeCompound(wires)
+        depth = _vector(depth_direction_data, "section_depth_direction")
+        depth.normalize()
+        points = [FreeCAD.Vector(*[float(value) for value in item]) for item in section_path_data]
+        bound_box = obj.Shape.BoundBox
+        depth_projections = [corner.dot(depth) for corner in _bbox_corners(bound_box)]
+        depth_min = min(depth_projections)
+        depth_max = max(depth_projections)
+        bbox_diagonal = (
+            float(bound_box.XLength) ** 2
+            + float(bound_box.YLength) ** 2
+            + float(bound_box.ZLength) ** 2
+        ) ** 0.5
+        depth_span = max(depth_max - depth_min, bbox_diagonal, 1.0)
+        margin = max(1.0, depth_span * 0.05)
+        depth_min -= margin
+        depth_max += margin
 
-    result_name = {result_name!r} or f"{{obj.Name}}_slice"
-    result = doc.addObject("Part::Feature", result_name)
+        section_parts = []
+        cumulative_distance = 0.0
+        for index, (start, end) in enumerate(zip(points, points[1:]), start=1):
+            segment = end - start
+            segment_length = float(segment.Length)
+            if segment_length <= 1e-9:
+                raise ValueError(f"section_path segment {{index}} has zero length")
+            tangent = segment * (1.0 / segment_length)
+            perpendicularity = abs(float(tangent.dot(depth)))
+            if perpendicularity > 1e-6:
+                raise ValueError(
+                    f"section_depth_direction must be perpendicular to segment {{index}} "
+                    f"(abs(dot)={{perpendicularity:.6g}})"
+                )
+            plane_axis = tangent.cross(depth)
+            if plane_axis.Length <= 1e-9:
+                raise ValueError(f"Cannot construct cutting plane for segment {{index}}")
+            plane_axis.normalize()
+
+            start_depth = start.dot(depth)
+            end_depth = end.dot(depth)
+            corner0 = start + depth * (depth_min - start_depth)
+            corner1 = end + depth * (depth_min - end_depth)
+            corner2 = end + depth * (depth_max - end_depth)
+            corner3 = start + depth * (depth_max - start_depth)
+            cutting_wire = Part.makePolygon([corner0, corner1, corner2, corner3, corner0])
+            cutting_face = Part.Face(cutting_wire)
+            segment_section = obj.Shape.section(cutting_face)
+            edge_count = 0 if segment_section.isNull() else len(segment_section.Edges)
+
+            if edge_count:
+                if align_segments:
+                    transform = _aligned_transform(
+                        start, tangent, depth, plane_axis, cumulative_distance
+                    )
+                    segment_section = segment_section.transformGeometry(transform)
+                section_parts.append(segment_section)
+
+            segment_evidence.append({{
+                "index": index,
+                "start": [float(start.x), float(start.y), float(start.z)],
+                "end": [float(end.x), float(end.y), float(end.z)],
+                "length": segment_length,
+                "edge_count": edge_count,
+                "cutting_plane_normal": [
+                    float(plane_axis.x), float(plane_axis.y), float(plane_axis.z)
+                ],
+                "aligned_start": cumulative_distance if align_segments else None,
+            }})
+            cumulative_distance += segment_length
+
+        if not section_parts:
+            raise ValueError(
+                "Broken-path slice produced no result - cutting path may not intersect shape"
+            )
+        section_shape = (
+            section_parts[0]
+            if len(section_parts) == 1
+            else Part.makeCompound(section_parts)
+        )
+        mode = "aligned_path" if align_segments else "broken_path"
+        path_length = cumulative_distance
+
+    if section_shape.isNull() or not section_shape.Edges:
+        raise ValueError("Slice produced an empty section shape")
+
+    requested_name = {result_name!r} or f"{{obj.Name}}_slice"
+    result = doc.addObject("Part::Feature", requested_name)
     result.Shape = section_shape
-
     doc.recompute()
     doc.commitTransaction()
 
@@ -3132,6 +3318,12 @@ try:
         "name": result.Name,
         "label": result.Label,
         "type_id": result.TypeId,
+        "mode": mode,
+        "edge_count": len(section_shape.Edges),
+        "segment_count": len(segment_evidence),
+        "segments": segment_evidence,
+        "path_length": path_length,
+        "aligned": bool(section_path_data is not None and align_segments),
     }}
 except Exception:
     doc.abortTransaction()
@@ -3150,20 +3342,11 @@ except Exception:
         result_name: str | None = None,
         doc_name: str | None = None,
     ) -> dict[str, Any]:
-        """Create a cross-section of a shape at a standard plane.
+        """Create a cross-section of a shape at a standard origin plane.
 
-        Args:
-            object_name: Name of the object to section.
-            plane: Section plane: "XY", "XZ", or "YZ". Defaults to "XY".
-            offset: Offset from origin along the plane normal. Defaults to 0.
-            result_name: Name for result object. Auto-generated if None.
-            doc_name: Document containing the object. Uses active document if None.
-
-        Returns:
-            Dictionary with result object information:
-                - name: Result object name
-                - label: Result object label
-                - type_id: Result object type
+        This is the compact convenience wrapper for ordinary XY/XZ/YZ sections.
+        Use ``slice_shape(section_path=..., section_depth_direction=...)`` for
+        offset/aligned sections whose cutting line is broken.
         """
         plane_normals = {
             "XY": [0, 0, 1],
@@ -3177,7 +3360,13 @@ except Exception:
         normal = plane_normals[plane]
         point = [n * offset for n in normal]
 
-        return await slice_shape(object_name, point, normal, result_name, doc_name)
+        return await slice_shape(
+            object_name=object_name,
+            plane_point=point,
+            plane_normal=normal,
+            result_name=result_name,
+            doc_name=doc_name,
+        )
 
     # =========================================================================
     # Part Compound Operations

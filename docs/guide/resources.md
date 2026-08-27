@@ -69,7 +69,9 @@ Skill.
 ### freecad://workflows/drawing-reconstruction
 
 Returns task-specific context that routes drawing reconstruction into the
-`$freecad-engineering` Skill. It is not a separate mandatory state machine.
+`$freecad-engineering` Skill, including the requirement to inventory every
+source view/dimension and reproduce every source-view manifest record for final
+one-to-one validation. It is not a separate mandatory state machine.
 
 ### freecad://workflows/model-modification
 
