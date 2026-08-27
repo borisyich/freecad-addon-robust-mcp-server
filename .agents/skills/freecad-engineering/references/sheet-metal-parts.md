@@ -48,6 +48,20 @@ Before modeling, identify:
 Choose the fixed panel so the largest and most dimensionally stable portion of
 the part remains stationary while other panels fold from it.
 
+Represent this as a panel-and-bend graph in the task record. Give every panel and
+bend a stable ID. For each bend record:
+
+- bend line/axis and source region;
+- fixed panel and moving panel;
+- signed bend direction relative to the viewed blank face;
+- angle, inside radius, thickness, and neutral/K-factor rule;
+- expected final panel normal and formed envelope;
+- holes/cutouts owned by each adjacent panel.
+
+`BEND UP` and `BEND DOWN` are relative to the referenced blank face, not
+automatically global +Z/-Z. Resolve the drawing view and blank-face normal before
+converting the note to a world-axis rotation.
+
 ## 4. Prefer dedicated sheet-metal features
 
 Call `sheet_metal_capabilities` before choosing a native SheetMetal construction
@@ -59,6 +73,9 @@ geometry.
 Model the sheet as sheet metal rather than a thick block with pockets when the
 part is clearly bend dominated. Use ordinary PartDesign only for features the
 sheet-metal workflow cannot represent reliably.
+
+Resolve topology inputs with `select_subshapes`; do not guess generated Edge/Face
+indices. Keep the native sheet-metal history linear from the current Body Tip.
 
 ## 5. Bend-development reasoning
 
@@ -100,6 +117,11 @@ created before folding. If its functional location is dimensioned on the formed
 part, creating/verifying it after the bend can be safer. The final geometry and
 flat/formed correspondence matter more than a universal holes-first/last rule.
 
+For a drawing-derived flat pattern, accept feature groups separately: external
+blank contour, stated planar radii, holes/cutouts, bend lines, then forming. Do
+not chase a fully constrained sketch before contour topology, hole centers, and
+flat dimensions agree with the source.
+
 ## 7. Verification
 
 After every important bend:
@@ -107,12 +129,17 @@ After every important bend:
 - recompute;
 - inspect sheet thickness and sheet-metal state;
 - verify panel orientation and bend direction;
-- compare the equivalent drawing view when modeling from a drawing.
+- measure the moved panel position/normal and formed envelope;
+- reopen the relevant source crop and compare the equivalent drawing view when
+  modeling from a drawing;
+- update the panel-and-bend graph and accept/rework the bend before continuing.
 
 At the end:
 
 - unfold the part when supported;
 - compare the unfolded outline and bend layout to any supplied flat pattern;
+- verify bend-line coordinates, panel adjacency, and flat-domain hole/cutout
+  positions rather than checking only the overall blank bounds;
 - check that thickness is consistent and that the result is one intended sheet
   body;
 - verify holes/cutouts near bends for unexpected deformation or relocation.
@@ -125,4 +152,6 @@ At the end:
 - Bend direction, angle, radius, fixed panel, and flange orientation are
   consistent with the source.
 - Unfolded geometry is checked when the workflow supports it.
+- Every panel/bend ID is reconciled with its source evidence and final normal;
+  no bend direction remains implicit.
 - Limitations for deep-drawn/stretch-formed geometry are explicitly reported.

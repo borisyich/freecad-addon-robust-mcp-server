@@ -49,6 +49,20 @@ Use pockets/cuts that express the intended removal. Avoid building a complicated
 union of small positive blocks when a simple stock minus a few cuts represents
 the part more clearly.
 
+Before details, distinguish these commonly confused dominant forms:
+
+- **solid prismatic bracket/plate:** primary envelope plus local removal;
+- **thin-walled cover/tray/housing:** outer envelope and open inner cavity are
+  primary geometry; a shallow recess on a solid block is not equivalent;
+- **cored casting/housing:** webs, cavities, feet, and drafted lobes define the
+  body before machined faces and bores;
+- **open ribbed/spoked/windowed form:** air gaps are primary topology, not lines
+  engraved into a filled plate.
+
+For a thin-walled or cored body, verify an actual section through the cavity and
+the wall sequence. Exterior bounds alone cannot distinguish an open shell from a
+solid approximation.
+
 ## 3. Turned / axisymmetric parts
 
 When most dimensions are diameters and axial lengths:
@@ -73,6 +87,21 @@ For housings, flanges, impeller-like bases, webs, or cast/forged shapes:
 - cut shared bores and holes only after the masses they pass through exist;
 - keep open windows and air gaps as real topology, not engraved lines on a slab;
 - reserve finishing radii for the end and re-check interfaces afterward.
+
+Use a dominant-form checkpoint before machining detail:
+
+1. verify main external envelope and internal cavity/core;
+2. inspect a section along each principal bore or chamber axis;
+3. confirm that bosses/ribs attach to the parent material with deliberate
+   overlap and do not close intended voids;
+4. confirm that through windows are topological openings and blind pockets retain
+   the sectioned web shown by the source;
+5. only then add bolt patterns, local bores, slots, and finishing radii.
+
+Common wrong-but-valid models include a slab-sided box instead of a casting, a
+solid disk instead of an annular/cored flange, full-depth tubes where the source
+shows local flange holes, and spokes fused into a filled plate. Treat these as
+base-strategy failures.
 
 ## 5. Additive parts
 
@@ -99,6 +128,26 @@ Start from the intended final material distribution:
 - After fillets/chamfers, re-check critical bores, mating faces, and repeated
   feature counts.
 
+## 7. Feature-specific evidence
+
+Select evidence that can falsify the intended feature rather than repeatedly
+checking only global validity:
+
+- stock/outer form: bounding box, principal face positions, and one-solid state;
+- bore/hole: analytic surface type, axis, diameter, depth, center, and through vs
+  blind termination;
+- pocket/window: depth, bottom/web presence, opening count, and section topology;
+- boss/rib/spoke: attachment to the parent, thickness/profile, count, and open
+  space around it;
+- pattern: accepted seed, count, pitch/angle, center/axis, and material-change
+  diagnostics;
+- finishing feature: radius/chamfer size plus unchanged interface inventory.
+
+For STEP/BREP benchmark or interchange output, prefer a simpler valid analytic
+construction over a fragile stack of tangent or coincident booleans. Validate
+the exported artifact, because a shape that recomputes in memory can still fail
+after STEP round-trip.
+
 ## Completion checks
 
 - The dominant body construction matches the likely manufacturing family.
@@ -107,5 +156,7 @@ Start from the intended final material distribution:
 - Axisymmetric parts have a stable, correctly oriented rotational base.
 - Additive parts are modeled as intended material, not as a fake machining
   sequence.
+- Thin-walled, cored, and open-frame forms have section/topology evidence, not
+  only a matching outer envelope.
 - Interfaces, bores, pockets, pattern counts, and one-solid expectations are
   verified before finishing.

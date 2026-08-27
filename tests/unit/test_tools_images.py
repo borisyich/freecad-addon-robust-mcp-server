@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import base64
 import os
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from mcp.types import CallToolResult, ImageContent
 from PIL import Image as PILImage
+
+from freecad_mcp.bridge.base import ExecutionResult
 
 
 @pytest.fixture
@@ -187,6 +189,7 @@ async def test_compare_images_rejects_tiny_panels(registered_tools, tmp_path):
     assert result.isError is True
     assert "at least 200" in result.structuredContent["error"]
 
+
 @pytest.mark.asyncio
 async def test_fastmcp_serializes_open_image_as_image_content(tmp_path):
     """FastMCP must preserve ImageContent through its result conversion layer."""
@@ -207,7 +210,9 @@ async def test_fastmcp_serializes_open_image_as_image_content(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_compare_images_returns_optional_review_guidance(registered_tools, tmp_path):
+async def test_compare_images_returns_optional_review_guidance(
+    registered_tools, tmp_path
+):
     """compare_images should suggest review without imposing a rigid gate."""
     reference = tmp_path / "reference.png"
     candidate = tmp_path / "candidate.png"
@@ -229,6 +234,69 @@ async def test_compare_images_returns_optional_review_guidance(registered_tools,
     assert review["optional_decision_values"] == ["continue", "rework"]
     assert "every principal target view" in review["when_uncertain"]
     assert "profile_plane_and_axis_direction" in review["inspect"]
+
+
+@pytest.mark.asyncio
+async def test_compare_images_records_document_geometry_evidence(tmp_path):
+    """A bridged comparison should be reusable by final validation."""
+    from freecad_mcp.tools.images import register_image_tools
+    from freecad_mcp.visual_evidence import (
+        clear_visual_comparisons,
+        visual_comparison_status,
+    )
+
+    clear_visual_comparisons()
+    reference = tmp_path / "reference.png"
+    candidate = tmp_path / "candidate.png"
+    _write_image(reference)
+    _write_image(candidate)
+    signature = {
+        "document": "Housing",
+        "geometry_signature": "abc123",
+        "shape_object_count": 2,
+        "body_tips": [{"body": "HousingCover", "tip": "Chamfer"}],
+    }
+    bridge = AsyncMock()
+    bridge.execute_python = AsyncMock(
+        return_value=ExecutionResult(
+            success=True,
+            result=signature,
+            stdout="",
+            stderr="",
+            execution_time_ms=1.0,
+        )
+    )
+
+    async def get_bridge():
+        return bridge
+
+    mcp = MagicMock()
+    mcp._registered_tools = {}
+
+    def tool_decorator():
+        def wrapper(func):
+            mcp._registered_tools[func.__name__] = func
+            return func
+
+        return wrapper
+
+    mcp.tool = tool_decorator
+    register_image_tools(mcp, get_bridge)
+
+    result = await mcp._registered_tools["compare_images"](
+        str(reference),
+        str(candidate),
+        doc_name="Housing",
+        view_context="Front / XZ / normal Y",
+    )
+
+    assert result.structuredContent["validation_evidence"]["recorded"] is True
+    assert result.structuredContent["validation_evidence"]["document"] == "Housing"
+    assert visual_comparison_status(signature)["status"] == "current"
+    generated_code = bridge.execute_python.await_args.args[0]
+    assert "_document_geometry_signature" in generated_code
+    assert "FreeCAD.getDocument('Housing')" in generated_code
+    clear_visual_comparisons()
 
 
 @pytest.mark.asyncio
@@ -293,9 +361,7 @@ async def test_open_image_tiles_rejects_excessive_grid(registered_tools, tmp_pat
     drawing = tmp_path / "drawing.png"
     _write_image(drawing)
 
-    result = await registered_tools["open_image_tiles"](
-        str(drawing), rows=4, columns=4
-    )
+    result = await registered_tools["open_image_tiles"](str(drawing), rows=4, columns=4)
 
     assert result.isError is True
     assert "must not exceed 9" in result.structuredContent["error"]

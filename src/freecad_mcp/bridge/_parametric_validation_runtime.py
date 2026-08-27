@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from textwrap import dedent
 
+from freecad_mcp.bridge._document_signature_runtime import (
+    DOCUMENT_SIGNATURE_RUNTIME_HELPERS,
+)
 from freecad_mcp.tools._freecad_runtime_helpers import (
     SKETCH_ANALYSIS_RUNTIME_HELPERS,
 )
@@ -87,6 +90,8 @@ import re
 import FreeCAD
 
 __SKETCH_HELPERS__
+
+__DOCUMENT_SIGNATURE_HELPERS__
 
 required_dimension_names = __REQUIRED_DIMENSION_NAMES__
 validation_target = __VALIDATION_TARGET__ or {"kind": "model"}
@@ -600,9 +605,12 @@ def _spreadsheet_summary(sheet, expression_bindings):
                 and any(_text_uses_token(expression, token) for token in tokens)
             ):
                 reference = dict(binding)
-                if not any(
-                    _text_uses_effective_token(expression, token) for token in tokens
-                ):
+                effective_tokens = [
+                    token
+                    for token in tokens
+                    if _text_uses_effective_token(expression, token)
+                ]
+                if not effective_tokens:
                     reference["target_driving"] = False
                     reference["sketch_driving"] = False
                     reference["solid_driving"] = False
@@ -610,7 +618,29 @@ def _spreadsheet_summary(sheet, expression_bindings):
                     reference["influence_reason"] = (
                         "parameter reference is structurally multiplied by zero"
                     )
+                    reference["dependency_kind"] = "neutralized"
+                elif any(
+                    _expression_is_direct_token(expression, token)
+                    for token in effective_tokens
+                ):
+                    reference["dependency_kind"] = "direct_reference"
+                else:
+                    reference["dependency_kind"] = "derived_expression"
                 references.append(reference)
+
+        driving_references = [
+            reference
+            for reference in references
+            if reference.get("target_driving") is True
+        ]
+        direct_reference_count = sum(
+            reference.get("dependency_kind") == "direct_reference"
+            for reference in driving_references
+        )
+        derived_reference_count = sum(
+            reference.get("dependency_kind") == "derived_expression"
+            for reference in driving_references
+        )
 
         cell_summary = {
             "cell": cell,
@@ -619,14 +649,13 @@ def _spreadsheet_summary(sheet, expression_bindings):
             "computed": computed,
             "references": references,
             "reference_count": len(references),
+            "direct_reference_count": direct_reference_count,
+            "derived_reference_count": derived_reference_count,
             "dependencies": [],
             "dependent_cells": [],
-            "connected_to_tree": any(
-                reference.get("target_driving") for reference in references
-            ),
-            "connected_to_target": any(
-                reference.get("target_driving") for reference in references
-            ),
+            "connected_to_tree": bool(driving_references),
+            "connected_to_target": bool(driving_references),
+            "connection_kind": None,
         }
         cells.append(cell_summary)
         if alias:
@@ -708,6 +737,12 @@ def _resolve_spreadsheet_connectivity(spreadsheets):
         for cell in spreadsheet["cells"]:
             cell["connected_to_tree"] = cell["node_id"] in connected
             cell["connected_to_target"] = cell["connected_to_tree"]
+            if cell["direct_reference_count"]:
+                cell["connection_kind"] = "direct_reference"
+            elif cell["derived_reference_count"]:
+                cell["connection_kind"] = "derived_expression"
+            elif cell["connected_to_tree"]:
+                cell["connection_kind"] = "transitive_spreadsheet_dependency"
             cell["connected_to_final_solid"] = bool(
                 validation_target_kind == "model" and cell["connected_to_tree"]
             )
@@ -933,6 +968,8 @@ def _sketch_summary(sketch, body_name=None):
 
 
 def _history_role(obj):
+    if _is_multi_transform_stage(obj):
+        return "transformation_stage"
     type_id = getattr(obj, "TypeId", "")
     if type_id == "Sketcher::SketchObject":
         return "sketch"
@@ -945,12 +982,61 @@ def _history_role(obj):
     return "other"
 
 
+def _is_multi_transform_stage(obj):
+    """Return whether obj is a metadata-only stage owned by MultiTransform."""
+    if getattr(obj, "TypeId", "") not in {
+        "PartDesign::LinearPattern",
+        "PartDesign::PolarPattern",
+        "PartDesign::Mirrored",
+        "PartDesign::Scaled",
+    }:
+        return False
+    for parent in getattr(obj, "InList", []) or []:
+        if getattr(parent, "TypeId", "") != "PartDesign::MultiTransform":
+            continue
+        try:
+            if any(stage is obj or stage == obj for stage in parent.Transformations):
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def _expression_is_direct_token(text, token):
+    """Return whether an expression is only one parameter reference.
+
+    Arithmetic, functions, units, and references through another Spreadsheet
+    cell are deliberately classified as derived. This is syntax evidence only;
+    even a direct reference does not prove engineering design intent.
+    """
+    value = str(text or "").strip()
+    if value.startswith("="):
+        value = value[1:].strip()
+    changed = True
+    while changed and value.startswith("(") and value.endswith(")"):
+        changed = False
+        depth = 0
+        for index, character in enumerate(value):
+            if character == "(":
+                depth += 1
+            elif character == ")":
+                depth -= 1
+                if depth == 0 and index != len(value) - 1:
+                    break
+        else:
+            if depth == 0:
+                value = value[1:-1].strip()
+                changed = True
+    return value == token
+
+
 def _history_item(obj, index):
     states = _state_values(obj)
     shape = _shape_summary(obj)
+    is_multi_transform_stage = _is_multi_transform_stage(obj)
     shape_is_problem = shape["present"] and (
         shape["valid"] is False or shape["is_null"] is True
-    )
+    ) and not is_multi_transform_stage
     is_static_shape_snapshot = bool(
         getattr(obj, "TypeId", None) == "PartDesign::Feature"
         and shape["present"]
@@ -964,6 +1050,7 @@ def _history_item(obj, index):
         "label": getattr(obj, "Label", None),
         "type_id": getattr(obj, "TypeId", None),
         "role": _history_role(obj),
+        "internal_transformation_stage": is_multi_transform_stage,
         "valid": bool(not _state_has_error(states) and not shape_is_problem),
         "state": states,
         "visibility": _visibility(obj),
@@ -1123,7 +1210,10 @@ if doc is None:
             "provided": bool(required_dimension_names),
             "required_names": required_dimension_names,
             "usage": [],
-            "all_used": False,
+            "all_connected": False,
+            "all_directly_connected": False,
+            "semantic_relationships_verified": False,
+            "claim_scope": "dependency_connectivity_only",
             "named_dimension_constraints": [],
             "spreadsheet_parameters": [],
         },
@@ -1345,10 +1435,17 @@ else:
                     "computed": parameter["computed"],
                     "references": parameter["references"],
                     "reference_count": parameter["reference_count"],
+                    "direct_reference_count": parameter[
+                        "direct_reference_count"
+                    ],
+                    "derived_reference_count": parameter[
+                        "derived_reference_count"
+                    ],
                     "dependencies": parameter["dependencies"],
                     "dependent_cells": parameter["dependent_cells"],
                     "connected_to_tree": parameter["connected_to_tree"],
                     "connected_to_target": parameter["connected_to_target"],
+                    "connection_kind": parameter["connection_kind"],
                     "connected_to_final_solid": parameter[
                         "connected_to_final_solid"
                     ],
@@ -1374,17 +1471,29 @@ else:
             for item in spreadsheet_matches
             if item["connected_to_target"]
         ]
-        if driving_sketch_matches or linked_spreadsheet_matches:
+        direct_spreadsheet_matches = [
+            item
+            for item in linked_spreadsheet_matches
+            if item["connection_kind"] == "direct_reference"
+        ]
+        derived_spreadsheet_matches = [
+            item
+            for item in linked_spreadsheet_matches
+            if item["connection_kind"] != "direct_reference"
+        ]
+        if driving_sketch_matches or direct_spreadsheet_matches:
             status = (
-                "sketch_driving"
+                "connected_to_sketch"
                 if validation_target_kind == "sketch"
-                else "solid_driving"
+                else "connected_to_final_solid"
             )
+        elif derived_spreadsheet_matches:
+            status = "connected_via_derived_expression"
         elif sketch_matches or spreadsheet_matches:
             status = (
-                "defined_but_not_sketch_driving"
+                "defined_but_not_connected_to_sketch"
                 if validation_target_kind == "sketch"
-                else "defined_but_not_solid_driving"
+                else "defined_but_not_connected_to_final_solid"
             )
         else:
             status = "missing"
@@ -1392,6 +1501,13 @@ else:
             {
                 "name": required_name,
                 "status": status,
+                "dependency_connectivity_verified": status
+                in {
+                    "connected_to_sketch",
+                    "connected_to_final_solid",
+                    "connected_via_derived_expression",
+                },
+                "semantic_relationship_verified": False,
                 "sketch_constraints": sketch_matches,
                 "spreadsheet_parameters": spreadsheet_matches,
             }
@@ -1454,8 +1570,8 @@ else:
                 }
             )
         elif item["status"] in {
-            "defined_but_not_solid_driving",
-            "defined_but_not_sketch_driving",
+            "defined_but_not_connected_to_final_solid",
+            "defined_but_not_connected_to_sketch",
         }:
             target_description = (
                 f"non-construction geometry of sketch {validation_target_name!r}"
@@ -1475,6 +1591,22 @@ else:
                         "Do not delete or rebuild an accepted sketch constraint graph "
                         "solely to change this diagnostic; inspect the existing "
                         "dependency path and prefer a semantic feature-property binding."
+                    ),
+                }
+            )
+        elif item["status"] == "connected_via_derived_expression":
+            findings.append(
+                {
+                    "severity": "warning",
+                    "category": "required_dimension_semantics_unverified",
+                    "object": None,
+                    "message": (
+                        f"Required drawing dimension {item['name']!r} reaches the "
+                        "validation target only through arithmetic or a transitive "
+                        "Spreadsheet dependency. This proves dependency connectivity, "
+                        "not that the formula expresses an engineering relationship. "
+                        "Verify the relation against the source dimension ledger and "
+                        "do not report it as semantic design-intent validation."
                     ),
                 }
             )
@@ -1785,8 +1917,10 @@ else:
             f"workflow={validation_workflow}; assessment={assessment}."
         )
 
-    driving_status = (
-        "sketch_driving" if validation_target_kind == "sketch" else "solid_driving"
+    direct_connection_status = (
+        "connected_to_sketch"
+        if validation_target_kind == "sketch"
+        else "connected_to_final_solid"
     )
 
     _result_ = {
@@ -1805,6 +1939,7 @@ else:
             "recomputed": bool(__RECOMPUTE__ and recompute_error is None),
             "recompute_error": recompute_error,
         },
+        "geometry_signature": _document_geometry_signature(doc),
         "counts": {
             "bodies": len(bodies),
             "body_history_items": sum(body["history_count"] for body in bodies),
@@ -1829,9 +1964,15 @@ else:
             "provided": bool(required_dimension_names),
             "required_names": required_dimension_names,
             "usage": dimension_usage,
-            "all_used": bool(required_dimension_names) and all(
-                item["status"] == driving_status for item in dimension_usage
+            "all_connected": bool(required_dimension_names) and all(
+                item["dependency_connectivity_verified"] for item in dimension_usage
             ),
+            "all_directly_connected": bool(required_dimension_names) and all(
+                item["status"] == direct_connection_status
+                for item in dimension_usage
+            ),
+            "semantic_relationships_verified": False,
+            "claim_scope": "dependency_connectivity_only",
             "named_dimension_constraints": named_dimension_constraints,
             "spreadsheet_parameters": spreadsheet_parameters,
         },
@@ -1853,7 +1994,8 @@ else:
                     "document and target sketch name",
                     "sketch solver, topology, outer-loop, and hole status",
                     "constraint-quality warning; 0 DoF is not acceptance",
-                    "required drawing-dimension influence on non-construction geometry",
+                    "required drawing-dimension dependency connectivity",
+                    "derived relations whose engineering semantics remain unverified",
                     "significant findings and unresolved warnings",
                 ]
                 if validation_target_kind == "sketch"
@@ -1862,7 +2004,8 @@ else:
                     "Body and Tip validity",
                     "ordered feature history",
                     "sketch solver/profile status",
-                    "required drawing-dimension usage",
+                    "required drawing-dimension dependency connectivity",
+                    "derived relations whose engineering semantics remain unverified",
                     "Spreadsheet parameter connectivity and unused aliases",
                     "significant findings and unresolved warnings",
                 ]
@@ -1874,6 +2017,9 @@ else:
             "It can verify only driving dimension identifiers supplied by the "
             "caller; it cannot discover omitted drawing dimensions, assign their "
             "driving/verification roles, or inspect source pixels.",
+            "Dependency connectivity does not prove an engineering relationship. "
+            "In particular, arithmetic and transitive Spreadsheet expressions are "
+            "reported as semantically unverified even when they change the Shape.",
             "It does not prove correspondence to a drawing, manufacturability, "
             "or design intent.",
             "Shape validity uses FreeCAD/OpenCASCADE isValid checks and does not "
@@ -1886,6 +2032,10 @@ else:
     return (
         dedent(template)
         .replace("__SKETCH_HELPERS__", SKETCH_ANALYSIS_RUNTIME_HELPERS)
+        .replace(
+            "__DOCUMENT_SIGNATURE_HELPERS__",
+            DOCUMENT_SIGNATURE_RUNTIME_HELPERS,
+        )
         .replace("__DOC_NAME__", repr(doc_name))
         .replace("__RECOMPUTE__", repr(recompute))
         .replace("__INCLUDE_CONSTRAINTS__", repr(include_sketch_constraints))

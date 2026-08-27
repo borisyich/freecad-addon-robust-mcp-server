@@ -418,7 +418,9 @@ feature; a screenshot alone is not a completed visual checkpoint. Compare the
 single seed before any pattern. If one pair is uncertain, compare all principal
 target views that exist—front, matching side, top, then isometric.
 `compare_images` is visual assistance rather than an automatic correctness
-metric; use formal checkpoints only when the task benefits from them.
+metric; use formal checkpoints only when the task benefits from them. It records
+the current active/named document geometry signature, so final validation can
+reject a missing comparison or one made before later geometry changes.
 
 ---
 
@@ -427,7 +429,7 @@ metric; use formal checkpoints only when the task benefits from them.
 - Directional subtractive tools default to `direction="auto"` and retain only a Shape/Tip-valid result with a measurable volume decrease. `pocket_sketch` and `create_hole` use `normal`/`reversed` relative to the global sketch normal; `create_cylindrical_cut`, `groove_sketch`, and `thread_helix` use `forward`/`reversed`. Explicit directions never fall back. For `pocket_sketch`, an optional `base_feature_name` selects the authoritative base; otherwise it prefers a valid preceding Body Tip, then the nearest valid preceding solid.
 - Sketch-based Pad, Pocket, Revolution, and Groove share `type` end conditions. Linear features accept `Length`; rotational features accept `Angle`; all four also accept `ThroughAll`, `UpToFirst`, and `UpToFace`. Supply `up_to_face="Feature.FaceN"` only with `UpToFace`. Additive `ThroughAll` is translated to FreeCAD's native `UpToLast` mode. Generic `extrude_shape` remains a fixed-vector B-rep operation; use `pad_sketch` when termination depends on Body material or a target face.
 - `set_body_tip` changes the active Body result without using `edit_object` or GUI selection and validates the resulting Shape/Tip contract.
-- `linear_pattern` and `polar_pattern` are for one transformation of a non-pattern seed. Use `multi_transform_pattern` for combined linear and polar stages. For drawing reconstruction, accept the single seed through `compare_images` before repeating it.
+- `linear_pattern` and `polar_pattern` are for one transformation of a non-pattern seed. Use `multi_transform_pattern` for combined linear and polar stages. Its internal pattern stages are metadata-only native Body members with no independent Shape; this is expected and is covered by `transformation_validation`. `validate_parametric_model` does not classify linked MultiTransform stages as broken, while an unrelated null pattern is still an error. For drawing reconstruction, accept the single seed through `compare_images` before repeating it.
 - Pattern, Pocket, and thread responses include before/after volume diagnostics. A valid Shape is not proof that the intended amount of material changed.
 - `boolean_operation` aborts its transaction for a null/invalid Shape or a solid
   count different from `expected_solid_count` (default `1`). Successful results
@@ -436,6 +438,10 @@ metric; use formal checkpoints only when the task benefits from them.
 - A failed `fillet_edges` rolls back and returns structured source/selection,
   adjacent-face, radius, result-state, and per-edge trial evidence. When every
   edge succeeds individually but the group fails, inspect `failing_edge_groups`.
+- Pass the current Body Tip—not the `PartDesign::Body` container—to
+  `fillet_edges` and `chamfer_edges`. A Body or orphaned PartDesign source is
+  rejected; neither tool silently creates a standalone `Part::Fillet` or
+  `Part::Chamfer`.
 - `thread_helix` creates native additive or subtractive helical geometry from an editable profile sketch.
 - `spreadsheet_apply_batch` stages numeric/structured-Quantity values, aliases, alias-dependent formulas, and property bindings in one transaction. Use `{"value":40,"unit":"mm"}` for a Quantity, `formula="=..."` for a formula, and `text="..."` for literal text; ambiguous raw string values such as `"40 mm"` are rejected. After recompute it evaluates every non-empty formula cell on the sheet, including unchanged formulas that depend on a modified cell or alias. Any formula failure restores affected cells, aliases, and expressions. Report View formula errors are surfaced as `FreeCADReportError` rather than success.
 - A unitless spreadsheet number bound to an angle property is interpreted in degrees, so `360` can safely drive `PolarPattern.Angle`. Supply an explicit angle to batch as `{"value":360,"unit":"deg"}`.
@@ -469,8 +475,12 @@ For drawing/sketch input, save every non-starred dimension but classify it as
 driving, verification, or unresolved. Pass the complete driving list as
 `required_dimension_names`; retain deterministic measured evidence for every
 verification item. The final report also flags Spreadsheet aliases that
-do not drive the feature tree directly or through other cells; connect intended
-parameters or delete redundant ones.
+are disconnected, and distinguishes direct bindings from arithmetic/transitive
+connectivity. This is a dependency check, not semantic proof. Do not invent a
+ratio such as `D_OUTER_200 * 0.27` merely to preserve a selected constant while
+making a dimension appear connected. A derived formula must come from the
+drawing, geometry, or an explicit engineering rule; otherwise keep the value as
+an assumption/verification item and report it honestly.
 
 For a sketch-only deliverable, call
 `validate_parametric_model(target={"kind":"sketch","name":"SketchName"}, ...)`.
@@ -526,7 +536,9 @@ For complex parts, build step by step:
 1. Immediately before the final response, call `validate_parametric_model`. For
    drawing/sketch input include all driving dimension identifiers and verify all
    check dimensions, then resolve missing/unlinked dimensions or unused
-   Spreadsheet aliases before completion.
+   Spreadsheet aliases before completion. Supplying required drawing dimensions
+   automatically requires current `compare_images` evidence; rerun the comparison
+   after any later geometry change.
 
 ### Semantic face, edge, and vertex selection
 

@@ -1,6 +1,18 @@
 # Changelog
 ## AFTER FORK ORIGINAL REPO (consistent history of changes)
 
+- Fixed `multi_transform_pattern` validation so FreeCAD's native null-Shape
+  internal transformation stages are recognized as expected MultiTransform
+  metadata instead of invalid Body history; added stage-link diagnostics and
+  regression coverage.
+- Stopped the dimension inventory from presenting dependency connectivity as
+  semantic design-intent proof. Direct and arithmetic/transitive bindings are
+  now distinguished, derived relations warn as semantically unverified, and the
+  misleading `all_used` field is replaced by explicit connectivity fields.
+- Made `fillet_edges` and `chamfer_edges` reject a `PartDesign::Body` (or orphaned
+  PartDesign object) instead of silently switching to standalone Part features.
+- Added document-geometry signatures to `compare_images` evidence; drawing final
+  validation now rejects missing or stale comparisons after geometry changes.
 - Debugged tools
 - Added effective-volume validation and rollback for Pad, Revolution, Additive Loft, and Additive Pipe.
 - Reworked screenshots to activate the target 3D view, fit and refresh the GUI, verify image output, and optionally save without returning base64.

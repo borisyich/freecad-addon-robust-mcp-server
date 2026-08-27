@@ -436,10 +436,10 @@ The server exposes a broad MCP tool set. The tables below list common tools rath
 | ------------------ | ------------------------------------------ | ---- |
 | `linear_pattern`   | Create linear pattern of a feature         | All  |
 | `polar_pattern`    | Create validated polar pattern of one feature    | All  |
-| `multi_transform_pattern` | Combine linear/polar stages natively | All |
+| `multi_transform_pattern` | Combine linear/polar stages natively; validates internal stage links | All |
 | `mirrored_feature` | Mirror a feature across a plane            | All  |
-| `fillet_edges`     | Add fillets (rounded edges)                | All  |
-| `chamfer_edges`    | Add chamfers (beveled edges)               | All  |
+| `fillet_edges`     | Add fillets; rejects Body-as-source paradigm fallback | All  |
+| `chamfer_edges`    | Add chamfers; rejects Body-as-source paradigm fallback | All  |
 
 #### Sheet Metal (5 tools)
 
@@ -463,7 +463,7 @@ SheetMetal GUI ViewProvider, so the result remains visible and inspectable.
 | `get_screenshot`            | Return the FreeCAD view as MCP image content                  | GUI  |
 | `open_image`                | Open a local drawing or saved screenshot                      | Both |
 | `open_image_tiles`          | Return a numbered overview plus enlarged overlapping tiles   | Both |
-| `compare_images`            | Required major-feature/seed comparison for drawing reconstruction | Both |
+| `compare_images`            | Required comparison plus document-state evidence for drawing reconstruction | Both |
 | `evaluate_model_checkpoint` | Optional deterministic continue/rework assessment             | Both |
 | `set_view_angle`            | Set camera to a standard view                                 | GUI  |
 | `fit_all`                   | Fit all visible objects in the view                           | GUI  |
@@ -493,7 +493,7 @@ See [FreeCAD Engineering Skill](docs/guide/freecad-engineering-skill.md) and
 | `validate_document` | Check geometric health across a document | All |
 | `capture_shape_checkpoint` | Capture a read-only in-memory B-rep baseline | All |
 | `compare_shape_checkpoint` | Report metric deltas and exact added/removed Shape regions | All |
-| `validate_parametric_model` | Compact final report; paged/expanded parametric diagnostics on request | All |
+| `validate_parametric_model` | Final structure/connectivity report with current visual-evidence gate | All |
 | `undo_if_invalid` | Undo after invalid document state | All |
 | `safe_execute` | Run Python with optional validation and rollback | All |
 

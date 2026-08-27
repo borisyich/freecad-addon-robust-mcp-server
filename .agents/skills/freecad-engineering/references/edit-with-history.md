@@ -23,6 +23,14 @@ Before changing geometry, identify:
 The visible face is usually the result, not necessarily the correct place to
 edit.
 
+Create a history-edit contract in the task record:
+
+- requested final dimension/feature and fixed datum/interface;
+- candidate causal parameter, sketch, or feature;
+- downstream dependents that may be affected;
+- baseline final measurement, feature count, Body Tip, and solver state;
+- expected final measurement and invariants that must not change.
+
 ## 2. Find the causal parameter/feature
 
 Prefer edits in this order:
@@ -52,6 +60,14 @@ After each source edit:
 A property accepting a new value does not prove the final shape changed as
 intended.
 
+After the final geometry reaches the requested value, perform a reversible
+sensitivity check when practical: perturb the edited driving value by a small,
+safe amount, recompute, and verify that the intended feature moves while
+protected interfaces remain stable; then restore the requested value and
+recompute. Skip this only when the perturbation is unsafe or disproportionately
+expensive, and record that it was not tested. This checks editability, not only
+the current shape.
+
 ## 4. Preserve dependency semantics
 
 - Do not replace a driven dimension with a disconnected numeric copy.
@@ -79,6 +95,11 @@ If a source edit invalidates downstream history:
 3. undo/rework the causal edit or repair the affected support/reference;
 4. avoid deleting and recreating unrelated later features.
 
+Do not stack compensating tail features on a failed upstream edit. If the first
+downstream failure shows a topological-name dependency, repair the stable
+support/datum relationship when possible and then re-run the original acceptance
+measurements.
+
 ## Completion checks
 
 - The requested change is encoded in the existing design history at the correct
@@ -88,5 +109,8 @@ If a source edit invalidates downstream history:
 - Spreadsheet aliases/expressions used by the edit are connected to final
   geometry.
 - Final dimensions are measured on the resulting shape.
+- The history-edit contract is reconciled: requested result passed and protected
+  dimensions/features stayed invariant.
+- A reversible sensitivity check passed, or its omission is explicitly reported.
 - `validate_parametric_model` confirms the intended Body/Tip/history state or
   its significant warnings are explained.

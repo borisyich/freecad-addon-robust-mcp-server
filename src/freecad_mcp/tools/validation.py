@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 from freecad_mcp.bridge._parametric_validation_runtime import (
     build_parametric_validation_code,
 )
+from freecad_mcp.visual_evidence import visual_comparison_status
 
 
 class SketchValidationTarget(BaseModel):
@@ -52,11 +53,22 @@ def _compact_dimension_inventory(value: dict[str, Any]) -> dict[str, Any]:
     return {
         "provided": value.get("provided", False),
         "required_names": value.get("required_names", []),
-        "all_used": value.get("all_used", False),
+        "all_connected": value.get("all_connected", False),
+        "all_directly_connected": value.get("all_directly_connected", False),
+        "semantic_relationships_verified": value.get(
+            "semantic_relationships_verified", False
+        ),
+        "claim_scope": value.get("claim_scope", "dependency_connectivity_only"),
         "usage": [
             {
                 "name": item.get("name"),
                 "status": item.get("status"),
+                "dependency_connectivity_verified": item.get(
+                    "dependency_connectivity_verified", False
+                ),
+                "semantic_relationship_verified": item.get(
+                    "semantic_relationship_verified", False
+                ),
                 "sketch_match_count": len(item.get("sketch_constraints") or []),
                 "spreadsheet_match_count": len(
                     item.get("spreadsheet_parameters") or []
@@ -65,6 +77,56 @@ def _compact_dimension_inventory(value: dict[str, Any]) -> dict[str, Any]:
             for item in value.get("usage", [])
         ],
     }
+
+
+def _attach_visual_evidence(
+    report: dict[str, Any], *, required: bool
+) -> dict[str, Any]:
+    """Attach document-scoped compare_images evidence and enforce freshness."""
+    result = dict(report)
+    evidence = visual_comparison_status(result.get("geometry_signature"))
+    evidence["required"] = required
+    result["visual_evidence"] = evidence
+    if not required or evidence["status"] == "current":
+        return result
+
+    findings = list(result.get("findings") or [])
+    category = {
+        "missing": "visual_comparison_missing",
+        "stale": "visual_comparison_stale",
+        "unavailable": "visual_comparison_evidence_unavailable",
+    }.get(evidence["status"], "visual_comparison_missing")
+    message = {
+        "missing": (
+            "Drawing-oriented final validation requires compare_images evidence "
+            "for this document state, but no comparison was recorded."
+        ),
+        "stale": (
+            "The latest compare_images evidence predates the current document "
+            "geometry. Capture the current model view and compare it again."
+        ),
+        "unavailable": (
+            "The current document geometry signature is unavailable, so visual "
+            "comparison evidence cannot be verified."
+        ),
+    }.get(evidence["status"], "Required visual comparison evidence is missing.")
+    findings.append(
+        {
+            "severity": "error",
+            "category": category,
+            "object": (result.get("document") or {}).get("name"),
+            "message": message,
+        }
+    )
+    result["findings"] = findings
+    result["assessment"] = "invalid_or_broken"
+    summary = str(result.get("summary") or "").rstrip()
+    result["summary"] = f"{summary} Visual comparison evidence: {evidence['status']}."
+    completion_guidance = dict(result.get("completion_guidance") or {})
+    completion_guidance["visual_comparison_required"] = True
+    completion_guidance["visual_comparison_status"] = evidence["status"]
+    result["completion_guidance"] = completion_guidance
+    return result
 
 
 def _parametric_response(
@@ -108,6 +170,7 @@ def _parametric_response(
         "dimension_inventory": _compact_dimension_inventory(
             report.get("dimension_inventory") or {}
         ),
+        "visual_evidence": report.get("visual_evidence", {}),
         "finding_counts": {
             "by_severity": severity_counts,
             "by_category": category_counts,
@@ -825,6 +888,7 @@ else:
         workflow: Literal["native_parametric", "imported_brep_edit"] = (
             "native_parametric"
         ),
+        require_visual_comparison: bool | None = None,
         detail_level: Literal["summary", "structure", "full"] = "summary",
         finding_offset: int = 0,
         finding_limit: int = 20,
@@ -832,10 +896,12 @@ else:
         """Validate parametric health with a compact default response.
 
         This is the mandatory final diagnostic for tasks that create or modify a
-        FreeCAD model. It is intentionally informative rather than a rigid gate:
-        it reports Bodies and Tips, ordered Body history, shape validity, sketch
+        FreeCAD model. Structural findings are diagnostic, while required visual
+        evidence is enforced as a workflow gate. The report covers Bodies and
+        Tips, ordered Body history, shape validity, sketch
         solver/profile state, expressions, direct solid objects outside Bodies,
         Spreadsheet parameter connectivity, required drawing-dimension usage,
+        current document-scoped ``compare_images`` evidence,
         and actionable findings. Set ``target={"kind":"sketch","name":"..."}``
         to validate a sketch deliverable without treating the absence or state of
         a Body, solid, or Tip as an error. Set
@@ -845,9 +911,12 @@ else:
         final user-facing response and summarize significant findings instead of
         merely saying "done".
 
-        The tool does not verify that the model matches a drawing or that the
-        chosen manufacturing process is correct. Those remain separate visual,
-        dimensional, and engineering checks. Do not bulk-delete or recreate an
+        The tool verifies dependency connectivity, not the semantic correctness
+        of an engineering formula. Arithmetic and transitive Spreadsheet paths
+        are reported separately and remain semantically unverified. It also does
+        not decide whether compared images match; it only verifies that
+        ``compare_images`` was actually run against the current geometry state.
+        Do not bulk-delete or recreate an
         accepted sketch constraint graph solely to improve this diagnostic;
         inspect the existing dependency path or report a tracing limitation.
 
@@ -870,6 +939,10 @@ else:
                 sketch. Check/reference dimensions belong in separate deterministic
                 measurement evidence. Construction-only geometry and inactive/helper
                 objects do not count as usage.
+            require_visual_comparison: Require a successful ``compare_images``
+                call recorded against the current document geometry. When omitted,
+                this is enabled automatically whenever required drawing dimensions
+                are supplied. Pass False only for a workflow with no visual source.
             target: Optional sketch validation target. Omit it for the existing
                 whole-model/final-solid diagnostic. For a sketch-only deliverable,
                 pass ``{"kind":"sketch","name":"Sketch_FlatPattern"}``.
@@ -890,7 +963,9 @@ else:
                 - each PartDesign Body, its validity, shape, Tip, and ordered history
                 - each sketch with solver state, remaining DoF, profile state,
                   support, expressions, and constraint type counts
-                - required dimension identifiers and whether they drive geometry
+                - required dimension dependency paths, distinguishing direct from
+                  arithmetic/transitive connectivity without claiming design intent
+                - current/missing/stale visual comparison evidence
                 - Spreadsheet cells, aliases, expression bindings, and unused parameters
                 - standalone sketches and solid objects outside Bodies
                 - findings with error/warning severity
@@ -930,6 +1005,12 @@ else:
             if not normalized_target["name"]:
                 raise ValueError("target sketch name must not be empty")
 
+        visual_comparison_required = (
+            bool(normalized_required_dimensions)
+            if require_visual_comparison is None
+            else require_visual_comparison
+        )
+
         bridge = await get_bridge()
         code = build_parametric_validation_code(
             doc_name=doc_name,
@@ -941,8 +1022,12 @@ else:
         )
         result = await bridge.execute_python(code)
         if result.success and result.result:
-            return _parametric_response(
+            report = _attach_visual_evidence(
                 result.result,
+                required=visual_comparison_required,
+            )
+            return _parametric_response(
+                report,
                 detail_level,
                 finding_offset,
                 finding_limit,
@@ -972,9 +1057,19 @@ else:
                 "provided": bool(normalized_required_dimensions),
                 "required_names": normalized_required_dimensions,
                 "usage": [],
-                "all_used": False,
+                "all_connected": False,
+                "all_directly_connected": False,
+                "semantic_relationships_verified": False,
+                "claim_scope": "dependency_connectivity_only",
                 "named_dimension_constraints": [],
                 "spreadsheet_parameters": [],
+            },
+            "visual_evidence": {
+                "required": visual_comparison_required,
+                "status": "unavailable",
+                "current_comparison_count": 0,
+                "recorded_comparison_count": 0,
+                "comparisons": [],
             },
             "bodies": [],
             "standalone_sketches": [],

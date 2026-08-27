@@ -536,6 +536,7 @@ class TestValidationTools:
             include_sketch_constraints=True,
             required_dimension_names=["Width", "HoleDiameter"],
             workflow="imported_brep_edit",
+            require_visual_comparison=False,
             detail_level="full",
         )
 
@@ -606,11 +607,16 @@ class TestValidationTools:
             "dimension_inventory": {
                 "provided": True,
                 "required_names": ["Width"],
-                "all_used": False,
+                "all_connected": False,
+                "all_directly_connected": False,
+                "semantic_relationships_verified": False,
+                "claim_scope": "dependency_connectivity_only",
                 "usage": [
                     {
                         "name": "Width",
-                        "status": "defined_but_not_solid_driving",
+                        "status": "defined_but_not_connected_to_final_solid",
+                        "dependency_connectivity_verified": False,
+                        "semantic_relationship_verified": False,
                         "sketch_constraints": [{"index": 0}],
                         "spreadsheet_parameters": [],
                     }
@@ -638,7 +644,9 @@ class TestValidationTools:
         )
 
         result = await register_tools["validate_parametric_model"](
-            required_dimension_names=["Width"], finding_limit=10
+            required_dimension_names=["Width"],
+            require_visual_comparison=False,
+            finding_limit=10,
         )
 
         assert result["detail_level"] == "summary"
@@ -647,7 +655,9 @@ class TestValidationTools:
         assert result["finding_pagination"]["next_offset"] == 10
         assert result["dimension_inventory"]["usage"][0] == {
             "name": "Width",
-            "status": "defined_but_not_solid_driving",
+            "status": "defined_but_not_connected_to_final_solid",
+            "dependency_connectivity_verified": False,
+            "semantic_relationship_verified": False,
             "sketch_match_count": 1,
             "spreadsheet_match_count": 0,
         }
@@ -667,6 +677,74 @@ class TestValidationTools:
             await tool(required_dimension_names=["Width", " Width "])
 
         mock_bridge.execute_python.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_validate_parametric_model_requires_current_visual_evidence(
+        self, register_tools, mock_bridge
+    ):
+        """Drawing validation should reject missing and stale comparisons."""
+        from freecad_mcp.visual_evidence import (
+            clear_visual_comparisons,
+            record_visual_comparison,
+        )
+
+        clear_visual_comparisons()
+        report = {
+            "informational": True,
+            "assessment": "healthy",
+            "summary": "Healthy model.",
+            "document": {"name": "DrawingModel"},
+            "geometry_signature": {
+                "document": "DrawingModel",
+                "geometry_signature": "shape-a",
+            },
+            "dimension_inventory": {
+                "provided": True,
+                "required_names": ["D_OUTER_200"],
+                "usage": [],
+            },
+            "findings": [],
+        }
+        mock_bridge.execute_python = AsyncMock(
+            return_value=ExecutionResult(
+                success=True,
+                result=report,
+                stdout="",
+                stderr="",
+                execution_time_ms=1.0,
+            )
+        )
+
+        missing = await register_tools["validate_parametric_model"](
+            required_dimension_names=["D_OUTER_200"], detail_level="full"
+        )
+        assert missing["assessment"] == "invalid_or_broken"
+        assert missing["visual_evidence"]["status"] == "missing"
+        assert missing["findings"][-1]["category"] == "visual_comparison_missing"
+
+        record_visual_comparison(
+            report["geometry_signature"],
+            reference_path="drawing.png",
+            candidate_path="model.png",
+            view_context="Front / XZ / normal Y",
+        )
+        current = await register_tools["validate_parametric_model"](
+            required_dimension_names=["D_OUTER_200"], detail_level="full"
+        )
+        assert current["assessment"] == "healthy"
+        assert current["visual_evidence"]["status"] == "current"
+
+        report["geometry_signature"] = {
+            "document": "DrawingModel",
+            "geometry_signature": "shape-b",
+        }
+        stale = await register_tools["validate_parametric_model"](
+            required_dimension_names=["D_OUTER_200"], detail_level="full"
+        )
+        assert stale["assessment"] == "invalid_or_broken"
+        assert stale["visual_evidence"]["status"] == "stale"
+        assert stale["findings"][-1]["category"] == "visual_comparison_stale"
+        clear_visual_comparisons()
 
     @pytest.mark.asyncio
     async def test_validate_parametric_model_failure_is_informative(

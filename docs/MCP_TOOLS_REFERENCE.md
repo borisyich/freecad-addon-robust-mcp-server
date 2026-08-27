@@ -1412,7 +1412,9 @@ geometry or path already defines the operation, so `auto` is not applicable.
 Add rounded edges. For a PartDesign object, the source must be the current
 Body Tip. `EdgeN` references are validated before mutation; after recompute the
 result must be one valid solid and the new Body Tip, otherwise the feature is
-removed and the previous Tip is restored.
+removed and the previous Tip is restored. Passing a `PartDesign::Body` container
+or an orphaned PartDesign object is rejected with a Tip hint. The tool never
+changes modeling paradigms by silently creating `Part::Fillet` from that input.
 
 ```python
 fillet_edges(
@@ -1435,7 +1437,8 @@ interaction.
 #### chamfer_edges
 
 Add beveled edges. The same current-Tip, `EdgeN`, post-recompute, and rollback
-contract used by `fillet_edges` applies.
+contract used by `fillet_edges` applies. A Body/orphaned PartDesign source is
+rejected rather than silently falling back to `Part::Chamfer`.
 
 ```python
 chamfer_edges(
@@ -1508,7 +1511,15 @@ multi_transform_pattern(
 ]
 ```
 
-Internal transformation stages are owned by the MultiTransform and intentionally have no separate `Originals`; the original seed is assigned once to the parent feature. The final MultiTransform receives the same Shape, Body Tip, volume-ratio, and causal `AddSubShape` checks as the single-pattern tools.
+Internal transformation stages are native `LinearPattern`/`PolarPattern` metadata
+objects linked from the MultiTransform (created as ordinary Body members, with
+the native empty `Originals` default). They intentionally have no independent
+Shape; the original seed is assigned once to the parent feature. The response
+includes `transformation_validation` for stage type/ownership/original-link
+checks, while the final MultiTransform receives the same Shape, Body Tip,
+volume-ratio, and causal `AddSubShape` checks as the single-pattern tools.
+`validate_parametric_model` recognizes these linked null-Shape stages as
+expected MultiTransform internals; an unrelated null pattern remains invalid.
 
 #### mirrored_feature
 
@@ -2035,6 +2046,7 @@ compare_images(
     panel_height: int = 900,
     output_path: str | None = None,
     view_context: str | None = None,
+    doc_name: str | None = None,
 ) -> CallToolResult
 ```
 
@@ -2051,6 +2063,13 @@ A match in one projection does not prove depth or feature-axis orientation. If
 similarity is uncertain, repeat same-view comparisons for every principal target
 view available: front, matching left/right side, top, then isometric. A formal
 discrepancy ledger and `evaluate_model_checkpoint` remain optional.
+
+When a FreeCAD bridge is available, a successful comparison records the active
+or named document's geometry signature in server-session memory. Final
+`validate_parametric_model` reports the evidence as `current`, `missing`, or
+`stale`; changing shape geometry or a Body Tip after comparison makes it stale.
+The evidence proves that the comparison was performed for the current model
+state, not that the two images match.
 
 Before `linear_pattern`, `polar_pattern`, `mirrored_feature`, or
 `multi_transform_pattern`, compare the single seed element first. A pattern
@@ -2284,9 +2303,10 @@ prompt. This is preferable to reading prompt source files from the repository.
 
 ### validate_parametric_model
 
-Inspect the active or named document's editable parametric structure. This is an
-informative diagnostic, not a hard pass/fail gate. After creating or changing
-model geometry, call it immediately before the final user-facing response.
+Inspect the active or named document's editable parametric structure. Structural
+findings remain diagnostic, while missing/stale visual evidence is a workflow
+gate for drawing-oriented validation. After creating or changing model geometry,
+call it immediately before the final user-facing response.
 
 ```python
 validate_parametric_model(
@@ -2296,6 +2316,7 @@ validate_parametric_model(
     required_dimension_names: list[str] | None = None,
     target: dict | None = None,  # {"kind":"sketch", "name":"SketchName"}
     workflow: str = "native_parametric",  # or imported_brep_edit
+    require_visual_comparison: bool | None = None,
     detail_level: str = "summary",  # summary | structure | full
     finding_offset: int = 0,
     finding_limit: int = 20,
@@ -2312,6 +2333,26 @@ dimensions with deterministic measurements and retain expected, observed,
 tolerance, pass/fail, and tool evidence separately. The validator can verify only
 identifiers supplied by the caller; it cannot discover an omitted dimension or
 infer its role from source pixels.
+
+The dimension inventory proves dependency connectivity only. It does not prove
+that an expression encodes a source-backed engineering relation. A direct
+feature/sketch binding is reported as `connected_to_final_solid` or
+`connected_to_sketch`; connectivity that reaches the target only through
+arithmetic or another Spreadsheet cell is
+`connected_via_derived_expression` and produces a
+`required_dimension_semantics_unverified` warning. Thus an expression such as
+`Dimensions.D_OUTER_200 * 0.27` cannot be presented as validator-confirmed
+design intent merely because changing it changes the Shape. The inventory uses
+`all_connected`, `all_directly_connected`, and the explicit
+`claim_scope="dependency_connectivity_only"`; it deliberately does not expose
+the former misleading `all_used` claim.
+
+Visual evidence is required automatically when `required_dimension_names` is
+non-empty, or explicitly with `require_visual_comparison=True`. A successful
+`compare_images(..., doc_name=...)` for the current geometry satisfies the gate.
+Missing or stale evidence adds an error finding. Pass
+`require_visual_comparison=False` only when the workflow genuinely has no visual
+source; this opt-out does not make image correspondence verified.
 
 Omit `target` for the existing whole-model/final-solid diagnostic. When the
 deliverable is a sketch, pass for example
@@ -2347,17 +2388,19 @@ The report includes:
   parametric `Part::*` primitives and boolean chains are classified as editable
   Part history and do not cause a warning merely because they are outside a
   `PartDesign::Body`, while static/imported `Part::Feature` shapes still do;
-- required-dimension usage, including `missing`,
-  `defined_but_not_solid_driving`, and `solid_driving`
-  identifiers in model scope, or `defined_but_not_sketch_driving` and
-  `sketch_driving` in sketch scope;
+- required-dimension dependency status, including `missing`,
+  `defined_but_not_connected_to_final_solid`, `connected_to_final_solid`, and
+  `connected_via_derived_expression` in model scope, with analogous
+  `defined_but_not_connected_to_sketch`/`connected_to_sketch` sketch status;
 - each Spreadsheet alias, its direct and transitive dependencies, whether it is
   connected to a feature-tree expression, and an error finding for aliases that
   remain unused;
 - findings with `error`, `warning`, or workflow-context `info` severity;
-- limitations: it does not prove drawing correspondence, manufacturing process,
-  tolerances, design intent, or that a valid feature changed the expected amount
-  of material. Use feature-level before/after volume diagnostics and visual checks.
+- current/missing/stale document-scoped visual-comparison evidence;
+- limitations: it does not judge the image match, prove semantic correctness of
+  a formula, manufacturing process, tolerances, design intent, or that a valid
+  feature changed the expected amount of material. Use source-ledger review,
+  feature-level before/after volume diagnostics, and visual checks.
 
 The default response is a completion-oriented summary with paged findings.
 `structure` adds Bodies, sketches, and Spreadsheet structure. `full` can be very

@@ -145,9 +145,7 @@ async def test_sketch_target_validation_accepts_spreadsheet_driven_sketch_withou
         tools,
         "edit_sketch_geometry",
         sketch_name="FlatPattern",
-        operations=[
-            {"op": "add_rectangle", "x": 0, "y": 0, "width": 40, "height": 20}
-        ],
+        operations=[{"op": "add_rectangle", "x": 0, "y": 0, "width": 40, "height": 20}],
         doc_name=doc_name,
     )
     await _call(
@@ -172,13 +170,13 @@ async def test_sketch_target_validation_accepts_spreadsheet_driven_sketch_withou
         doc_name=doc_name,
         recompute=True,
         required_dimension_names=["Width"],
+        require_visual_comparison=False,
         target={"kind": "sketch", "name": "FlatPattern"},
         detail_level="full",
     )
 
     usage = {
-        item["name"]: item["status"]
-        for item in report["dimension_inventory"]["usage"]
+        item["name"]: item["status"] for item in report["dimension_inventory"]["usage"]
     }
     errors = [
         finding
@@ -186,7 +184,7 @@ async def test_sketch_target_validation_accepts_spreadsheet_driven_sketch_withou
         if finding.get("severity") == "error"
     ]
 
-    assert usage == {"Width": "sketch_driving"}
+    assert usage == {"Width": "connected_to_sketch"}
     assert report["assessment"] != "invalid_or_broken", report
     assert not errors, errors
     assert all(
@@ -260,13 +258,13 @@ async def test_sketch_target_validation_rejects_construction_only_required_dimen
         doc_name=doc_name,
         recompute=True,
         required_dimension_names=["HelperLength"],
+        require_visual_comparison=False,
         target={"kind": "sketch", "name": "FlatPattern"},
         detail_level="full",
     )
 
     usage = {
-        item["name"]: item["status"]
-        for item in report["dimension_inventory"]["usage"]
+        item["name"]: item["status"] for item in report["dimension_inventory"]["usage"]
     }
     matching_findings = [
         finding
@@ -274,6 +272,6 @@ async def test_sketch_target_validation_rejects_construction_only_required_dimen
         if finding.get("category") == "required_dimension_unlinked"
     ]
 
-    assert usage == {"HelperLength": "defined_but_not_sketch_driving"}
+    assert usage == {"HelperLength": "defined_but_not_connected_to_sketch"}
     assert matching_findings, report
     assert report["assessment"] == "invalid_or_broken", report

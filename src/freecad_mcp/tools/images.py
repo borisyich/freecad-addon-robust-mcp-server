@@ -6,14 +6,21 @@ import base64
 import io
 import json
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from mcp.types import CallToolResult, ContentBlock, ImageContent, TextContent
 from PIL import Image as PILImage
 from PIL import ImageDraw, ImageFont, ImageOps, UnidentifiedImageError
 
+from freecad_mcp.bridge._document_signature_runtime import (
+    build_document_signature_code,
+)
 from freecad_mcp.config import get_config
 from freecad_mcp.guidance import DISCREPANCY_LEDGER_FIELDS
+from freecad_mcp.visual_evidence import record_visual_comparison
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
 
 SUPPORTED_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
 MAX_IMAGE_BYTES = 25 * 1024 * 1024
@@ -205,7 +212,9 @@ def _resolve_image_path(path: str) -> Path:
     """Resolve and validate a local image path."""
     config = get_config()
     if not config.allow_file_access:
-        raise PermissionError("Local file access is disabled by FREECAD_ALLOW_FILE_ACCESS")
+        raise PermissionError(
+            "Local file access is disabled by FREECAD_ALLOW_FILE_ACCESS"
+        )
 
     resolved = Path(path).expanduser()
     if not resolved.is_absolute():
@@ -216,7 +225,9 @@ def _resolve_image_path(path: str) -> Path:
         raise FileNotFoundError(f"Image file not found: {resolved}")
     if resolved.suffix.lower() not in SUPPORTED_SUFFIXES:
         supported = ", ".join(sorted(SUPPORTED_SUFFIXES))
-        raise ValueError(f"Unsupported image format: {resolved.suffix}. Supported: {supported}")
+        raise ValueError(
+            f"Unsupported image format: {resolved.suffix}. Supported: {supported}"
+        )
 
     size = resolved.stat().st_size
     if size <= 0:
@@ -228,7 +239,9 @@ def _resolve_image_path(path: str) -> Path:
     return resolved
 
 
-def _load_normalized_image(path: Path, max_dimension: int) -> tuple[PILImage.Image, dict[str, Any]]:
+def _load_normalized_image(
+    path: Path, max_dimension: int
+) -> tuple[PILImage.Image, dict[str, Any]]:
     """Load, orient, resize, and normalize an image for model consumption."""
     if max_dimension <= 0:
         raise ValueError("max_dimension must be positive")
@@ -332,7 +345,9 @@ def _tile_boxes(
     return boxes
 
 
-def _resize_tile(image: PILImage.Image, target_long_side: int) -> tuple[PILImage.Image, float]:
+def _resize_tile(
+    image: PILImage.Image, target_long_side: int
+) -> tuple[PILImage.Image, float]:
     """Resize a crop so its long side receives a predictable visual budget."""
     current = max(image.size)
     if current <= 0:
@@ -370,10 +385,10 @@ def _label_tile(
         f"DETAIL {index}/{total} | R{row + 1}/{rows} C{column + 1}/{columns} | "
         f"src [{left},{top}]-[{right},{bottom}]"
     )
-    info_font = ImageFont.load_default(
-        size=max(16, round(min(source.size) * 0.022))
+    info_font = ImageFont.load_default(size=max(16, round(min(source.size) * 0.022)))
+    draw.text(
+        (14, max(12, (header_height - 18) // 2)), text, fill="black", font=info_font
     )
-    draw.text((14, max(12, (header_height - 18) // 2)), text, fill="black", font=info_font)
     draw.rectangle((0, 0, canvas.width - 1, canvas.height - 1), outline=(90, 90, 90))
     return canvas
 
@@ -396,7 +411,9 @@ def _make_grid_overview(
         )
     draw = ImageDraw.Draw(overview)
     line_width = max(2, round(min(overview.size) / 360))
-    for index, (row, column, left, top, right, bottom) in enumerate(boxes, start=1):
+    for index, (_row, _column, left, top, right, bottom) in enumerate(
+        boxes, start=1
+    ):
         scaled = tuple(round(value * scale) for value in (left, top, right, bottom))
         draw.rectangle(scaled, outline=(220, 35, 35), width=line_width)
         x1, y1, _x2, _y2 = scaled
@@ -421,8 +438,11 @@ def _make_grid_overview(
     return canvas
 
 
-def register_image_tools(mcp: Any) -> None:
-    """Register local image tools that do not require a FreeCAD bridge."""
+def register_image_tools(
+    mcp: Any,
+    get_bridge: Callable[[], Awaitable[Any]] | None = None,
+) -> None:
+    """Register local image tools and optional document-scoped visual evidence."""
 
     @mcp.tool()
     async def open_image(path: str, max_dimension: int = 4096) -> CallToolResult:
@@ -492,7 +512,9 @@ def register_image_tools(mcp: Any) -> None:
             Metadata and multiple labelled MCP ImageContent blocks in row-major order.
         """
         if not 1 <= rows <= 4 or not 1 <= columns <= 4:
-            return image_error("rows and columns must each be between 1 and 4", path=path)
+            return image_error(
+                "rows and columns must each be between 1 and 4", path=path
+            )
         if rows * columns > 9:
             return image_error("rows * columns must not exceed 9", path=path)
         if not 0 <= overlap_percent <= 25:
@@ -517,9 +539,7 @@ def register_image_tools(mcp: Any) -> None:
             if save_to_disk:
                 if output_dir is None:
                     target_dir = (
-                        Path.cwd()
-                        / "image_tiles"
-                        / f"{resolved.stem}_{rows}x{columns}"
+                        Path.cwd() / "image_tiles" / f"{resolved.stem}_{rows}x{columns}"
                     )
                 else:
                     target_dir = Path(output_dir).expanduser()
@@ -647,6 +667,7 @@ def register_image_tools(mcp: Any) -> None:
         panel_height: int = 900,
         output_path: str | None = None,
         view_context: str | None = None,
+        doc_name: str | None = None,
     ) -> CallToolResult:
         """Return one labelled comparison image; example: reference_path="drawing-front.png", candidate_path="model-front.png", view_context="Front / XZ / normal Y".
 
@@ -678,6 +699,10 @@ def register_image_tools(mcp: Any) -> None:
             output_path: Optional PNG path for persisting the comparison.
             view_context: Optional short description of the equivalent view and
                 coordinate contract, for example ``Front / XZ / normal Y``.
+            doc_name: Optional FreeCAD document whose current geometry state this
+                comparison verifies. Uses the active document when omitted. When
+                the image tools are registered with a bridge, successful evidence
+                is recorded for final ``validate_parametric_model`` checks.
 
         Returns:
             Metadata and one side-by-side MCP ImageContent block.
@@ -735,6 +760,37 @@ def register_image_tools(mcp: Any) -> None:
                 comparison.save(target, format="PNG", optimize=True)
                 saved_path = str(target)
 
+            validation_evidence: dict[str, Any] = {
+                "recorded": False,
+                "document": doc_name,
+                "reason": "FreeCAD bridge is unavailable for image tools",
+            }
+            if get_bridge is not None:
+                try:
+                    bridge = await get_bridge()
+                    signature_result = await bridge.execute_python(
+                        build_document_signature_code(doc_name)
+                    )
+                    if not signature_result.success or not signature_result.result:
+                        raise RuntimeError(
+                            signature_result.error_traceback
+                            or "FreeCAD document signature was unavailable"
+                        )
+                    evidence = record_visual_comparison(
+                        signature_result.result,
+                        reference_path=str(reference),
+                        candidate_path=str(candidate),
+                        view_context=normalized_view_context,
+                    )
+                except Exception as exc:
+                    validation_evidence = {
+                        "recorded": False,
+                        "document": doc_name,
+                        "reason": str(exc),
+                    }
+                else:
+                    validation_evidence = {"recorded": True, **evidence}
+
             payload = {
                 "success": True,
                 "kind": "image_comparison",
@@ -745,6 +801,7 @@ def register_image_tools(mcp: Any) -> None:
                 "height": comparison.height,
                 "saved_path": saved_path,
                 "view_context": normalized_view_context,
+                "validation_evidence": validation_evidence,
                 "comparison_preconditions": [
                     "Crop a whole drawing sheet to the matching target view first.",
                     "Orient the candidate to the same orthographic or isometric projection.",

@@ -59,6 +59,7 @@ async def _assert_parametric_model_valid(
         recompute=True,
         include_sketch_constraints=True,
         required_dimension_names=required_names,
+        require_visual_comparison=False,
         detail_level="full",
     )
 
@@ -74,7 +75,7 @@ async def _assert_parametric_model_valid(
     usage = {
         item["name"]: item["status"] for item in report["dimension_inventory"]["usage"]
     }
-    assert usage == dict.fromkeys(required_names, "solid_driving"), usage
+    assert usage == dict.fromkeys(required_names, "connected_to_final_solid"), usage
 
     dimensions_sheet = next(
         item for item in report["spreadsheets"] if item["name"] == "Dimensions"

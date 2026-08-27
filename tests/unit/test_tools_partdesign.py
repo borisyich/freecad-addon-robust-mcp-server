@@ -1190,6 +1190,8 @@ class TestPartDesignTools:
 
         assert result["name"] == "Fillet"
         generated_code = mock_bridge.execute_python.await_args.args[0]
+        assert "The tool will not switch to Part::Fillet" in generated_code
+        assert "Pass its current Body Tip" in generated_code
         assert '"source_shape_type": source_shape_type' in generated_code
         assert '"source_solid_count": source_solid_count' in generated_code
         assert '"adjacent_face_types": {' in generated_code
@@ -1263,6 +1265,8 @@ class TestPartDesignTools:
 
         assert result["name"] == "Chamfer"
         generated_code = mock_bridge.execute_python.await_args.args[0]
+        assert "The tool will not switch to Part::Chamfer" in generated_code
+        assert "Pass its current Body Tip" in generated_code
         assert '_require_current_body_tip(body, obj, "Chamfer")' in generated_code
         assert "_validate_single_solid_feature" in generated_code
         assert "_cleanup_failed_partdesign_feature" in generated_code
@@ -2264,8 +2268,8 @@ async def test_pattern_tools_validate_shape_tip_and_reject_nested_patterns() -> 
 
 
 @pytest.mark.asyncio
-async def test_multi_transform_pattern_uses_internal_empty_original_stages() -> None:
-    """Chained patterns should be represented by a native MultiTransform."""
+async def test_multi_transform_pattern_uses_native_internal_stages() -> None:
+    """Chained patterns should use FreeCAD's metadata-only stage objects."""
     from freecad_mcp.tools.partdesign import register_partdesign_tools
 
     mcp = MagicMock()
@@ -2295,11 +2299,16 @@ async def test_multi_transform_pattern_uses_internal_empty_original_stages() -> 
     )
     code = bridge.execute_python.await_args.args[0]
     assert 'body.newObject(\n        "PartDesign::MultiTransform"' in code
+    assert 'doc.addObject(\n                "PartDesign::LinearPattern"' in code
+    assert 'doc.addObject(\n                "PartDesign::PolarPattern"' in code
+    assert "body.addObject(stage_obj)" in code
     assert "_configure_feature_transform_mode(multi)" in code
     assert "_configure_feature_transform_mode(stage_obj)" in code
     assert 'TransformMode = "Features"' not in code
-    assert "stage_obj.Originals = []" in code
+    assert "stage_obj.Originals = []" not in code
     assert "multi.Transformations = stage_objects" in code
+    assert "_validate_multi_transform_stages" in code
+    assert '"transformation_validation"' in code
     assert "_pattern_material_change_diagnostics" in code
     assert '"material_change_diagnostics"' in code
     assert "body.Tip = multi" in code

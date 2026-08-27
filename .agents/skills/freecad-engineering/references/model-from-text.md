@@ -10,7 +10,8 @@ then build the simplest editable model that represents that specification.
 
 ## 1. Normalize the request before modeling
 
-Extract a compact requirement table containing:
+Extract a compact requirement ledger before creating geometry. Give every
+requirement a stable ID and keep the ledger visible during the build. Include:
 
 - overall envelope and units;
 - functional datums or symmetry axes;
@@ -30,6 +31,11 @@ Separate three kinds of values:
 
 Do not silently promote an assumption into a user requirement.
 
+For each row record the controlled feature/axis, implementation path, planned
+verification, and current status (`pending`, `passed`, `failed`, `unresolved`).
+Record qualitative requirements too: through vs blind, open vs closed cavity,
+one solid, symmetry, material/process, fixed datum, and protected interfaces.
+
 ## 2. Determine the dominant body family
 
 Before selecting tools, classify the main form. Typical families include:
@@ -44,6 +50,18 @@ Before selecting tools, classify the main form. Typical families include:
 
 Build the dominant form first. If the first valid model is the wrong body family,
 replace the base strategy instead of patching it with local cuts and fillets.
+
+Before ACT, decompose the requested part into a feature plan:
+
+- dominant/base form;
+- major additive masses and major removed volumes;
+- functional interfaces and datums;
+- repeated-feature seeds and patterns;
+- finishing features.
+
+For every planned feature record its parent, semantic operation, requirement IDs,
+expected change, and acceptance measurement. This plan is the working memory for
+the model; update it when the implementation or interpretation changes.
 
 ## 3. Choose stable datums and parameters
 
@@ -69,6 +87,10 @@ A robust default sequence is:
 Change the order when geometry dependencies require it; do not treat the list as
 a rigid recipe.
 
+Before each major feature, reread its requirement rows and state the expected
+change in dimensions, topology, volume, or feature count. Do not stack several
+speculative operations into one opaque step.
+
 ## 5. Verify against the text, not against your own model
 
 After each major feature, compare the observed state to the requirement table:
@@ -81,6 +103,17 @@ After each major feature, compare the observed state to the requirement table:
 
 For a repeated feature, verify the seed before creating the pattern and verify
 the final instance count afterward.
+
+Record the evidence and mark the affected requirement rows passed or failed.
+Rework the causal feature when a check fails; do not let a later valid feature
+hide an earlier mismatch. When the request defines internal geometry, use an
+appropriate section or direct measurement rather than accepting an exterior
+render.
+
+At the first valid dominant-form candidate, check the whole envelope and material
+distribution before adding fine detail. A valid block with approximately correct
+bounds is not an acceptable substitute for an open housing, annular form, webbed
+casting, or thin-walled shell.
 
 ## 6. Handling ambiguity
 
@@ -104,6 +137,10 @@ example:
 - The model implements every explicit textual requirement.
 - Derived values are traceable to explicit requirements.
 - Assumptions are few and disclosed.
+- Every requirement-ledger row is passed, unresolved, or explicitly out-of-scope;
+  there are no silent omissions.
+- Required dimensions and feature counts have direct measured evidence on final
+  geometry, not only matching input parameters.
 - The feature tree expresses the intended design rather than only the final
   silhouette.
 - Final `validate_parametric_model` findings are reviewed and summarized.

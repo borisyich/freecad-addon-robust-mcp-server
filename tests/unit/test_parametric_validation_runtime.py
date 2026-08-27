@@ -318,7 +318,7 @@ def test_generated_report_describes_body_tip_history_and_sketch(monkeypatch) -> 
         Shape=FakeShape(),
         ExpressionEngine=[
             ("Length", "Params.HalfWidth"),
-            ("Length2", "Params.Width2"),
+            ("Length2", "Params.Width2 * 0.27"),
             ("AuditNeutralized", "0 * (Params.Orphan)"),
         ],
         InList=[sketch],
@@ -352,7 +352,7 @@ def test_generated_report_describes_body_tip_history_and_sketch(monkeypatch) -> 
         doc_name="Bracket",
         recompute=True,
         include_sketch_constraints=True,
-        required_dimension_names=["Width", "Depth"],
+        required_dimension_names=["Width", "Width2", "Depth"],
     )
     namespace: dict[str, object] = {}
     exec(code, namespace)
@@ -381,25 +381,59 @@ def test_generated_report_describes_body_tip_history_and_sketch(monkeypatch) -> 
     assert any(
         item["category"] == "sketch_under_constrained" for item in report["findings"]
     )
-    assert report["dimension_inventory"]["required_names"] == ["Width", "Depth"]
+    assert report["dimension_inventory"]["required_names"] == [
+        "Width",
+        "Width2",
+        "Depth",
+    ]
     usage = {
         item["name"]: item["status"] for item in report["dimension_inventory"]["usage"]
     }
-    assert usage == {"Width": "solid_driving", "Depth": "missing"}
+    assert usage == {
+        "Width": "connected_via_derived_expression",
+        "Width2": "connected_via_derived_expression",
+        "Depth": "missing",
+    }
+    assert report["dimension_inventory"]["all_connected"] is False
+    assert report["dimension_inventory"]["all_directly_connected"] is False
+    assert report["dimension_inventory"]["semantic_relationships_verified"] is False
+    assert report["dimension_inventory"]["claim_scope"] == (
+        "dependency_connectivity_only"
+    )
     spreadsheet = report["spreadsheets"][0]
     parameters = {item["alias"]: item for item in spreadsheet["parameters"]}
     # Exact token matching: Params.Width2 must not count as Params.Width.
     assert parameters["Width"]["reference_count"] == 0
     assert parameters["Width"]["connected_to_tree"] is True
+    assert parameters["Width"]["connection_kind"] == (
+        "transitive_spreadsheet_dependency"
+    )
     assert parameters["HalfWidth"]["reference_count"] == 1
     assert parameters["HalfWidth"]["connected_to_tree"] is True
     assert parameters["HalfWidth"]["connected_to_final_solid"] is True
+    assert parameters["HalfWidth"]["connection_kind"] == "direct_reference"
+    assert parameters["Width2"]["connection_kind"] == "derived_expression"
+    assert parameters["Width2"]["derived_reference_count"] == 1
+    assert (
+        namespace["_expression_is_direct_token"](
+            "Dimensions.D_OUTER_200 * 0.27", "Dimensions.D_OUTER_200"
+        )
+        is False
+    )
+    assert (
+        namespace["_expression_is_direct_token"](
+            "Dimensions.D_RIM_INNER_188 * (48.0 / 188.0)",
+            "Dimensions.D_RIM_INNER_188",
+        )
+        is False
+    )
     assert parameters["Orphan"]["reference_count"] == 1
     assert parameters["Orphan"]["references"][0]["neutralized_reference"] is True
     assert parameters["Orphan"]["references"][0]["solid_driving"] is False
     assert [item["alias"] for item in spreadsheet["unused_parameters"]] == ["Orphan"]
     categories = {item["category"] for item in report["findings"]}
     assert "required_dimension_missing" in categories
+    assert "required_dimension_semantics_unverified" in categories
     assert "unused_spreadsheet_parameter" in categories
 
     # Sketch scope traces dimensions to this sketch's regular geometry and does
@@ -428,7 +462,7 @@ def test_generated_report_describes_body_tip_history_and_sketch(monkeypatch) -> 
         item["name"]: item["status"]
         for item in target_report["dimension_inventory"]["usage"]
     }
-    assert target_usage == {"Width": "sketch_driving", "Depth": "missing"}
+    assert target_usage == {"Width": "connected_to_sketch", "Depth": "missing"}
     target_categories = {item["category"] for item in target_report["findings"]}
     assert "body_invalid" not in target_categories
     assert "body_issue" not in target_categories
@@ -790,6 +824,247 @@ def test_generic_partdesign_features_are_reported_as_static_snapshots(
     assert len(findings) == 4
     assert all(item["severity"] == "warning" for item in findings)
     assert report["assessment"] == "review_recommended"
+
+
+def test_multitransform_internal_stages_are_not_reported_as_invalid(
+    monkeypatch,
+) -> None:
+    """Native MultiTransform stages are null-shape metadata, not broken history."""
+    import sys
+    from types import SimpleNamespace
+
+    class BoundBox:
+        XMin = YMin = ZMin = 0.0
+        XMax = YMax = ZMax = 10.0
+        XLength = YLength = ZLength = 10.0
+
+    bound_box = BoundBox()
+
+    class SolidShape:
+        ShapeType = "Solid"
+        Solids = [object()]
+        Shells = [object()]
+        Faces = [object()]
+        Edges = [object()]
+        Vertexes = [object()]
+        Wires = []
+        Volume = 1000.0
+        Area = 600.0
+        BoundBox = bound_box
+
+        def isNull(self):  # noqa: N802
+            return False
+
+        def isValid(self):  # noqa: N802
+            return True
+
+    class NullShape:
+        ShapeType = "Shape"
+        Solids = []
+        Shells = []
+        Faces = []
+        Edges = []
+        Vertexes = []
+        Wires = []
+        Volume = 0.0
+        Area = 0.0
+        BoundBox = bound_box
+
+        def isNull(self):  # noqa: N802
+            return True
+
+        def isValid(self):  # noqa: N802
+            return True
+
+    placement = SimpleNamespace(
+        Base=SimpleNamespace(x=0.0, y=0.0, z=0.0),
+        Rotation=SimpleNamespace(
+            Axis=SimpleNamespace(x=0.0, y=0.0, z=1.0),
+            Angle=0.0,
+        ),
+    )
+    seed = SimpleNamespace(
+        Name="PocketSeed",
+        Label="Pocket Seed",
+        TypeId="PartDesign::Pocket",
+        State=[],
+        ViewObject=SimpleNamespace(Visibility=False),
+        Placement=placement,
+        Shape=SolidShape(),
+        ExpressionEngine=[],
+        InList=[],
+        OutList=[],
+    )
+    multi = SimpleNamespace(
+        Name="Pattern",
+        Label="Pattern",
+        TypeId="PartDesign::MultiTransform",
+        State=[],
+        ViewObject=SimpleNamespace(Visibility=True),
+        Placement=placement,
+        Shape=SolidShape(),
+        ExpressionEngine=[],
+        InList=[],
+        OutList=[],
+        Originals=[seed],
+    )
+    stage_objects = []
+    for index, type_id in enumerate(
+        ("PartDesign::LinearPattern", "PartDesign::PolarPattern"),
+        start=1,
+    ):
+        stage_objects.append(
+            SimpleNamespace(
+                Name=f"PatternStage{index}",
+                Label=f"Pattern Stage {index}",
+                TypeId=type_id,
+                State=[],
+                ViewObject=SimpleNamespace(Visibility=False),
+                Placement=placement,
+                Shape=NullShape(),
+                ExpressionEngine=[],
+                InList=[],
+                OutList=[],
+                Originals=[],
+            )
+        )
+    multi.Transformations = stage_objects
+    for stage in stage_objects:
+        stage.InList = [multi]
+    body = SimpleNamespace(
+        Name="Body",
+        Label="Body",
+        TypeId="PartDesign::Body",
+        State=[],
+        ViewObject=SimpleNamespace(Visibility=True),
+        Placement=placement,
+        Shape=SolidShape(),
+        Group=[seed, *stage_objects, multi],
+        Tip=multi,
+    )
+    multi.InList = [body]
+    doc = SimpleNamespace(
+        Name="MultiTransformModel",
+        Label="MultiTransformModel",
+        FileName="",
+        Objects=[body, seed, *stage_objects, multi],
+        recompute=lambda: None,
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "FreeCAD",
+        SimpleNamespace(
+            ActiveDocument=doc,
+            listDocuments=lambda: {doc.Name: doc},
+        ),
+    )
+
+    namespace: dict[str, object] = {}
+    exec(
+        build_parametric_validation_code(
+            doc_name=doc.Name,
+            recompute=True,
+            include_sketch_constraints=False,
+        ),
+        namespace,
+    )
+    report = namespace["_result_"]
+    body_report = report["bodies"][0]
+    stage_reports = body_report["history"][1:3]
+
+    assert report["assessment"] == "review_recommended"
+    assert body_report["valid"] is True
+    assert body_report["invalid_history_item_count"] == 0
+    assert not [item for item in report["findings"] if item["severity"] == "error"]
+    assert all(item["valid"] for item in stage_reports)
+    assert all(item["role"] == "transformation_stage" for item in stage_reports)
+    assert all(item["internal_transformation_stage"] for item in stage_reports)
+    assert all(item["shape"]["is_null"] is True for item in stage_reports)
+
+
+def test_orphan_null_pattern_is_still_reported_as_invalid(monkeypatch) -> None:
+    """The MultiTransform exemption must not hide an unrelated null pattern."""
+    import sys
+    from types import SimpleNamespace
+
+    class NullShape:
+        ShapeType = "Shape"
+        Solids = []
+        Shells = []
+        Faces = []
+        Edges = []
+        Vertexes = []
+        Wires = []
+        Volume = 0.0
+        Area = 0.0
+
+        def isNull(self):  # noqa: N802
+            return True
+
+        def isValid(self):  # noqa: N802
+            return True
+
+    placement = SimpleNamespace(
+        Base=SimpleNamespace(x=0.0, y=0.0, z=0.0),
+        Rotation=SimpleNamespace(
+            Axis=SimpleNamespace(x=0.0, y=0.0, z=1.0),
+            Angle=0.0,
+        ),
+    )
+    orphan = SimpleNamespace(
+        Name="OrphanPattern",
+        Label="Orphan Pattern",
+        TypeId="PartDesign::LinearPattern",
+        State=[],
+        ViewObject=SimpleNamespace(Visibility=False),
+        Placement=placement,
+        Shape=NullShape(),
+        ExpressionEngine=[],
+        InList=[],
+        OutList=[],
+        Originals=[],
+    )
+    body = SimpleNamespace(
+        Name="Body",
+        Label="Body",
+        TypeId="PartDesign::Body",
+        State=[],
+        ViewObject=SimpleNamespace(Visibility=True),
+        Placement=placement,
+        Shape=NullShape(),
+        Group=[orphan],
+        Tip=None,
+    )
+    orphan.InList = [body]
+    doc = SimpleNamespace(
+        Name="OrphanPatternModel",
+        Label="OrphanPatternModel",
+        FileName="",
+        Objects=[body, orphan],
+        recompute=lambda: None,
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "FreeCAD",
+        SimpleNamespace(
+            ActiveDocument=doc,
+            listDocuments=lambda: {doc.Name: doc},
+        ),
+    )
+
+    namespace: dict[str, object] = {}
+    exec(
+        build_parametric_validation_code(
+            doc_name=doc.Name,
+            recompute=True,
+            include_sketch_constraints=False,
+        ),
+        namespace,
+    )
+    report = namespace["_result_"]
+
+    assert report["assessment"] == "invalid_or_broken"
+    assert report["bodies"][0]["invalid_history_item_count"] == 1
 
 
 def test_native_part_boolean_chain_is_healthy_and_static_import_is_warned(

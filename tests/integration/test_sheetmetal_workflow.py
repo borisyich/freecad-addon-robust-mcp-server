@@ -68,6 +68,7 @@ async def _assert_valid_model(
         doc_name=doc,
         recompute=True,
         required_dimension_names=dimensions,
+        require_visual_comparison=False,
         detail_level="structure",
     )
     errors = [
@@ -403,8 +404,8 @@ _result_ = {{
         for item in validation["dimension_inventory"]["usage"]
     }
     assert usage == {
-        "VerticalFlangeLength": "solid_driving",
-        "HorizontalFlangeLength": "solid_driving",
+        "VerticalFlangeLength": "connected_to_final_solid",
+        "HorizontalFlangeLength": "connected_to_final_solid",
     }
     assert validation["counts"]["uncontained_shape_objects"] == 0
     assert validation["counts"]["standalone_sketches"] == 0
@@ -635,9 +636,9 @@ _result_ = {{
         for item in validation["dimension_inventory"]["usage"]
     }
     assert usage == {
-        "BlankWidth": "solid_driving",
-        "BlankDepth": "solid_driving",
-        "FlangeLength": "solid_driving",
+        "BlankWidth": "connected_to_final_solid",
+        "BlankDepth": "connected_to_final_solid",
+        "FlangeLength": "connected_to_final_solid",
     }
 
 
@@ -914,6 +915,7 @@ _result_ = {{
         "validate_parametric_model",
         doc_name=doc,
         required_dimension_names=["DIM_BEND_ANGLE", "DIM_K_FACTOR"],
+        require_visual_comparison=False,
         detail_level="full",
     )
     usage = {
@@ -921,8 +923,8 @@ _result_ = {{
         for item in validation["dimension_inventory"]["usage"]
     }
     assert usage == {
-        "DIM_BEND_ANGLE": "solid_driving",
-        "DIM_K_FACTOR": "solid_driving",
+        "DIM_BEND_ANGLE": "connected_to_final_solid",
+        "DIM_K_FACTOR": "connected_to_final_solid",
     }
     fold_bindings = [
         item

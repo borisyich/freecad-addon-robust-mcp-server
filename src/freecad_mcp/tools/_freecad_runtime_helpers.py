@@ -351,6 +351,89 @@ FEATURE_VALIDATION_RUNTIME_HELPERS = _runtime_code(
         return diagnostics
 
 
+    def _validate_multi_transform_stages(multi, expected_stages):
+        """Validate MultiTransform's metadata-only native stage objects.
+
+        FreeCAD stores the individual LinearPattern/PolarPattern stages as
+        linked objects owned by MultiTransform.  They intentionally keep an
+        empty ``Originals`` list and do not produce a Shape of their own; the
+        parent owns the source feature and evaluates the complete transform.
+        """
+        actual_stages = list(getattr(multi, "Transformations", []) or [])
+        reasons = []
+        if len(actual_stages) != len(expected_stages):
+            reasons.append(
+                "expected "
+                f"{len(expected_stages)} transformation stages, got "
+                f"{len(actual_stages)}"
+            )
+
+        stage_diagnostics = []
+        for index, expected in enumerate(expected_stages):
+            stage = actual_stages[index] if index < len(actual_stages) else None
+            expected_type = (
+                "PartDesign::LinearPattern"
+                if expected["kind"] == "linear"
+                else "PartDesign::PolarPattern"
+            )
+            originals = (
+                list(getattr(stage, "Originals", []) or [])
+                if stage is not None
+                else []
+            )
+            owned_by_multi = bool(
+                stage is not None
+                and any(
+                    parent is multi
+                    for parent in (getattr(stage, "InList", []) or [])
+                )
+            )
+            shape_is_null = None
+            if stage is not None and hasattr(stage, "Shape"):
+                shape_is_null = bool(stage.Shape.isNull())
+            stage_diagnostics.append(
+                {
+                    "index": index + 1,
+                    "name": getattr(stage, "Name", None),
+                    "type_id": getattr(stage, "TypeId", None),
+                    "expected_type_id": expected_type,
+                    "original_count": len(originals),
+                    "owned_by_multi_transform": owned_by_multi,
+                    "shape_is_null": shape_is_null,
+                }
+            )
+            if stage is None:
+                reasons.append(f"transformation stage {index + 1} is missing")
+                continue
+            if getattr(stage, "TypeId", None) != expected_type:
+                reasons.append(
+                    f"transformation stage {index + 1} has type "
+                    f"{getattr(stage, 'TypeId', None)!r}, expected {expected_type!r}"
+                )
+            if originals:
+                reasons.append(
+                    f"transformation stage {index + 1} unexpectedly owns "
+                    "original features"
+                )
+            if not owned_by_multi:
+                reasons.append(
+                    f"transformation stage {index + 1} is not linked from "
+                    "the MultiTransform"
+                )
+            if shape_is_null is not True:
+                reasons.append(
+                    f"transformation stage {index + 1} unexpectedly exposes "
+                    "an independent Shape"
+                )
+
+        return {
+            "ok": not reasons,
+            "stage_count": len(actual_stages),
+            "stages": stage_diagnostics,
+            "reasons": reasons,
+        }
+
+
     def _volume_diagnostics(base_volume, result_volume):
         """Return neutral before/after diagnostics without judging intent."""
         change = None

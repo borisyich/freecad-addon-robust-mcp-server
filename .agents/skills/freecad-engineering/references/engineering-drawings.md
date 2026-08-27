@@ -21,6 +21,16 @@ When dedicated drawing tooling is implemented, this route should cover:
 6. check that every manufacturing-critical feature is defined by the drawing;
 7. export the required drawing format and inspect the result.
 
+The future route should maintain a drawing-definition ledger: view IDs and
+camera/section definitions, each manufacturing feature, its one authoritative
+location/size callout, datum/GD&T relationships, and a coverage status. Visual
+legibility and semantic completeness are separate gates; a clean page may still
+omit a manufacturing-critical feature.
+
+Deterministic checks should include projection/view-axis consistency, measured
+dimension-label agreement, duplicated or contradictory dimensions, feature
+coverage, annotation/view overlap, page bounds, and exported-artifact inspection.
+
 ## Current behavior
 
 Do not pretend a complete drawing workflow exists through ordinary 3D tools.
@@ -31,3 +41,7 @@ If the user asks for a production drawing today:
   for the task;
 - keep any generated drawing provisional and report which checks could not be
   performed deterministically through MCP.
+
+Do not present a screenshot with manually placed text as a production drawing
+unless dimensions remain associated with model geometry and the missing semantic
+checks are made explicit.

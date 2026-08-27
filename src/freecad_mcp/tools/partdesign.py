@@ -2058,8 +2058,9 @@ _result_ = {{
     ) -> dict[str, Any]:
         """Add a validated fillet to the current solid feature.
 
-        For PartDesign objects the source must be the current Body Tip. This
-        avoids inserting a dress-up feature into an older history branch.
+        For PartDesign objects the source must be the current Body Tip. Passing
+        the Body container itself is rejected; the tool never falls back to a
+        standalone ``Part::Fillet`` for a PartDesign source.
 
         Args:
             object_name: Name of the object to fillet.
@@ -2089,6 +2090,18 @@ obj = doc.getObject({object_name!r})
 if obj is None:
     raise ValueError(f"Object not found: {object_name!r}")
 body = _find_body_containing_object(doc, obj)
+if body is None and str(getattr(obj, "TypeId", "")).startswith("PartDesign::"):
+    tip = getattr(obj, "Tip", None)
+    tip_hint = (
+        f" Pass its current Body Tip {{tip.Name!r}} instead."
+        if getattr(tip, "Name", None)
+        else " Pass the current Body Tip instead."
+    )
+    raise ValueError(
+        f"Fillet source {{obj.Name!r}} is a PartDesign object outside a containing "
+        "Body (a Body container is not a feature source)." + tip_hint +
+        " The tool will not switch to Part::Fillet."
+    )
 selected_edges = _validated_shape_subelement_names(obj, {edges!r}, "Edge")
 
 def _same_shape(first, second):
@@ -2268,7 +2281,9 @@ else:
     ) -> dict[str, Any]:
         """Add a validated chamfer to the current solid feature.
 
-        For PartDesign objects the source must be the current Body Tip.
+        For PartDesign objects the source must be the current Body Tip. Passing
+        the Body container itself is rejected; the tool never falls back to a
+        standalone ``Part::Chamfer`` for a PartDesign source.
         """
         if size <= 0:
             raise ValueError("Chamfer size must be positive")
@@ -2284,6 +2299,18 @@ obj = doc.getObject({object_name!r})
 if obj is None:
     raise ValueError(f"Object not found: {object_name!r}")
 body = _find_body_containing_object(doc, obj)
+if body is None and str(getattr(obj, "TypeId", "")).startswith("PartDesign::"):
+    tip = getattr(obj, "Tip", None)
+    tip_hint = (
+        f" Pass its current Body Tip {{tip.Name!r}} instead."
+        if getattr(tip, "Name", None)
+        else " Pass the current Body Tip instead."
+    )
+    raise ValueError(
+        f"Chamfer source {{obj.Name!r}} is a PartDesign object outside a containing "
+        "Body (a Body container is not a feature source)." + tip_hint +
+        " The tool will not switch to Part::Chamfer."
+    )
 selected_edges = _validated_shape_subelement_names(obj, {edges!r}, "Edge")
 if body is not None:
     if not _is_valid_single_solid_feature(obj):
@@ -3862,7 +3889,8 @@ _result_ = {{
 
         Returns:
             MultiTransform and stage information with Shape/Tip, neutral volume
-            evidence, and an AddSubShape-based causal material-change check.
+            evidence, an AddSubShape-based causal material-change check, and
+            structural diagnostics for its internal transformation stages.
         """
         if len(transformations) < 2:
             raise ValueError(
@@ -3917,12 +3945,12 @@ try:
 
     for index, stage in enumerate(transformations, start=1):
         if stage["kind"] == "linear":
-            stage_obj = body.newObject(
+            stage_obj = doc.addObject(
                 "PartDesign::LinearPattern",
                 f"{{multi.Name}}_Linear{{index}}",
             )
+            body.addObject(stage_obj)
             stage_transform_mode = _configure_feature_transform_mode(stage_obj)
-            stage_obj.Originals = []
             stage_obj.Length = stage["length"]
             stage_obj.Occurrences = stage["occurrences"]
             axis_obj = _resolve_body_origin_feature(
@@ -3938,12 +3966,12 @@ try:
                 "transform_mode": stage_transform_mode["value"],
             }})
         else:
-            stage_obj = body.newObject(
+            stage_obj = doc.addObject(
                 "PartDesign::PolarPattern",
                 f"{{multi.Name}}_Polar{{index}}",
             )
+            body.addObject(stage_obj)
             stage_transform_mode = _configure_feature_transform_mode(stage_obj)
-            stage_obj.Originals = []
             stage_obj.Angle = stage["angle"]
             stage_obj.Occurrences = stage["occurrences"]
             axis_obj = _resolve_body_origin_feature(
@@ -3964,6 +3992,14 @@ try:
     multi.Transformations = stage_objects
     body.Tip = multi
     doc.recompute()
+    transformation_validation = _validate_multi_transform_stages(
+        multi, transformations
+    )
+    if not transformation_validation["ok"]:
+        raise ValueError(
+            "MultiTransform stages failed structural validation: "
+            + "; ".join(transformation_validation["reasons"])
+        )
     validation = _validate_single_solid_feature(multi, body)
     if not validation["ok"]:
         raise ValueError(
@@ -4007,6 +4043,7 @@ _result_ = {{
     "transform_mode": transform_mode["value"],
     "transform_mode_options": transform_mode["options"],
     "transformations": stage_results,
+    "transformation_validation": transformation_validation,
     "base_volume": base_volume,
     "result_volume": validation["result_volume"],
     "volume_diagnostics": volume_diagnostics,
