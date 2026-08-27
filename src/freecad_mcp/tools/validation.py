@@ -32,6 +32,281 @@ class SketchValidationTarget(BaseModel):
 _VALIDATION_TARGET_ADAPTER = TypeAdapter(SketchValidationTarget)
 
 
+class SourceDimensionAcceptance(BaseModel):
+    """One source dimension and its final same-context verification evidence."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(min_length=1)
+    role: Literal["driving", "verification", "source_issue"]
+    status: Literal["verified", "failed", "source_issue"]
+    source_view_id: str = Field(min_length=1)
+    target_elements: list[str] = Field(default_factory=list)
+    measurement_semantics: str | None = None
+    expected: float | str | None = None
+    observed: float | str | None = None
+    tolerance: float | str | None = None
+    passed: bool | None = None
+    tool_evidence: list[str] = Field(default_factory=list)
+    source_evidence: list[str] = Field(default_factory=list)
+    attempted_interpretations: list[str] = Field(default_factory=list)
+    reason: str | None = None
+
+
+class SourceViewAcceptance(BaseModel):
+    """One source view and evidence that its final comparison was reviewed."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    view_id: str = Field(min_length=1)
+    drawing_role: str = Field(min_length=1)
+    status: Literal["verified", "failed", "source_issue"]
+    source_reference: str = Field(min_length=1)
+    candidate_reference: str | None = None
+    candidate_recipe: dict[str, Any] = Field(default_factory=dict)
+    cutting_line_changes_direction: bool = False
+    cutting_path: list[list[float]] | None = None
+    comparison_image_path: str | None = None
+    image_content_reviewed: bool = False
+    visual_observation: str | None = None
+    decision: Literal["accept", "rework", "source_issue"]
+    source_evidence: list[str] = Field(default_factory=list)
+    reason: str | None = None
+
+
+class SourceAcceptanceManifest(BaseModel):
+    """Complete source-evidence acceptance input for drawing/sketch workflows."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    dimensions: list[SourceDimensionAcceptance] = Field(min_length=1)
+    views: list[SourceViewAcceptance] = Field(min_length=1)
+
+
+_SOURCE_ACCEPTANCE_ADAPTER = TypeAdapter(SourceAcceptanceManifest)
+
+
+def _normalized_nonempty(values: list[str]) -> list[str]:
+    return [value.strip() for value in values if value and value.strip()]
+
+
+def _acceptance_record(
+    *, record_id: str, role: str, complete: bool, missing: list[str]
+) -> dict[str, Any]:
+    return {
+        "id": record_id,
+        "role": role,
+        "complete": complete,
+        "missing_or_failed": missing,
+    }
+
+
+def _assess_source_acceptance(
+    manifest: dict[str, Any] | None,
+    *,
+    source_evidence_expected: bool,
+) -> dict[str, Any]:
+    """Check manifest coverage without pretending to inspect source pixels."""
+    if manifest is None:
+        return {
+            "provided": False,
+            "required": source_evidence_expected,
+            "complete": not source_evidence_expected,
+            "driving_dimension_ids": [],
+            "counts": {
+                "dimensions": 0,
+                "driving": 0,
+                "verification": 0,
+                "source_issue": 0,
+                "views": 0,
+            },
+            "dimension_records": [],
+            "view_records": [],
+            "limitations": [
+                "Manifest completeness is checked only from caller-supplied records."
+            ],
+        }
+
+    manifest_view_ids = {item["view_id"].strip() for item in manifest["views"]}
+    dimension_records = []
+    driving_ids = []
+    role_counts = {"driving": 0, "verification": 0, "source_issue": 0}
+    for item in manifest["dimensions"]:
+        item_id = item["id"].strip()
+        role = item["role"]
+        role_counts[role] += 1
+        missing = []
+        if item["source_view_id"].strip() not in manifest_view_ids:
+            missing.append("source_view_record")
+        if role in {"driving", "verification"}:
+            if role == "driving":
+                driving_ids.append(item_id)
+            if item["status"] != "verified":
+                missing.append("status=verified")
+            if item.get("passed") is not True:
+                missing.append("passed=true")
+            for field in ("expected", "observed"):
+                if item.get(field) is None:
+                    missing.append(field)
+            if not _normalized_nonempty(item.get("target_elements") or []):
+                missing.append("target_elements")
+            if not (item.get("measurement_semantics") or "").strip():
+                missing.append("measurement_semantics")
+            if not _normalized_nonempty(item.get("tool_evidence") or []):
+                missing.append("tool_evidence")
+        else:
+            if item["status"] != "source_issue":
+                missing.append("status=source_issue")
+            if not _normalized_nonempty(item.get("source_evidence") or []):
+                missing.append("source_evidence")
+            if not _normalized_nonempty(item.get("attempted_interpretations") or []):
+                missing.append("attempted_interpretations")
+            if not (item.get("reason") or "").strip():
+                missing.append("reason")
+        dimension_records.append(
+            _acceptance_record(
+                record_id=item_id,
+                role=role,
+                complete=not missing,
+                missing=missing,
+            )
+        )
+
+    view_records = []
+    for item in manifest["views"]:
+        view_id = item["view_id"].strip()
+        missing = []
+        if item["status"] == "source_issue":
+            if item["decision"] != "source_issue":
+                missing.append("decision=source_issue")
+            if not _normalized_nonempty(item.get("source_evidence") or []):
+                missing.append("source_evidence")
+            if not (item.get("reason") or "").strip():
+                missing.append("reason")
+        else:
+            if item["status"] != "verified":
+                missing.append("status=verified")
+            if item["decision"] != "accept":
+                missing.append("decision=accept")
+            if not item.get("candidate_reference"):
+                missing.append("candidate_reference")
+            if not item.get("candidate_recipe"):
+                missing.append("candidate_recipe")
+            if not item.get("comparison_image_path"):
+                missing.append("comparison_image_path")
+            if item.get("image_content_reviewed") is not True:
+                missing.append("image_content_reviewed=true")
+            if not (item.get("visual_observation") or "").strip():
+                missing.append("visual_observation")
+
+        if item.get("cutting_line_changes_direction"):
+            recipe = item.get("candidate_recipe") or {}
+            if recipe.get("tool") != "slice_shape":
+                missing.append("candidate_recipe.tool=slice_shape")
+            if recipe.get("mode") != "section_path":
+                missing.append("candidate_recipe.mode=section_path")
+            if recipe.get("align_segments") is not True:
+                missing.append("candidate_recipe.align_segments=true")
+            if len(item.get("cutting_path") or []) < 3:
+                missing.append("cutting_path_with_direction_change")
+
+        view_records.append(
+            _acceptance_record(
+                record_id=view_id,
+                role=item["drawing_role"],
+                complete=not missing,
+                missing=missing,
+            )
+        )
+
+    complete = all(item["complete"] for item in [*dimension_records, *view_records])
+    return {
+        "provided": True,
+        "required": True,
+        "complete": complete,
+        "driving_dimension_ids": driving_ids,
+        "counts": {
+            "dimensions": len(dimension_records),
+            **role_counts,
+            "views": len(view_records),
+        },
+        "dimension_records": dimension_records,
+        "view_records": view_records,
+        "limitations": [
+            "Manifest coverage and image_content_reviewed are caller attestations; "
+            "the validator does not inspect source pixels or the model's visual reasoning."
+        ],
+    }
+
+
+def _merge_source_acceptance(
+    report: dict[str, Any], source_acceptance: dict[str, Any]
+) -> dict[str, Any]:
+    """Merge requirement-correspondence findings into the FreeCAD-side report."""
+    merged = dict(report)
+    findings = list(merged.get("findings") or [])
+    if source_acceptance["required"] and not source_acceptance["provided"]:
+        findings.append(
+            {
+                "severity": "warning",
+                "category": "source_acceptance_manifest_missing",
+                "object": None,
+                "message": (
+                    "Driving dimension IDs were supplied without the complete source "
+                    "acceptance manifest; drawing correspondence is not accepted."
+                ),
+            }
+        )
+    elif source_acceptance["provided"] and not source_acceptance["complete"]:
+        incomplete_ids = [
+            item["id"]
+            for item in [
+                *source_acceptance["dimension_records"],
+                *source_acceptance["view_records"],
+            ]
+            if not item["complete"]
+        ]
+        findings.append(
+            {
+                "severity": "error",
+                "category": "source_acceptance_incomplete",
+                "object": None,
+                "message": (
+                    "Source acceptance has incomplete or failed records: "
+                    + ", ".join(incomplete_ids)
+                ),
+            }
+        )
+
+    merged["findings"] = findings
+    merged["source_acceptance"] = source_acceptance
+    counts = dict(merged.get("counts") or {})
+    counts["source_dimensions"] = source_acceptance["counts"]["dimensions"]
+    counts["source_views"] = source_acceptance["counts"]["views"]
+    merged["counts"] = counts
+
+    severities = {item.get("severity") for item in findings}
+    if "error" in severities:
+        merged["assessment"] = "invalid_or_broken"
+    elif "warning" in severities and merged.get("assessment") == "healthy":
+        merged["assessment"] = "review_recommended"
+    summary = str(merged.get("summary") or "").rstrip()
+    merged["summary"] = (
+        f"{summary} Source acceptance: "
+        f"provided={source_acceptance['provided']}, "
+        f"complete={source_acceptance['complete']}."
+    ).strip()
+    completion_guidance = dict(merged.get("completion_guidance") or {})
+    report_items = list(completion_guidance.get("report") or [])
+    report_items.append("complete source dimension/view acceptance and failed records")
+    completion_guidance["report"] = report_items
+    merged["completion_guidance"] = completion_guidance
+    limitations = list(merged.get("limitations") or [])
+    limitations.extend(source_acceptance["limitations"])
+    merged["limitations"] = limitations
+    return merged
+
+
 def _finding_page(
     findings: list[dict[str, Any]], offset: int, page_size: int
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -108,6 +383,7 @@ def _parametric_response(
         "dimension_inventory": _compact_dimension_inventory(
             report.get("dimension_inventory") or {}
         ),
+        "source_acceptance": report.get("source_acceptance", {}),
         "finding_counts": {
             "by_severity": severity_counts,
             "by_category": category_counts,
@@ -821,6 +1097,7 @@ else:
         recompute: bool = True,
         include_sketch_constraints: bool = False,
         required_dimension_names: list[str] | None = None,
+        acceptance_manifest: SourceAcceptanceManifest | None = None,
         target: SketchValidationTarget | None = None,
         workflow: Literal["native_parametric", "imported_brep_edit"] = (
             "native_parametric"
@@ -861,15 +1138,20 @@ else:
             include_sketch_constraints: Include every individual sketch constraint
                 with name, type, datum, driving/reference state, and index. Defaults
                 to False because large sketches can make the response very long.
-            required_dimension_names: Stable identifiers for all source dimensions
-                classified as driving in the pre-model evidence manifest. Each name
-                must appear as a named driving sketch constraint or as a Spreadsheet
-                alias connected directly or transitively to an expression in the
-                active final-solid dependency graph. With a sketch target, each name
-                must instead influence non-construction geometry of that exact
-                sketch. Check/reference dimensions belong in separate deterministic
-                measurement evidence. Construction-only geometry and inactive/helper
+            required_dimension_names: Legacy list of source dimensions classified
+                as driving. Prefer ``acceptance_manifest`` for drawing/sketch input;
+                its complete driving-ID set is derived automatically. Supplying only
+                this list leaves source correspondence incomplete and produces a
+                review finding. Construction-only geometry and inactive/helper
                 objects do not count as usage.
+            acceptance_manifest: Complete final source-evidence manifest. Every
+                driving and verification dimension must include same-view semantic
+                expected/observed/pass evidence; every source view must include a
+                reviewed ``compare_images`` artifact and concrete visual observation.
+                ``source_issue`` needs source evidence, attempted interpretations,
+                and a reason. For a cutting line that changes direction, the view
+                recipe must use ``slice_shape`` ``section_path`` mode with aligned
+                segments. The validator derives all driving IDs from this manifest.
             target: Optional sketch validation target. Omit it for the existing
                 whole-model/final-solid diagnostic. For a sketch-only deliverable,
                 pass ``{"kind":"sketch","name":"Sketch_FlatPattern"}``.
@@ -921,6 +1203,50 @@ else:
             seen_required_dimensions.add(name)
             normalized_required_dimensions.append(name)
 
+        normalized_acceptance_manifest = None
+        if acceptance_manifest is not None:
+            normalized_acceptance_manifest = _SOURCE_ACCEPTANCE_ADAPTER.validate_python(
+                acceptance_manifest
+            ).model_dump()
+            dimension_ids = []
+            for item in normalized_acceptance_manifest["dimensions"]:
+                item["id"] = item["id"].strip()
+                item["source_view_id"] = item["source_view_id"].strip()
+                dimension_ids.append(item["id"])
+            if len(dimension_ids) != len(set(dimension_ids)):
+                raise ValueError(
+                    "acceptance_manifest contains duplicate dimension identifiers"
+                )
+            view_ids = []
+            for item in normalized_acceptance_manifest["views"]:
+                item["view_id"] = item["view_id"].strip()
+                item["drawing_role"] = item["drawing_role"].strip()
+                item["source_reference"] = item["source_reference"].strip()
+                view_ids.append(item["view_id"])
+            if len(view_ids) != len(set(view_ids)):
+                raise ValueError(
+                    "acceptance_manifest contains duplicate view identifiers"
+                )
+
+            manifest_driving_ids = [
+                item["id"]
+                for item in normalized_acceptance_manifest["dimensions"]
+                if item["role"] == "driving"
+            ]
+            if normalized_required_dimensions and set(
+                normalized_required_dimensions
+            ) != set(manifest_driving_ids):
+                raise ValueError(
+                    "required_dimension_names must exactly match all driving IDs "
+                    "in acceptance_manifest; omit the legacy list to derive them"
+                )
+            normalized_required_dimensions = manifest_driving_ids
+
+        source_acceptance = _assess_source_acceptance(
+            normalized_acceptance_manifest,
+            source_evidence_expected=bool(normalized_required_dimensions),
+        )
+
         normalized_target = None
         if target is not None:
             normalized_target = _VALIDATION_TARGET_ADAPTER.validate_python(
@@ -941,8 +1267,9 @@ else:
         )
         result = await bridge.execute_python(code)
         if result.success and result.result:
+            merged_report = _merge_source_acceptance(result.result, source_acceptance)
             return _parametric_response(
-                result.result,
+                merged_report,
                 detail_level,
                 finding_offset,
                 finding_limit,
@@ -976,6 +1303,7 @@ else:
                 "named_dimension_constraints": [],
                 "spreadsheet_parameters": [],
             },
+            "source_acceptance": source_acceptance,
             "bodies": [],
             "standalone_sketches": [],
             "uncontained_shape_objects": [],

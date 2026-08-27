@@ -432,6 +432,8 @@ class TestFreecadResources:
         assert "flat pattern/developed blank" in result
         assert "fixed/moving panels" in result
         assert "required_dimension_names" in result
+        assert "acceptance_manifest" in result
+        assert "image_content_reviewed=true" in result
         assert "compare_images" in result
         assert "every record in the source view manifest" in result
         assert "source_issue" in result
@@ -542,7 +544,13 @@ class TestFreecadResources:
             for tool in data["tools"]["images_and_checkpoints"]["tools"]
             if tool["name"] == "compare_images"
         )
-        assert "exhaustive across all source views" in compare_tool["description"]
+        assert "ImageContent" in compare_tool["description"]
+        validation_tool = next(
+            tool
+            for tool in data["tools"]["validation"]["tools"]
+            if tool["name"] == "validate_parametric_model"
+        )
+        assert "acceptance_manifest" in validation_tool["key_params"]
 
         # Should have resources section - list of dicts with uri/description
         assert "resources" in data
@@ -550,7 +558,6 @@ class TestFreecadResources:
 
         # Should have prompts section
         assert "prompts" in data
-
 
     @pytest.mark.asyncio
     async def test_resource_capabilities_includes_all_prompts(

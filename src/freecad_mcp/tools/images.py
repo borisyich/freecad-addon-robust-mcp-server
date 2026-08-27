@@ -205,7 +205,9 @@ def _resolve_image_path(path: str) -> Path:
     """Resolve and validate a local image path."""
     config = get_config()
     if not config.allow_file_access:
-        raise PermissionError("Local file access is disabled by FREECAD_ALLOW_FILE_ACCESS")
+        raise PermissionError(
+            "Local file access is disabled by FREECAD_ALLOW_FILE_ACCESS"
+        )
 
     resolved = Path(path).expanduser()
     if not resolved.is_absolute():
@@ -216,7 +218,9 @@ def _resolve_image_path(path: str) -> Path:
         raise FileNotFoundError(f"Image file not found: {resolved}")
     if resolved.suffix.lower() not in SUPPORTED_SUFFIXES:
         supported = ", ".join(sorted(SUPPORTED_SUFFIXES))
-        raise ValueError(f"Unsupported image format: {resolved.suffix}. Supported: {supported}")
+        raise ValueError(
+            f"Unsupported image format: {resolved.suffix}. Supported: {supported}"
+        )
 
     size = resolved.stat().st_size
     if size <= 0:
@@ -228,7 +232,9 @@ def _resolve_image_path(path: str) -> Path:
     return resolved
 
 
-def _load_normalized_image(path: Path, max_dimension: int) -> tuple[PILImage.Image, dict[str, Any]]:
+def _load_normalized_image(
+    path: Path, max_dimension: int
+) -> tuple[PILImage.Image, dict[str, Any]]:
     """Load, orient, resize, and normalize an image for model consumption."""
     if max_dimension <= 0:
         raise ValueError("max_dimension must be positive")
@@ -332,7 +338,9 @@ def _tile_boxes(
     return boxes
 
 
-def _resize_tile(image: PILImage.Image, target_long_side: int) -> tuple[PILImage.Image, float]:
+def _resize_tile(
+    image: PILImage.Image, target_long_side: int
+) -> tuple[PILImage.Image, float]:
     """Downscale a crop to the requested long-side cap without upscaling it."""
     current = max(image.size)
     if current <= 0:
@@ -370,10 +378,10 @@ def _label_tile(
         f"DETAIL {index}/{total} | R{row + 1}/{rows} C{column + 1}/{columns} | "
         f"src [{left},{top}]-[{right},{bottom}]"
     )
-    info_font = ImageFont.load_default(
-        size=max(16, round(min(source.size) * 0.022))
+    info_font = ImageFont.load_default(size=max(16, round(min(source.size) * 0.022)))
+    draw.text(
+        (14, max(12, (header_height - 18) // 2)), text, fill="black", font=info_font
     )
-    draw.text((14, max(12, (header_height - 18) // 2)), text, fill="black", font=info_font)
     draw.rectangle((0, 0, canvas.width - 1, canvas.height - 1), outline=(90, 90, 90))
     return canvas
 
@@ -396,7 +404,7 @@ def _make_grid_overview(
         )
     draw = ImageDraw.Draw(overview)
     line_width = max(2, round(min(overview.size) / 360))
-    for index, (row, column, left, top, right, bottom) in enumerate(boxes, start=1):
+    for index, (_row, _column, left, top, right, bottom) in enumerate(boxes, start=1):
         scaled = tuple(round(value * scale) for value in (left, top, right, bottom))
         draw.rectangle(scaled, outline=(220, 35, 35), width=line_width)
         x1, y1, _x2, _y2 = scaled
@@ -464,7 +472,11 @@ def register_image_tools(mcp: Any) -> None:
     ) -> CallToolResult:
         """Deliver a drawing overview plus labelled, overlapping source-resolution tiles.
 
-        Use this before reconstructing a part from a dense drawing. Whole-sheet
+        Use this before reconstructing a part from a dense drawing. Start with the
+        default 2 x 3 grid, or the smallest grid that makes annotations readable;
+        do not select the maximum tile count pre-emptively. Increase one grid
+        dimension only after identifying evidence that remains unreadable.
+        Whole-sheet
         images are often downscaled by a VLM, making dimensions and small features
         occupy too few visual tokens. Cropping does not invent information. Tiles
         retain their native crop resolution unless they exceed the configured cap.
@@ -493,7 +505,9 @@ def register_image_tools(mcp: Any) -> None:
             Metadata and multiple labelled MCP ImageContent blocks in row-major order.
         """
         if not 1 <= rows <= 4 or not 1 <= columns <= 4:
-            return image_error("rows and columns must each be between 1 and 4", path=path)
+            return image_error(
+                "rows and columns must each be between 1 and 4", path=path
+            )
         if rows * columns > 9:
             return image_error("rows * columns must not exceed 9", path=path)
         if not 0 <= overlap_percent <= 25:
@@ -518,9 +532,7 @@ def register_image_tools(mcp: Any) -> None:
             if save_to_disk:
                 if output_dir is None:
                     target_dir = (
-                        Path.cwd()
-                        / "image_tiles"
-                        / f"{resolved.stem}_{rows}x{columns}"
+                        Path.cwd() / "image_tiles" / f"{resolved.stem}_{rows}x{columns}"
                     )
                 else:
                     target_dir = Path(output_dir).expanduser()
@@ -628,7 +640,9 @@ def register_image_tools(mcp: Any) -> None:
                 "recommended_review": (
                     "Inspect every returned fragment, reconcile overlaps with the "
                     "overview, and record dimensions/features with their fragment "
-                    "indices before choosing the modeling strategy."
+                    "indices before choosing the modeling strategy. Use the minimum "
+                    "tile grid sufficient for annotations; enlarge the grid only "
+                    "when named evidence remains unreadable after this review."
                 ),
                 "limitations": [
                     "Tiles are never upscaled; insufficient source detail remains insufficient.",
@@ -668,7 +682,11 @@ def register_image_tools(mcp: Any) -> None:
         apparently good pair does not prove depth, opposite-face geometry, or axis
         orientation. Before final acceptance, reproduce and compare every source
         view/detail/section recorded in the drawing view manifest one-to-one.
-        Describe concrete discrepancies and rework the causal feature.
+        Describe concrete discrepancies and rework the causal feature. A comparison
+        is not reviewed merely because the output file or text metadata exists: the
+        caller must surface the returned MCP ImageContent to the vision model. A
+        wrapper over multiple calls must forward image blocks rather than retaining
+        only text blocks.
         ``evaluate_model_checkpoint`` remains available when a formal ledger is
         useful, but is not mandatory.
 
@@ -776,6 +794,21 @@ def register_image_tools(mcp: Any) -> None:
                     ),
                     "optional_ledger_fields": list(DISCREPANCY_LEDGER_FIELDS),
                     "optional_decision_values": ["continue", "rework"],
+                },
+                "visual_review_contract": {
+                    "image_content_returned": True,
+                    "image_content_review_required": True,
+                    "metadata_or_saved_file_alone_is_not_review": True,
+                    "wrapper_requirement": (
+                        "Forward the returned MCP ImageContent block to the vision "
+                        "model; do not keep only text/metadata from this result."
+                    ),
+                    "acceptance_evidence": [
+                        "comparison_image_path",
+                        "image_content_reviewed=true",
+                        "visual_observation",
+                        "decision",
+                    ],
                 },
             }
             return image_tool_result(

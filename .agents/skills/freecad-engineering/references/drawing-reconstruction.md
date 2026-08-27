@@ -172,7 +172,10 @@ Rules:
    the view manifest before modeling.
 2. Use `open_image_tiles` for local dimensions and small geometry. Tiles are
    cropped at source resolution and only downscaled when they exceed the
-   configured long-side limit.
+   configured long-side limit. Start with the default 2 x 3 grid or the minimum
+   grid that makes annotations readable. Increase it only after identifying
+   specific evidence that remains unreadable; never choose nine tiles merely
+   because the tool permits nine.
 3. For every drawing section, save a matching candidate-section recipe before
    modeling is considered complete. Use `section_shape` for standard XY/XZ/YZ
    sections, `slice_shape(plane_point=..., plane_normal=...)` for arbitrary
@@ -181,7 +184,9 @@ Rules:
    with a broken cutting line. In path mode, provide the ordered 3D cutting-line
    points in the drawing-view plane and the axis normal to that view; the tool
    unfolds the segment sections into one XY-plane result for section-to-section
-   inspection.
+   inspection. Record `section_type`, source cutting path, and exact candidate
+   recipe in the view manifest. If the source cutting line changes direction,
+   `section_shape` and planar `slice_shape` are not equivalent substitutes.
 4. Extract every dimension from every view and assign its semantic
    references and role before geometry creation. No dimension may disappear from
    the manifest because it is redundant, inconvenient, or difficult to map.
@@ -223,6 +228,11 @@ combine `fit_all` with an explicit orthographic height.
 `compare_images` only presents images. It does not align them, read dimensions,
 or compute correctness. Explicitly inspect:
 
+The comparison is not reviewed until the returned MCP `ImageContent` is surfaced
+to and inspected by the vision model. A multi-call wrapper must forward image
+blocks rather than retaining only text. A saved file or structured metadata by
+itself is not visual evidence.
+
 - outer silhouette and aspect ratio;
 - feature count and symmetry evidence;
 - center positions and spacing;
@@ -237,6 +247,12 @@ rendering unrelated views adds cost without evidence. A screenshot that was
 merely captured or opened is not a completed visual checkpoint. Before any
 linear, polar, mirrored, or multi-transform pattern, compare the single seed
 element first; repeating an unverified seed multiplies its error.
+
+For each completed view comparison, retain the comparison path,
+`image_content_reviewed=true`, a concrete visual observation, and the
+accept/rework decision. These records belong in the final
+`acceptance_manifest`; creating comparison artifacts without reviewing their
+image content leaves the view incomplete.
 
 Before final acceptance, iterate through **every view-manifest record** and
 reproduce its candidate view from the finished model. Compare every pair,

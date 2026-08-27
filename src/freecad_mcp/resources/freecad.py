@@ -438,10 +438,10 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                     "The Skill is the single source of detailed modeling policy.",
                     "execute_python, safe_execute, and run_macro remain available.",
                     "Drawing reconstruction inventories every source view that depicts part geometry, including redundant/corroborative views, and every dimension before modeling.",
-                    "Final drawing acceptance requires one-to-one candidate comparison for every source-view manifest record.",
+                    "Final drawing acceptance requires one-to-one candidate comparison for every source-view manifest record and inspection of each returned ImageContent block.",
                     "Every explicit source dimension is inventoried; drafting markers are preserved and interpreted rather than used to skip an annotation.",
                     "Source dimensions end as driving/verification, or exceptional source_issue with concrete source evidence; unresolved is not a terminal manifest role.",
-                    "The final validator is informative and does not prove drawing correspondence.",
+                    "Pass the complete acceptance_manifest so the final validator derives all driving IDs and rejects incomplete dimension/view evidence; it still cannot inspect source pixels or prove the caller's visual reasoning.",
                 ],
             },
             indent=2,
@@ -1285,7 +1285,7 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                         },
                         {
                             "name": "open_image_tiles",
-                            "description": "Return indexed overview plus overlapping drawing fragments without upscaling",
+                            "description": "Return a minimal sufficient indexed grid plus overlapping drawing fragments without upscaling; enlarge only when annotations remain unreadable",
                             "key_params": [
                                 "path",
                                 "rows",
@@ -1295,7 +1295,7 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                         },
                         {
                             "name": "compare_images",
-                            "description": "Equivalent-view comparison for drawing reconstruction; feature-relevant during modeling and exhaustive across all source views before final acceptance",
+                            "description": "Equivalent-view comparison returning ImageContent that must be surfaced and visually inspected; feature-relevant during modeling and exhaustive before final acceptance",
                             "key_params": [
                                 "reference_path",
                                 "candidate_path",
@@ -1497,6 +1497,7 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                                 "recompute",
                                 "include_sketch_constraints",
                                 "required_dimension_names",
+                                "acceptance_manifest",
                                 "target",
                                 "detail_level",
                                 "finding_offset",

@@ -123,17 +123,23 @@ editable history rather than only assigning a final `Shape` to `Part::Feature`.
 
 After any task that creates or changes model geometry, call:
 
-For a drawing/sketch reconstruction, pass every saved `driving` dimension
-identifier to the validator. Separately measure every `driving` and
-`verification` dimension against the solved model using the same source-view
-context and semantic elements recorded in the dimension manifest:
+For a drawing/sketch reconstruction, pass the complete saved source acceptance
+manifest to the validator. The validator derives every `driving` identifier from
+that manifest, traces it to the target geometry, and checks that every
+`driving`/`verification` record has final same-view measurement evidence and
+every source-view record has reviewed visual-comparison evidence:
 
 ```text
 validate_parametric_model(
     doc_name=<intended document>,
-    required_dimension_names=[<all driving source dimension identifiers>],
+    acceptance_manifest={"dimensions":[...], "views":[...]},
 )
 ```
+
+`required_dimension_names` remains a legacy compatibility input. Supplying it
+without `acceptance_manifest` is not complete drawing acceptance and must not be
+reported as such. If both are supplied, the list must exactly match every
+manifest item whose role is `driving`.
 
 When the requested deliverable is a sketch rather than a final solid, scope the
 same diagnostic to that sketch:
@@ -142,7 +148,7 @@ same diagnostic to that sketch:
 validate_parametric_model(
     doc_name=<intended document>,
     target={"kind":"sketch", "name":<intended sketch>},
-    required_dimension_names=[<all driving source dimension identifiers>],
+    acceptance_manifest={"dimensions":[...], "views":[...]},
 )
 ```
 
@@ -473,7 +479,10 @@ replace this same-view geometric measurement.
   notes, and scale relationships.
 - Use `open_image_tiles` when dimensions/features are too small in the full
   sheet. Tiles preserve native crop resolution unless they exceed the configured
-  long-side cap; they are not upscaled.
+  long-side cap; they are not upscaled. Start with the default 2 x 3 grid or the
+  smallest grid likely to make annotations readable. Increase the grid only
+  after naming evidence that remains unreadable; do not select the maximum tile
+  count pre-emptively.
 - Treat every drawing section as geometric evidence, not merely annotation. If a
   section view exists, reproduce the candidate section before completion and
   compare section-to-section. Use `section_shape` for an origin-aligned XY/XZ/YZ
@@ -482,7 +491,10 @@ replace this same-view geometric measurement.
   section_depth_direction=[...], align_segments=True)`: `section_path` is the
   ordered 3D cutting line from the drawing view and `section_depth_direction` is
   the axis normal to that drawing view. The returned aligned-path section is
-  unfolded into one XY plane for inspection. Do not infer internal steps,
+  unfolded into one XY plane for inspection. Record `section_type`, the source
+  cutting path, and this exact mode in the view manifest. When the source cutting
+  line changes direction, `section_shape` and planar `slice_shape` are not
+  equivalent substitutes. Do not infer internal steps,
   chamfers, fillets, wall thicknesses, or axial offsets from external views when
   the section provides explicit evidence.
 - Before creating geometry, extract and save every explicit dimension from every
@@ -543,6 +555,13 @@ smallest set of source views that directly exposes that feature; do **not**
 re-render every view after every feature when it adds no evidence. A screenshot
 without comparison is not a completed visual checkpoint. Broaden the checkpoint
 to any additional source views that can expose an uncertainty or contradiction.
+
+The comparison is incomplete until its returned MCP `ImageContent` has been
+surfaced to and inspected by the vision model. When orchestrating multiple calls,
+forward image blocks; never retain only text/metadata. Saving a comparison file
+or receiving its structured metadata is not visual review. Record the comparison
+path, `image_content_reviewed=true`, a concrete visual observation, and the
+accept/rework decision in the view manifest.
 
 Before final acceptance, however, the rule is exhaustive: iterate through
 **every record in the source view manifest**, reproduce its candidate
@@ -774,10 +793,11 @@ Before reporting completion:
   record one-to-one against the final model, including sections/details and
   opposite-side views;
 - confirm that the dimension manifest contains every source dimension. Pass
-  every driving identifier to
-  `validate_parametric_model(required_dimension_names=[...])`, and confirm
-  same-view semantic measured evidence for every driving and verification
-  identifier; audit and disclose every exceptional `source_issue`; for a
+  the complete source acceptance manifest to
+  `validate_parametric_model(acceptance_manifest={...})`; require every driving
+  and verification record to be verified with same-view semantic measured
+  evidence, every source-view comparison image to be inspected, and every
+  exceptional `source_issue` to contain concrete evidence; for a
   sketch-only
   deliverable also pass `target={"kind":"sketch","name":...}`;
 - inspect each Spreadsheet alias: determine why it exists, connect it to the

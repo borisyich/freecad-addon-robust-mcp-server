@@ -17,8 +17,9 @@ modifies, repairs, or validates a mechanical model in FreeCAD.
    every explicit dimension before modeling; drafting markers do not make a
    dimension optional. Dimensions end as driving/verification, or exceptional
    `source_issue` with concrete source evidence; never use unresolved as a
-   terminal manifest role. Pass all driving
-   IDs to final validation and measure every driving/verification dimension
+   terminal manifest role. Pass the complete source acceptance manifest to final
+   validation so it derives every driving ID, and measure every
+   driving/verification dimension
    between the same semantic elements in its reproduced source-view context.
    Compare feature-relevant views during modeling and every source-view manifest
    record one-to-one before final acceptance.

@@ -187,6 +187,7 @@ async def test_compare_images_rejects_tiny_panels(registered_tools, tmp_path):
     assert result.isError is True
     assert "at least 200" in result.structuredContent["error"]
 
+
 @pytest.mark.asyncio
 async def test_fastmcp_serializes_open_image_as_image_content(tmp_path):
     """FastMCP must preserve ImageContent through its result conversion layer."""
@@ -207,7 +208,9 @@ async def test_fastmcp_serializes_open_image_as_image_content(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_compare_images_returns_optional_review_guidance(registered_tools, tmp_path):
+async def test_compare_images_returns_optional_review_guidance(
+    registered_tools, tmp_path
+):
     """compare_images should suggest review without imposing a rigid gate."""
     reference = tmp_path / "reference.png"
     candidate = tmp_path / "candidate.png"
@@ -229,6 +232,11 @@ async def test_compare_images_returns_optional_review_guidance(registered_tools,
     assert review["optional_decision_values"] == ["continue", "rework"]
     assert "every source-view manifest record" in review["when_uncertain"]
     assert "profile_plane_and_axis_direction" in review["inspect"]
+    contract = metadata["visual_review_contract"]
+    assert contract["image_content_returned"] is True
+    assert contract["image_content_review_required"] is True
+    assert contract["metadata_or_saved_file_alone_is_not_review"] is True
+    assert "Forward the returned MCP ImageContent" in contract["wrapper_requirement"]
 
 
 @pytest.mark.asyncio
@@ -263,6 +271,7 @@ async def test_open_image_tiles_returns_overview_and_labelled_fragments(
     assert "visual_ack_required" not in metadata
     assert "submit_modeling_plan" not in str(metadata)
     assert "Inspect every returned fragment" in metadata["recommended_review"]
+    assert "minimum tile grid" in metadata["recommended_review"]
 
 
 @pytest.mark.asyncio
@@ -317,9 +326,7 @@ async def test_open_image_tiles_rejects_excessive_grid(registered_tools, tmp_pat
     drawing = tmp_path / "drawing.png"
     _write_image(drawing)
 
-    result = await registered_tools["open_image_tiles"](
-        str(drawing), rows=4, columns=4
-    )
+    result = await registered_tools["open_image_tiles"](str(drawing), rows=4, columns=4)
 
     assert result.isError is True
     assert "must not exceed 9" in result.structuredContent["error"]

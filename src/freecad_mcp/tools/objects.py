@@ -3078,7 +3078,8 @@ except Exception:
         """Create a planar or broken-path cross-section of a shape.
 
         Use ``plane_point`` + ``plane_normal`` for an ordinary infinite planar
-        section. For an offset/aligned drawing section, pass ``section_path`` as
+        section. If the source cutting line changes direction, planar mode is not
+        an equivalent substitute: pass ``section_path`` as
         the 3D points of the cutting line and ``section_depth_direction`` as the
         direction perpendicular to the drawing view. Each path segment defines
         a finite cutting plane. With ``align_segments=True`` (default), segment
@@ -3109,9 +3110,7 @@ except Exception:
                 "Use either plane_point/plane_normal or section_path, not both"
             )
         if not plane_mode and not path_mode:
-            raise ValueError(
-                "Provide plane_point/plane_normal or section_path"
-            )
+            raise ValueError("Provide plane_point/plane_normal or section_path")
         if plane_mode:
             if plane_point is None or plane_normal is None:
                 raise ValueError(
@@ -3119,7 +3118,9 @@ except Exception:
                 )
             if len(plane_point) != 3 or len(plane_normal) != 3:
                 raise ValueError("plane_point and plane_normal must contain 3 values")
-            if not all(math.isfinite(float(value)) for value in [*plane_point, *plane_normal]):
+            if not all(
+                math.isfinite(float(value)) for value in [*plane_point, *plane_normal]
+            ):
                 raise ValueError("plane_point and plane_normal must be finite")
             if math.sqrt(sum(float(value) ** 2 for value in plane_normal)) <= 1e-9:
                 raise ValueError("plane_normal must be non-zero")
@@ -3135,12 +3136,16 @@ except Exception:
             flat_values = [value for point in section_path for value in point]
             flat_values.extend(section_depth_direction)
             if not all(math.isfinite(float(value)) for value in flat_values):
-                raise ValueError("section_path and section_depth_direction must be finite")
+                raise ValueError(
+                    "section_path and section_depth_direction must be finite"
+                )
             depth = [float(value) for value in section_depth_direction]
             depth_length = math.sqrt(sum(value * value for value in depth))
             if depth_length <= 1e-9:
                 raise ValueError("section_depth_direction must be non-zero")
-            for index, (start, end) in enumerate(zip(section_path, section_path[1:]), start=1):
+            for index, (start, end) in enumerate(
+                zip(section_path, section_path[1:], strict=False), start=1
+            ):
                 segment = [float(end[i]) - float(start[i]) for i in range(3)]
                 segment_length = math.sqrt(sum(value * value for value in segment))
                 if segment_length <= 1e-9:
@@ -3345,8 +3350,9 @@ except Exception:
         """Create a cross-section of a shape at a standard origin plane.
 
         This is the compact convenience wrapper for ordinary XY/XZ/YZ sections.
-        Use ``slice_shape(section_path=..., section_depth_direction=...)`` for
-        offset/aligned sections whose cutting line is broken.
+        It is not valid for a source section whose cutting line changes direction;
+        use ``slice_shape(section_path=..., section_depth_direction=...,
+        align_segments=True)`` for that offset/aligned section.
         """
         plane_normals = {
             "XY": [0, 0, 1],

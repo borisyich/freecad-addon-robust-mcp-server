@@ -250,8 +250,7 @@ def test_drawing_reconstruction_requires_complete_view_and_dimension_evidence() 
         encoding="utf-8"
     )
     reference = (
-        ROOT
-        / ".agents/skills/freecad-engineering/references/drawing-reconstruction.md"
+        ROOT / ".agents/skills/freecad-engineering/references/drawing-reconstruction.md"
     ).read_text(encoding="utf-8")
     sketch_reference = (
         ROOT / ".agents/skills/freecad-engineering/references/sketch-construction.md"
@@ -275,6 +274,11 @@ def test_drawing_reconstruction_requires_complete_view_and_dimension_evidence() 
         "never use `unresolved` as a terminal dimension classification",
         "a marker is not a reason to omit the dimension",
         "not** a whitelist of drawing views",
+        "acceptance_manifest",
+        "image_content_reviewed=true",
+        "never retain only text/metadata",
+        "do not select the maximum tile count pre-emptively",
+        "planar `slice_shape` are not equivalent substitutes",
     ):
         assert concept in normalized_skill
 
@@ -286,6 +290,9 @@ def test_drawing_reconstruction_requires_complete_view_and_dimension_evidence() 
         "The only exceptional terminal role is `source_issue`",
         "it is not a reason to omit the annotation",
         "It is not a whitelist of source views",
+        "never choose nine tiles merely because the tool permits nine",
+        "A saved file or structured metadata by itself is not visual evidence",
+        "`acceptance_manifest`",
     ):
         assert concept in normalized_reference
 

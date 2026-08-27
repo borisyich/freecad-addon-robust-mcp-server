@@ -72,17 +72,21 @@ creating the pattern.
 
 ## Source dimensions and Spreadsheet cleanliness
 
-For drawing/sketch input, call the final validator with the complete saved list
-of `driving` source-dimension identifiers. Each driving identifier must be used
-by a named driving sketch constraint or by a Spreadsheet alias that connects
-directly or transitively to an expression that influences the active final
-solid. A link to construction-only geometry, an inactive sketch, a datum/helper
-object, or metadata is not sufficient.
+For drawing/sketch input, call the final validator with the complete saved
+`acceptance_manifest`, not a hand-selected identifier subset. The validator
+derives every `driving` ID and traces it to a named driving sketch constraint or
+Spreadsheet alias connected directly or transitively to the active final solid.
+A link to construction-only geometry, an inactive sketch, a datum/helper object,
+or metadata is not sufficient. Legacy `required_dimension_names` without the
+manifest produces an incomplete-acceptance finding.
 
-This structural trace is only one half of dimension validation. The saved source
-manifest must also contain every dimension. For every `driving` and
-`verification` item, reproduce its recorded source view/section/detail context
-and measure the finished model between the same semantic elements using the same
+The manifest connects that structural trace to dimension/view acceptance. Every
+`driving` and `verification` item must have status `verified` and retain its
+recorded source-view/section/detail context, the same semantic elements, and the
+same measurement semantics. Retain expected, observed, tolerance, pass/fail, and
+tool evidence. Every view must retain its candidate recipe, comparison artifact,
+`image_content_reviewed=true`, concrete visual observation, and decision. Measure
+the finished model between the same semantic elements using the same
 dimension semantics. Retain expected, observed, tolerance, pass/fail, and tool
 evidence. A parameter path that drives the model does not prove that the final
 geometry matches the source relationship.

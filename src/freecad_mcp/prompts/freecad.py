@@ -92,6 +92,9 @@ mechanical model, activate `$freecad-engineering`. The canonical policy is
   Before final acceptance, reproduce and compare every source-view manifest
   record one-to-one, then rework the causal feature when any view disagrees. A
   formal discrepancy ledger/checkpoint is optional rather than a universal gate.
+  A `compare_images` checkpoint is incomplete until its returned ImageContent is
+  surfaced and visually inspected; text metadata or a saved output file alone
+  does not count.
 - Preserve native editable design intent: Body, sketches, constraints, and
   semantic PartDesign history unless the user explicitly asks for direct B-rep.
 - `execute_python`, `safe_execute`, and `run_macro` are always available. Using
@@ -110,8 +113,10 @@ mechanical model, activate `$freecad-engineering`. The canonical policy is
   source-view context.
 - Immediately before the final user-facing response after any geometry change,
   call `{FINAL_PARAMETRIC_VALIDATION_TOOL}` and summarize significant findings.
-  For drawing/sketch input, pass the complete driving-identifier list as
-  `required_dimension_names` and retain verification evidence separately.
+  For drawing/sketch input, pass the complete `acceptance_manifest`; the tool
+  derives all driving identifiers and checks evidence for every driving,
+  verification, and source-view record. Legacy `required_dimension_names` alone
+  is not complete drawing acceptance.
 
 ## Quick Reference
 

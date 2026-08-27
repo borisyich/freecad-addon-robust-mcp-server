@@ -669,6 +669,231 @@ class TestValidationTools:
         mock_bridge.execute_python.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_validate_parametric_model_derives_driving_ids_from_acceptance_manifest(
+        self, register_tools, mock_bridge
+    ):
+        report = {
+            "informational": True,
+            "assessment": "healthy",
+            "summary": "Model is healthy.",
+            "counts": {},
+            "findings": [],
+            "limitations": [],
+        }
+        mock_bridge.execute_python = AsyncMock(
+            return_value=ExecutionResult(
+                success=True,
+                result=report,
+                stdout="",
+                stderr="",
+                execution_time_ms=1.0,
+            )
+        )
+        manifest = {
+            "dimensions": [
+                {
+                    "id": "WIDTH_120",
+                    "role": "driving",
+                    "status": "verified",
+                    "source_view_id": "V_TOP",
+                    "target_elements": ["LEFT_FACE", "RIGHT_FACE"],
+                    "measurement_semantics": "projected_distance_x",
+                    "expected": 120.0,
+                    "observed": 120.0,
+                    "passed": True,
+                    "tool_evidence": ["measure_distance:WidthWitness"],
+                },
+                {
+                    "id": "THICKNESS_3",
+                    "role": "verification",
+                    "status": "verified",
+                    "source_view_id": "V_SIDE",
+                    "target_elements": ["BOTTOM_FACE", "STEP_FACE"],
+                    "measurement_semantics": "projected_distance_z",
+                    "expected": 3.0,
+                    "observed": 3.0,
+                    "passed": True,
+                    "tool_evidence": ["measure_distance:StepWitness"],
+                },
+            ],
+            "views": [
+                {
+                    "view_id": "V_TOP",
+                    "drawing_role": "orthographic",
+                    "status": "verified",
+                    "source_reference": "drawing_top.png",
+                    "candidate_reference": "final_top.png",
+                    "candidate_recipe": {"camera": "Top"},
+                    "comparison_image_path": "compare_top.png",
+                    "image_content_reviewed": True,
+                    "visual_observation": "Silhouette and hole positions agree.",
+                    "decision": "accept",
+                },
+                {
+                    "view_id": "V_SIDE",
+                    "drawing_role": "orthographic",
+                    "status": "verified",
+                    "source_reference": "drawing_side.png",
+                    "candidate_reference": "final_side.png",
+                    "candidate_recipe": {"camera": "Left"},
+                    "comparison_image_path": "compare_side.png",
+                    "image_content_reviewed": True,
+                    "visual_observation": "Underside step agrees.",
+                    "decision": "accept",
+                },
+            ],
+        }
+
+        result = await register_tools["validate_parametric_model"](
+            acceptance_manifest=manifest
+        )
+
+        assert result["assessment"] == "healthy"
+        assert result["source_acceptance"]["complete"] is True
+        assert result["source_acceptance"]["counts"] == {
+            "dimensions": 2,
+            "driving": 1,
+            "verification": 1,
+            "source_issue": 0,
+            "views": 2,
+        }
+        generated_code = mock_bridge.execute_python.await_args.args[0]
+        assert "['WIDTH_120']" in generated_code
+        assert "THICKNESS_3" not in generated_code
+
+    @pytest.mark.asyncio
+    async def test_validate_parametric_model_rejects_incomplete_source_acceptance(
+        self, register_tools, mock_bridge
+    ):
+        mock_bridge.execute_python = AsyncMock(
+            return_value=ExecutionResult(
+                success=True,
+                result={
+                    "informational": True,
+                    "assessment": "healthy",
+                    "summary": "Structurally healthy.",
+                    "counts": {},
+                    "findings": [],
+                    "limitations": [],
+                },
+                stdout="",
+                stderr="",
+                execution_time_ms=1.0,
+            )
+        )
+        manifest = {
+            "dimensions": [
+                {
+                    "id": "FILLET_R5",
+                    "role": "verification",
+                    "status": "failed",
+                    "source_view_id": "S_AA",
+                    "target_elements": ["SECTION_FILLET"],
+                    "measurement_semantics": "radius",
+                    "expected": 5.0,
+                    "observed": 0.0,
+                    "passed": False,
+                    "tool_evidence": ["measure_radius:no_match"],
+                }
+            ],
+            "views": [
+                {
+                    "view_id": "S_AA",
+                    "drawing_role": "aligned_section",
+                    "status": "verified",
+                    "source_reference": "section_aa.png",
+                    "candidate_reference": "final_section.png",
+                    "candidate_recipe": {
+                        "tool": "slice_shape",
+                        "mode": "plane",
+                    },
+                    "cutting_line_changes_direction": True,
+                    "cutting_path": [[0, 0, 0], [10, 0, 0]],
+                    "comparison_image_path": "compare_section.png",
+                    "image_content_reviewed": False,
+                    "visual_observation": "",
+                    "decision": "accept",
+                }
+            ],
+        }
+
+        result = await register_tools["validate_parametric_model"](
+            acceptance_manifest=manifest
+        )
+
+        assert result["assessment"] == "invalid_or_broken"
+        assert result["source_acceptance"]["complete"] is False
+        dimension = result["source_acceptance"]["dimension_records"][0]
+        assert "status=verified" in dimension["missing_or_failed"]
+        view = result["source_acceptance"]["view_records"][0]
+        assert "image_content_reviewed=true" in view["missing_or_failed"]
+        assert "candidate_recipe.mode=section_path" in view["missing_or_failed"]
+
+    @pytest.mark.asyncio
+    async def test_validate_parametric_model_marks_legacy_dimension_list_incomplete(
+        self, register_tools, mock_bridge
+    ):
+        mock_bridge.execute_python = AsyncMock(
+            return_value=ExecutionResult(
+                success=True,
+                result={
+                    "informational": True,
+                    "assessment": "healthy",
+                    "summary": "Structurally healthy.",
+                    "counts": {},
+                    "findings": [],
+                    "limitations": [],
+                },
+                stdout="",
+                stderr="",
+                execution_time_ms=1.0,
+            )
+        )
+
+        result = await register_tools["validate_parametric_model"](
+            required_dimension_names=["WIDTH_120"]
+        )
+
+        assert result["assessment"] == "review_recommended"
+        assert result["source_acceptance"]["required"] is True
+        assert result["source_acceptance"]["complete"] is False
+        assert result["findings"][0]["category"] == (
+            "source_acceptance_manifest_missing"
+        )
+
+    @pytest.mark.asyncio
+    async def test_validate_parametric_model_rejects_manifest_driving_id_mismatch(
+        self, register_tools, mock_bridge
+    ):
+        manifest = {
+            "dimensions": [
+                {
+                    "id": "WIDTH_120",
+                    "role": "driving",
+                    "status": "verified",
+                    "source_view_id": "V_TOP",
+                }
+            ],
+            "views": [
+                {
+                    "view_id": "V_TOP",
+                    "drawing_role": "orthographic",
+                    "status": "verified",
+                    "source_reference": "drawing_top.png",
+                    "decision": "accept",
+                }
+            ],
+        }
+
+        with pytest.raises(ValueError, match="must exactly match all driving IDs"):
+            await register_tools["validate_parametric_model"](
+                required_dimension_names=["OTHER"],
+                acceptance_manifest=manifest,
+            )
+
+        mock_bridge.execute_python.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_validate_parametric_model_failure_is_informative(
         self, register_tools, mock_bridge
     ):

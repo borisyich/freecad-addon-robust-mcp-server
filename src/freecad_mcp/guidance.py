@@ -96,9 +96,10 @@ asterisk, parentheses, REF, or TYP; they never make an annotation optional. Each
 dimension must map to its source view and semantic geometric references and be
 classified as driving or verification; `source_issue` is exceptional and
 requires concrete source evidence. Never use `unresolved` as a terminal manifest
-role. Pass only the complete driving-ID list
-as `required_dimension_names`, then measure every driving and verification item
-between the same semantic elements in its reproduced source-view context.
+role. Pass the complete `acceptance_manifest` to the final validator; it
+derives every driving ID and checks final evidence for every driving,
+verification, and source-view record. Legacy `required_dimension_names` alone is
+not complete drawing acceptance.
 
 When the deliverable is a sketch rather than a final solid, pass
 `target={{"kind":"sketch","name":"..."}}` so required dimensions are traced to
@@ -113,7 +114,9 @@ DRAWING_RECONSTRUCTION_WORKFLOW: Final[str] = (
     "'Reconstruct from drawings or images' and its referenced guidance. Before "
     "modeling, inventory every source view and dimension. Use `compare_images` "
     "after every major feature against the source views that expose that feature, "
-    "and before patterning a single seed element. Before final acceptance, "
+    "and before patterning a single seed element. Surface and inspect every "
+    "returned comparison ImageContent block; text metadata or a saved file alone "
+    "is not visual review. Before final acceptance, "
     "reproduce and compare every source-view manifest record one-to-one, including "
     "sections/details/opposite-side views when present.\n"
 )

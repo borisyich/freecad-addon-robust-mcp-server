@@ -104,8 +104,10 @@ If the signed chain does not close within the documented tolerance or drawing
 precision, record `dimension_chain_mismatch`, reinspect the crop/view mapping,
 and revise the interpretation. Do not average conflicting values.
 
-Pass only all `driving` IDs to `required_dimension_names`. Independently check
-every non-`source_issue` item, including driving items, by reproducing its
+Pass the complete final `acceptance_manifest`; the validator derives all
+`driving` IDs and checks that no dimension or source view has been omitted from
+the supplied acceptance evidence. Check every non-`source_issue` item, including
+driving items, by reproducing its
 recorded source-view/section context and measuring between the same semantic
 model elements with the same distance/radius/diameter/angle/thickness semantics.
 Save observed value, tolerance, pass/fail, and tool evidence in the manifest or
@@ -290,14 +292,14 @@ Call:
 validate_parametric_model(
     doc_name=<document>,
     target={"kind":"sketch", "name":<sketch name>},
-    required_dimension_names=[<all driving source dimension IDs>],
+    acceptance_manifest={"dimensions":[...], "views":[...]},
 )
 ```
 
 Confirm that every required item is `sketch_driving` for non-construction
-geometry of that sketch. Separately confirm that every driving and verification
-dimension has deterministic same-view semantic measurement evidence, and audit
-any exceptional `source_issue` record against its retained source evidence.
+geometry of that sketch and that every driving/verification/view acceptance
+record is complete. Audit any exceptional `source_issue` record against its
+retained source evidence and attempted interpretations.
 Body, Tip, and solid findings are outside sketch scope. The validator cannot
-infer omitted source dimensions, visual correspondence, or coordinate provenance
-from pixels.
+infer records omitted from the supplied manifest, independently prove visual
+reasoning, or infer coordinate provenance from pixels.

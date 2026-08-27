@@ -80,6 +80,8 @@ class TestFreecadPrompts:
         assert "validate_parametric_model" in result
         assert "$freecad-engineering" in result
         assert "required_dimension_names" in result
+        assert "acceptance_manifest" in result
+        assert "ImageContent" in result
         assert "compare_images" in result
         assert "every source-view manifest" in result
         assert "source_issue" in result
@@ -232,7 +234,6 @@ class TestFreecadPrompts:
         general_result = await prompt_guidance(task_type="general")
         assert result == general_result
 
-
     @pytest.mark.asyncio
     async def test_drawing_reconstruction_prompt_routes_to_skill(
         self, register_prompts: dict[str, Callable[..., Any]]
@@ -249,6 +250,8 @@ class TestFreecadPrompts:
         assert "every source view" in result
         assert "one-to-one" in result
         assert "source_issue" in result
+        assert "acceptance_manifest" in result
+        assert "ImageContent" in result
         assert "drawing.png" in result
 
     @pytest.mark.asyncio
