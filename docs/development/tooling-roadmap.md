@@ -2,8 +2,8 @@
 
 This is the prioritized TODO list for making FreeCAD MCP reliable for autonomous mechanical modeling.
 
-Status was re-audited against the 131-tool registry and live FreeCAD 1.0 tests
-on 2026-08-08. A partially implemented umbrella item remains unchecked until
+Status was re-audited against the 145-tool registry and live FreeCAD 1.0 tests
+on 2026-09-07. A partially implemented umbrella item remains unchecked until
 every capability named by that item has a public, tested contract.
 
 ## Sketch authoring

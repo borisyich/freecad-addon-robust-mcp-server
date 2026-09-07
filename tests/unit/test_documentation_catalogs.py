@@ -55,6 +55,15 @@ def test_tools_overview_contains_every_registered_tool() -> None:
     missing = [name for name in tool_names if f"`{name}`" not in text]
     assert missing == []
 
+    count = len(tool_names)
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    reference = (ROOT / "docs/MCP_TOOLS_REFERENCE.md").read_text(encoding="utf-8")
+    assert f"**{count} MCP Tools**" in readme
+    assert f"**{count} MCP tools**" in readme
+    assert f"authoritative {count}-tool inventory" in reference
+    assert f"| **Total** | **{count}** |" in reference
+    assert f"| **Total** |  | **{count}** |" in text
+
 
 def test_resources_page_contains_every_registered_resource_uri() -> None:
     source = ROOT / "src/freecad_mcp/resources/freecad.py"

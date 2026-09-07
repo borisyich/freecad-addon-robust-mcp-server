@@ -413,7 +413,12 @@ def test_runtime_contracts_are_strict_and_include_boolean_expectations() -> None
     assert all(
         schema.get("additionalProperties") is False for schema in input_schemas.values()
     )
-    assert "expected_solid_count" in input_schemas["boolean_operation"]["properties"]
+    assert {
+        "expected_solid_count",
+        "fuzzy_tolerance",
+        "refine",
+        "timeout_ms",
+    }.issubset(input_schemas["boolean_operation"]["properties"])
     assert {
         "fuzzy_tolerance",
         "refine",

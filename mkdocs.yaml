@@ -124,8 +124,10 @@ nav:
       - Installation: getting-started/installation.md
       - Configuration: getting-started/configuration.md
       - Quick Start: getting-started/quickstart.md
+      - Internet-Accessible Server: getting-started/internet-mcp-quickstart.md
   - User Guide:
       - Connection Modes: guide/connection-modes.md
+      - Remote Access with Fixed Token: guide/remote-access-fixed-token.md
       - Robust MCP Bridge Workbench: guide/workbench.md
       - MCP Macro Tools: guide/macros.md
       - Tools Overview: guide/tools.md
@@ -147,6 +149,7 @@ nav:
       - Architecture: development/architecture.md
       - Detailed Architecture: development/architecture-detailed.md
       - Agent CAD System Audit: development/agent-cad-system-audit.md
+      - MCP Wire Audit: development/mcp-wire-audit.md
       - Tooling Roadmap: development/tooling-roadmap.md
       - Release Process: development/releasing.md
       - MkDocs Guide: development/mkdocs-guide.md

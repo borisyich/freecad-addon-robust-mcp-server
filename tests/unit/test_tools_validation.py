@@ -106,6 +106,7 @@ class TestValidationTools:
             "object_name": "Body",
         }
         compare_code = mock_bridge.execute_python.await_args_list[1].args[0]
+        compile(compare_code, "<compare-shape-checkpoint>", "exec")
         assert "before.importBrepFromString" in compare_code
         capture_code = mock_bridge.execute_python.await_args_list[0].args[0]
         assert "brep = shape.exportBrepToString()" in capture_code
@@ -120,15 +121,59 @@ class TestValidationTools:
         assert "before.cut(after)" in compare_code
         assert "after.cut(before)" in compare_code
         assert "if not _has_topology(shape)" in compare_code
+        assert "def _difference_issues(" in compare_code
+        assert 'region["valid"]' in compare_code
+        assert "has nonphysical volume" in compare_code
+        assert "volume < 0.0" in compare_code
+        assert "has non-finite bounds" in compare_code
+        assert "def _safe_refine_difference(" in compare_code
+        assert "source_has_topology != refined_has_topology" in compare_code
+        assert (
+            "difference_available = run_exact and boolean_error is None" in compare_code
+        )
+        helper_code = compare_code[
+            compare_code.index("def _has_topology") : compare_code.index(
+                "requested_doc_name"
+            )
+        ]
+        helper_namespace: dict[str, object] = {}
+        exec(f"import math\n{helper_code}", helper_namespace)  # noqa: S102
+
+        invalid_shape = MagicMock()
+        invalid_shape.isNull.return_value = False
+        invalid_shape.isValid.return_value = False
+        invalid_shape.Solids = [object()]
+        invalid_shape.Faces = []
+        invalid_shape.Edges = []
+        invalid_shape.Vertexes = []
+        issues = helper_namespace["_difference_issues"](  # type: ignore[operator]
+            "removed",
+            invalid_shape,
+            [
+                {
+                    "index": 1,
+                    "valid": False,
+                    "volume": -1.0,
+                    "area": 2.0,
+                    "bounding_box": {
+                        "min": [0.0, 0.0, 0.0],
+                        "max": [float("inf"), 1.0, 1.0],
+                        "size": [1.0, 1.0, 1.0],
+                    },
+                }
+            ],
+        )
+        assert "removed difference Shape is invalid" in issues
+        assert "removed region 1 is invalid" in issues
+        assert "removed region 1 has nonphysical volume -1.0" in issues
+        assert "removed region 1 has non-finite bounds" in issues
         assert "face_product" in compare_code
         assert 'requested_mode == "auto"' in compare_code
         assert mock_bridge.execute_python.await_args_list[1].kwargs == {
             "timeout_ms": 30000
         }
         assert (
-            compare_code.count(
-                'removed_volume = sum(region["volume"] for region in removed_regions)'
-            )
+            compare_code.count('sum(region["volume"] for region in removed_regions)')
             == 1
         )
         change_expression = compare_code.split("geometric_change =", 1)[1].split(

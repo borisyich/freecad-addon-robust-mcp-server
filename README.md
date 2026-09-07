@@ -83,7 +83,7 @@ An [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server that 
 
 ## Features
 
-- **131 MCP Tools**: Compact CAD operations including primitives, PartDesign, measurements, booleans, and export
+- **145 MCP Tools**: Compact CAD operations including primitives, PartDesign, measurements, booleans, and export
 - **Multiple Connection Modes**: XML-RPC (recommended), JSON-RPC socket, or embedded
 - **GUI & Headless Support**: Full modeling in headless mode, plus screenshots/colors in GUI mode
 - **Macro Development**: Create, edit, run, and template FreeCAD macros via MCP
@@ -348,7 +348,7 @@ FREECAD_MODE=embedded freecad-mcp
 
 ### Available Tools
 
-The server currently registers **131 MCP tools**. The tables below list common tools rather than duplicating the exact inventory. See the generated [Tools Overview](docs/guide/tools.md) or the MCP client's discovered tool list for the authoritative inventory; [MCP Tools Reference](docs/MCP_TOOLS_REFERENCE.md) provides detailed examples for core tools, while `freecad://capabilities` is a curated runtime overview. Tools marked with **GUI** require FreeCAD to be running in GUI mode; they return a structured error in headless mode.
+The server currently registers **145 MCP tools**. The tables below list common tools rather than duplicating the exact inventory. See the generated [Tools Overview](docs/guide/tools.md) or the MCP client's discovered tool list for the authoritative inventory; [MCP Tools Reference](docs/MCP_TOOLS_REFERENCE.md) provides detailed examples for core tools, while `freecad://capabilities` is a curated runtime overview. Tools marked with **GUI** require FreeCAD to be running in GUI mode; they return a structured error in headless mode.
 
 #### Execution & Debugging (5 tools)
 
@@ -394,7 +394,7 @@ The server currently registers **131 MCP tools**. The tables below list common t
 | `rotate_object`     | Rotate an object around an axis                    | All  |
 | `copy_object`       | Create a copy of an object                         | All  |
 | `mirror_object`     | Mirror an object across a plane (XY, XZ, YZ)       | All  |
-| `boolean_operation` | Fuse, cut, or intersect objects                    | All  |
+| `boolean_operation` | Fuse, cut, or intersect with native or fuzzy direct-Shape execution | All  |
 | `selection`         | Get/set/clear object or qualified subelement selection | GUI  |
 | `move_faces`        | Locally move planar faces as an auditable static direct edit | All  |
 
@@ -404,7 +404,7 @@ The server currently registers **131 MCP tools**. The tables below list common t
 | ---- | ----------- | ---- |
 | `group_feature_faces` | Group selected faces into connected features | All |
 | `detect_rotational_pattern` | Detect equal angular spacing of face groups | All |
-| `defeature_faces` | Remove faces with OCCT defeaturing and reject no-op results | All |
+| `defeature_faces` | Remove faces and reject raw defeaturing no-ops before refinement | All |
 | `extract_feature_material` | Recover valid material/void solids from imperfect Boolean containers with semantic filters | All |
 | `sew_shell` | Sew object faces into a validated shell | All |
 | `heal_shape` | Fix tolerances and refine a Shape | All |

@@ -551,6 +551,26 @@ class TestFreecadResources:
             if tool["name"] == "validate_parametric_model"
         )
         assert "acceptance_manifest" in validation_tool["key_params"]
+        object_tools = data["tools"]["objects"]["tools"]
+        boolean_tool = next(
+            tool for tool in object_tools if tool["name"] == "boolean_operation"
+        )
+        assert "fuzzy_tolerance" in boolean_tool["key_params"]
+        extraction_tool = next(
+            tool for tool in object_tools if tool["name"] == "extract_feature_material"
+        )
+        assert {
+            "component_volume_min",
+            "component_volume_max",
+            "component_sort_by",
+            "component_sort_order",
+            "component_limit",
+            "fuzzy_tolerance",
+            "refine",
+        }.issubset(extraction_tool["key_params"])
+        export_tool = data["tools"]["export_import"]["tools"][0]
+        assert export_tool["name"] == "export"
+        assert "verify_round_trip" in export_tool["key_params"]
 
         # Should have resources section - list of dicts with uri/description
         assert "resources" in data

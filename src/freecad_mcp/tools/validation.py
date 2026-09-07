@@ -415,7 +415,7 @@ def register_validation_tools(
     Args:
         mcp: The FastMCP (Robust MCP Server) instance.
         get_bridge: Async function to get the active bridge.
-    """
+    """  # noqa: D202
 
     shape_checkpoints: dict[str, dict[str, Any]] = {}
 
@@ -631,6 +631,7 @@ _result_ = {{
         code = f"""
 import FreeCAD
 import Part
+import math
 
 def _bbox(shape):
     box = shape.BoundBox
@@ -654,15 +655,15 @@ def _metrics(shape):
         "bounding_box": _bbox(shape),
     }}
 
-def _difference_regions(shape):
-    def _has_topology(candidate):
-        return not candidate.isNull() and bool(
-            len(candidate.Solids)
-            or len(candidate.Faces)
-            or len(candidate.Edges)
-            or len(candidate.Vertexes)
-        )
+def _has_topology(candidate):
+    return not candidate.isNull() and bool(
+        len(candidate.Solids)
+        or len(candidate.Faces)
+        or len(candidate.Edges)
+        or len(candidate.Vertexes)
+    )
 
+def _difference_regions(shape):
     if not _has_topology(shape):
         return []
     regions = [solid for solid in shape.Solids if _has_topology(solid)]
@@ -685,6 +686,55 @@ def _difference_regions(shape):
         }}
         for index, region in enumerate(regions, 1)
     ]
+
+def _difference_issues(label, shape, regions):
+    issues = []
+    if _has_topology(shape) and not shape.isValid():
+        issues.append(f"{{label}} difference Shape is invalid")
+    for region in regions:
+        if not region["valid"]:
+            issues.append(f"{{label}} region {{region['index']}} is invalid")
+        volume = region["volume"]
+        area = region["area"]
+        if not math.isfinite(volume) or volume < 0.0:
+            issues.append(
+                f"{{label}} region {{region['index']}} has nonphysical volume {{volume}}"
+            )
+        if not math.isfinite(area) or area < 0.0:
+            issues.append(
+                f"{{label}} region {{region['index']}} has nonphysical area {{area}}"
+            )
+        bounds = region["bounding_box"]
+        if not all(
+            math.isfinite(value)
+            for key in ("min", "max", "size")
+            for value in bounds[key]
+        ):
+            issues.append(
+                f"{{label}} region {{region['index']}} has non-finite bounds"
+            )
+    return issues
+
+def _safe_refine_difference(shape):
+    try:
+        refined = shape.removeSplitter()
+    except Exception:
+        return shape
+    if refined is None:
+        return shape
+    source_has_topology = _has_topology(shape)
+    refined_has_topology = _has_topology(refined)
+    if source_has_topology != refined_has_topology:
+        return shape
+    if refined_has_topology and not refined.isValid():
+        return shape
+    volume_tolerance = max(1e-9, abs(float(shape.Volume)) * 1e-10)
+    area_tolerance = max(1e-9, abs(float(shape.Area)) * 1e-10)
+    if abs(float(refined.Volume) - float(shape.Volume)) > volume_tolerance:
+        return shape
+    if abs(float(refined.Area) - float(shape.Area)) > area_tolerance:
+        return shape
+    return refined
 
 requested_doc_name = {target_doc!r}
 doc = FreeCAD.ActiveDocument if requested_doc_name is None else FreeCAD.getDocument(requested_doc_name)
@@ -720,13 +770,16 @@ if run_exact:
     try:
         removed = before.cut(after)
         added = after.cut(before)
-        try:
-            removed = removed.removeSplitter()
-            added = added.removeSplitter()
-        except Exception:
-            pass
+        removed = _safe_refine_difference(removed)
+        added = _safe_refine_difference(added)
         removed_regions = _difference_regions(removed)
         added_regions = _difference_regions(added)
+        exact_issues = (
+            _difference_issues("removed", removed, removed_regions)
+            + _difference_issues("added", added, added_regions)
+        )
+        if exact_issues:
+            boolean_error = "; ".join(exact_issues)
     except Exception as exc:
         boolean_error = str(exc)
         removed_regions = []
@@ -748,14 +801,23 @@ bbox_delta = {{
     ]
     for key in ("min", "max", "size")
 }}
-removed_volume = sum(region["volume"] for region in removed_regions)
-added_volume = sum(region["volume"] for region in added_regions)
+difference_available = run_exact and boolean_error is None
+removed_volume = (
+    sum(region["volume"] for region in removed_regions)
+    if difference_available
+    else None
+)
+added_volume = (
+    sum(region["volume"] for region in added_regions)
+    if difference_available
+    else None
+)
 bbox_changed = any(
     abs(value) > {linear_tolerance!r}
     for values in bbox_delta.values()
     for value in values
 )
-geometric_change = None if boolean_error or not run_exact else bool(
+geometric_change = None if not difference_available else bool(
     removed_volume > {volume_tolerance!r}
     or added_volume > {volume_tolerance!r}
 )
@@ -786,7 +848,7 @@ _result_ = {{
         ),
         "requested_mode": requested_mode,
         "performed_mode": "exact" if run_exact else "metrics",
-        "available": run_exact and boolean_error is None,
+        "available": difference_available,
         "error": boolean_error,
         "skip_reason": skip_reason,
         "face_product": face_product,

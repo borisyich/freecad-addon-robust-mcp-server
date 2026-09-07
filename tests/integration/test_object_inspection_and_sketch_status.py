@@ -328,6 +328,76 @@ _result_ = {{
 
 
 @pytest.mark.asyncio
+async def test_boolean_operation_supports_generic_fuzzy_shape_cut(
+    live_bridge: XmlRpcBridge,
+    tools: dict[str, Any],
+) -> None:
+    """Positive fuzzy tolerance should use a validated auditable Shape Boolean."""
+    doc_name = "MCPFuzzyBoolean"
+    setup = await live_bridge.execute_python(
+        f"""
+import FreeCAD
+
+if {doc_name!r} in FreeCAD.listDocuments():
+    FreeCAD.closeDocument({doc_name!r})
+doc = FreeCAD.newDocument({doc_name!r})
+base = doc.addObject("Part::Box", "Base")
+base.Length = 10.0
+base.Width = 10.0
+base.Height = 10.0
+tool = doc.addObject("Part::Box", "Tool")
+tool.Length = 5.0
+tool.Width = 5.0
+tool.Height = 5.0
+tool.Placement.Base = FreeCAD.Vector(5.0, 5.0, 5.0)
+doc.recompute()
+_result_ = True
+"""
+    )
+    assert setup.success, setup.error_traceback
+
+    try:
+        result = await tools["boolean_operation"](
+            operation="cut",
+            object1_name="Base",
+            object2_name="Tool",
+            result_name="FuzzyCut",
+            fuzzy_tolerance=1e-6,
+            expected_solid_count=1,
+            doc_name=doc_name,
+        )
+
+        assert result["execution_mode"] == "direct_shape_fuzzy"
+        assert result["type_id"] == "Part::Feature"
+        assert result["fuzzy_tolerance"] == pytest.approx(1e-6)
+        assert result["shape_valid"] is True
+        assert result["solid_count"] == 1
+        assert result["result_volume"] == pytest.approx(875.0)
+
+        audit = await live_bridge.execute_python(
+            f"""
+doc = FreeCAD.getDocument({doc_name!r})
+obj = doc.getObject("FuzzyCut")
+_result_ = {{
+    "base": obj.BaseSource.Name,
+    "tool": obj.ToolSource.Name,
+    "operation": obj.BooleanOperation,
+    "tolerance": float(obj.FuzzyTolerance),
+}}
+"""
+        )
+        assert audit.success, audit.error_traceback
+        assert audit.result == {
+            "base": "Base",
+            "tool": "Tool",
+            "operation": "cut",
+            "tolerance": pytest.approx(1e-6),
+        }
+    finally:
+        await _close_document(live_bridge, doc_name)
+
+
+@pytest.mark.asyncio
 async def test_sketch_mutations_return_solver_and_profile_state(
     live_bridge: XmlRpcBridge,
     tools: dict[str, Any],

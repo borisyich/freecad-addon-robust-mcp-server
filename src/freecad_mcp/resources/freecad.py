@@ -633,12 +633,13 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                         },
                         {
                             "name": "boolean_operation",
-                            "description": "Transactional union, cut, or intersection that aborts null, invalid, or unexpected-solid results",
+                            "description": "Transactional native or fuzzy direct-Shape union, cut, or intersection with strict validation",
                             "key_params": [
                                 "operation",
                                 "object1_name",
                                 "object2_name",
                                 "expected_solid_count",
+                                "fuzzy_tolerance",
                                 "refine",
                                 "timeout_ms",
                             ],
@@ -680,7 +681,7 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                         },
                         {
                             "name": "defeature_faces",
-                            "description": "Remove selected faces with OCCT defeaturing and validate the healed support",
+                            "description": "Remove selected faces and reject raw defeaturing no-ops before refinement",
                             "key_params": [
                                 "object_name",
                                 "face_names",
@@ -689,12 +690,19 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                         },
                         {
                             "name": "extract_feature_material",
-                            "description": "Extract exact material or void components from source and healed Shapes",
+                            "description": "Extract valid material or void solids from imperfect Boolean containers with semantic filters",
                             "key_params": [
                                 "source_name",
                                 "healed_name",
                                 "mode",
                                 "component_indices",
+                                "component_volume_min",
+                                "component_volume_max",
+                                "component_sort_by",
+                                "component_sort_order",
+                                "component_limit",
+                                "fuzzy_tolerance",
+                                "refine",
                             ],
                         },
                         {
@@ -1395,8 +1403,14 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                     "tools": [
                         {
                             "name": "export",
-                            "description": "Export to STEP, IGES, STL, 3MF, or OBJ",
-                            "key_params": ["file_format", "file_path", "object_names"],
+                            "description": "Export to STEP, IGES, STL, 3MF, or OBJ with default BREP round-trip verification",
+                            "key_params": [
+                                "file_format",
+                                "file_path",
+                                "object_names",
+                                "mesh_tolerance",
+                                "verify_round_trip",
+                            ],
                         },
                         {
                             "name": "import",
@@ -1470,7 +1484,7 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                         },
                         {
                             "name": "capture_shape_checkpoint",
-                            "description": "Capture an in-memory B-rep baseline without modifying the document",
+                            "description": "Capture a canonical in-memory BREP-round-trip baseline without modifying the document",
                             "key_params": [
                                 "checkpoint_name",
                                 "object_name",
@@ -1479,7 +1493,7 @@ def register_resources(mcp: Any, get_bridge: Any) -> None:
                         },
                         {
                             "name": "compare_shape_checkpoint",
-                            "description": "Report before/after metrics and complexity-bounded added/removed Shape regions",
+                            "description": "Report canonical metrics and only valid, physical complexity-bounded difference regions",
                             "key_params": [
                                 "checkpoint_name",
                                 "object_name",

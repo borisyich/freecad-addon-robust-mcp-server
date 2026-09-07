@@ -397,6 +397,7 @@ boolean_operation(
     object2_name="Cylinder", # Tool shape
     result_name="FusedShape",  # Optional result name
     expected_solid_count=1,
+    fuzzy_tolerance=0.0,
 )
 ```
 
@@ -404,6 +405,9 @@ boolean_operation(
 - Both shapes must be **solids** (not curves, meshes, or compounds)
 - Shapes should **overlap** for meaningful results
 - Both objects must have **valid geometry**
+- Keep `fuzzy_tolerance=0` for a native parametric Boolean. For imported/static
+  B-reps that need tolerant matching, use the smallest positive tolerance; the
+  result is then an auditable static `Part::Feature` with operand links.
 
 ## Validation Pattern
 ```
@@ -422,6 +426,7 @@ boolean_operation(
 - **Empty result**: Shapes don't overlap - check positions
 - **Invalid result**: Source shape has bad geometry
 - **Fails completely**: Wrong shape type (mesh vs solid)
+- **Near-coincident imported faces**: Retry with a small `fuzzy_tolerance`
 
 ## Recovery
 If boolean fails:
@@ -775,8 +780,11 @@ boolean_operation(
 - Shapes must overlap for meaningful results
 - Null, invalid, or unexpected-solid results abort before transaction commit
 - Set `expected_solid_count=None` only for an intentional multi-solid result
-- The original objects remain in the document
-- Use `set_visual_properties(object_name, visible=False)` to hide originals after operation
+- `fuzzy_tolerance=0` keeps a native parametric document feature
+- A positive `fuzzy_tolerance` uses the direct Shape API for fuse/cut/common,
+  stores an auditable static result with operand links, and hides the operands
+- Keep any fuzzy tolerance as small as the topology permits
+- The original objects remain in the document even when hidden
 - The tool recomputes before validating and committing the result
 """
 

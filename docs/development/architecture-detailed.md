@@ -1124,8 +1124,11 @@ async def boolean_operation(
     result_name: str | None = None,
     doc_name: str | None = None,
     expected_solid_count: int | None = 1,
+    fuzzy_tolerance: float = 0.0,
+    refine: bool = True,
+    timeout_ms: int = 30000,
 ) -> dict:
-    """Commit only a non-null, valid result with the expected solid count."""
+    """Use a native feature at zero tolerance or an auditable direct Shape Boolean when fuzzy."""
     pass
 ```
 
@@ -1141,8 +1144,9 @@ async def export(
     object_names: list[str] | None = None,
     doc_name: str | None = None,
     mesh_tolerance: float = 0.1,
+    verify_round_trip: bool = True,
 ) -> dict:
-    """Route all supported export formats through one MCP tool."""
+    """Route exports and verify STEP/IGES by re-reading the written file."""
     pass
 ```
 

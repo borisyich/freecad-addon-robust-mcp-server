@@ -1628,6 +1628,7 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
         result_name: str | None = None,
         doc_name: str | None = None,
         expected_solid_count: Annotated[int, Field(ge=1)] | None = 1,
+        fuzzy_tolerance: Annotated[float, Field(ge=0, allow_inf_nan=False)] = 0.0,
         refine: bool = True,
         timeout_ms: Annotated[int, Field(ge=1, le=600000)] = 30000,
     ) -> dict[str, Any]:
@@ -1643,6 +1644,10 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
             expected_solid_count: Exact required number of result solids. The
                 default is one continuous solid; set None only for an intentional
                 multi-solid result. Null and invalid Shapes are always rejected.
+            fuzzy_tolerance: OCCT fuzzy Boolean tolerance. Zero keeps the native
+                parametric document feature. A positive value performs the same
+                operation through the direct Shape API and stores an auditable
+                static ``Part::Feature`` result with operand links.
             refine: Remove unnecessary splitter edges when the FreeCAD feature
                 exposes a Refine property.
             timeout_ms: Bridge execution deadline in milliseconds.
@@ -1675,7 +1680,10 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
         result_name = result_name or f"{operation.capitalize()}"
 
         code = f"""
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
+import Part
+
+requested_doc_name = {doc_name!r}
+doc = FreeCAD.ActiveDocument if requested_doc_name is None else FreeCAD.getDocument(requested_doc_name)
 if doc is None:
     raise ValueError("No document found")
 
@@ -1699,20 +1707,77 @@ tool_volume = float(tool_shape.Volume) if tool_shape is not None and not tool_sh
 # Wrap in transaction for undo support
 doc.openTransaction("Boolean {operation.capitalize()}")
 try:
-    if {op_type!r} == "Part::Cut":
-        result = doc.addObject({op_type!r}, {result_name!r})
-        result.Base = obj1
-        result.Tool = obj2
+    refine_requested = {refine!r}
+    refine_applied = False
+    refine_fallback_reason = None
+    if {fuzzy_tolerance!r} > 0.0:
+        execution_mode = "direct_shape_fuzzy"
+        try:
+            raw_shape = getattr(base_shape, {operation!r})(
+                tool_shape, {fuzzy_tolerance!r}
+            )
+        except TypeError as exc:
+            raise ValueError(
+                "This FreeCAD build does not expose fuzzy tolerance for "
+                "the requested Shape Boolean"
+            ) from exc
+        if raw_shape.isNull() or not raw_shape.isValid():
+            raise ValueError("Fuzzy Shape Boolean produced a null or invalid Shape")
+        shape = raw_shape
+        if refine_requested:
+            try:
+                refined_shape = raw_shape.removeSplitter()
+                if refined_shape.isNull() or not refined_shape.isValid():
+                    raise ValueError("removeSplitter produced a null or invalid Shape")
+                shape = refined_shape
+                refine_applied = True
+            except Exception as exc:
+                refine_fallback_reason = str(exc)
+        result = doc.addObject("Part::Feature", {result_name!r})
+        result.Shape = shape
+        result.addProperty("App::PropertyLink", "BaseSource", "MCP")
+        result.BaseSource = obj1
+        result.addProperty("App::PropertyLink", "ToolSource", "MCP")
+        result.ToolSource = obj2
+        result.addProperty("App::PropertyString", "BooleanOperation", "MCP")
+        result.BooleanOperation = {operation!r}
+        result.addProperty("App::PropertyFloat", "FuzzyTolerance", "MCP")
+        result.FuzzyTolerance = {fuzzy_tolerance!r}
+        obj1.Visibility = False
+        obj2.Visibility = False
     else:
-        result = doc.addObject({op_type!r}, {result_name!r})
-        result.Shapes = [obj1, obj2]
-    if hasattr(result, "Refine"):
-        result.Refine = {refine!r}
+        execution_mode = "native_document_feature"
+        if {op_type!r} == "Part::Cut":
+            result = doc.addObject({op_type!r}, {result_name!r})
+            result.Base = obj1
+            result.Tool = obj2
+        else:
+            result = doc.addObject({op_type!r}, {result_name!r})
+            result.Shapes = [obj1, obj2]
+        if hasattr(result, "Refine"):
+            result.Refine = refine_requested
+            refine_applied = refine_requested
 
     doc.recompute()
     shape = getattr(result, "Shape", None)
     shape_is_null = shape is None or shape.isNull()
     shape_valid = bool(not shape_is_null and shape.isValid())
+    if (
+        execution_mode == "native_document_feature"
+        and refine_applied
+        and (shape_is_null or not shape_valid)
+    ):
+        result.Refine = False
+        doc.recompute()
+        fallback_shape = getattr(result, "Shape", None)
+        fallback_is_null = fallback_shape is None or fallback_shape.isNull()
+        fallback_valid = bool(not fallback_is_null and fallback_shape.isValid())
+        if fallback_valid:
+            shape = fallback_shape
+            shape_is_null = False
+            shape_valid = True
+            refine_applied = False
+            refine_fallback_reason = "Native Refine produced an invalid Shape"
     shape_type = "Null" if shape_is_null else str(shape.ShapeType)
     solid_count = 0 if shape_is_null else len(shape.Solids)
     result_volume = 0.0 if shape_is_null else float(shape.Volume)
@@ -1723,9 +1788,10 @@ try:
         rejection_reasons.append("result Shape is invalid")
     if result_volume <= 0.0:
         rejection_reasons.append(f"result volume must be positive, got {{result_volume}}")
-    if {expected_solid_count!r} is not None and solid_count != {expected_solid_count!r}:
+    expected_count = {expected_solid_count!r}
+    if expected_count is not None and solid_count != expected_count:
         rejection_reasons.append(
-            f"expected {expected_solid_count!r} solid(s), got {{solid_count}}"
+            f"expected {{expected_count}} solid(s), got {{solid_count}}"
         )
     if rejection_reasons:
         raise ValueError(
@@ -1750,7 +1816,12 @@ _result_ = {{
     "tool_volume": tool_volume,
     "result_volume": result_volume,
     "volume_delta": result_volume - base_volume,
-    "refined": {refine!r},
+    "fuzzy_tolerance": {fuzzy_tolerance!r},
+    "execution_mode": execution_mode,
+    "refined": refine_applied,
+    "refine_requested": refine_requested,
+    "refine_applied": refine_applied,
+    "refine_fallback_reason": refine_fallback_reason,
     "transaction_state": "committed",
 }}
 """

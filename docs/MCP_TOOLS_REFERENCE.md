@@ -1,6 +1,6 @@
 # FreeCAD Robust MCP Server Tools Reference
 
-This document provides detailed signatures and examples for core MCP tools. It is not the exact inventory of all registered tools. Use [Tools Overview](guide/tools.md) or the MCP client's discovered tool list for the authoritative 131-tool inventory.
+This document provides detailed signatures and examples for core MCP tools. It is not the exact inventory of all registered tools. Use [Tools Overview](guide/tools.md) or the MCP client's discovered tool list for the authoritative 145-tool inventory.
 
 ---
 
@@ -13,8 +13,9 @@ The exact generated inventory is grouped as follows:
 | Category | Tool Count |
 | --- | ---: |
 | Execution | 5 |
+| Prompt access | 1 |
 | Documents | 7 |
-| Objects / Part | 33 |
+| Objects / Part and BREP surgery | 43 |
 | Measurements | 9 |
 | PartDesign / Sketcher | 28 |
 | Sheet Metal | 5 |
@@ -22,11 +23,11 @@ The exact generated inventory is grouped as follows:
 | Draft | 6 |
 | Images | 3 |
 | Checkpoints | 1 |
-| View / GUI / History | 10 |
+| View / GUI / History | 11 |
 | Validation | 7 |
 | Export / Import | 2 |
 | Macros | 6 |
-| **Total** | **131** |
+| **Total** | **145** |
 
 The sections below retain deeper examples for commonly used tools; they do not repeat every generated entry.
 
@@ -198,7 +199,8 @@ Treat the live `tools/list` response as the source of truth. A copied source
 archive can legitimately describe another commit than a still-running FreeCAD
 bridge/MCP process. Restart both components after upgrades and keep the server
 commit/version with task logs. CI pins the complete registered tool inventory
-and asserts critical fields such as `boolean_operation.expected_solid_count`, so
+and asserts critical fields such as `boolean_operation.expected_solid_count`
+and `boolean_operation.fuzzy_tolerance`, so
 an implementation/schema mismatch fails before release.
 
 ### Primitive Creation
@@ -487,6 +489,7 @@ boolean_operation(
     result_name: str | None = None,
     doc_name: str | None = None,
     expected_solid_count: int | None = 1,
+    fuzzy_tolerance: float = 0.0,
     refine: bool = True,
     timeout_ms: int = 30000,
 ) -> dict
@@ -503,8 +506,18 @@ The operation commits only after the result is non-null, valid, and has exactly
 rejected result aborts the FreeCAD transaction and returns an MCP error; set
 `expected_solid_count=None` only for an intentional multi-solid result.
 
+With `fuzzy_tolerance=0`, the tool keeps FreeCAD's native parametric `Part::Cut`,
+`Part::MultiFuse`, or `Part::MultiCommon` feature. A positive tolerance routes
+`fuse`, `cut`, and `common` through the corresponding direct `Shape` Boolean in
+the same transaction and stores a static `Part::Feature` with `BaseSource` and
+`ToolSource` provenance links plus the operation and tolerance. This is the
+generic tolerant path for imported/static B-reps. Use the smallest defensible
+tolerance. Optional refinement falls back to the valid unrefined result when
+possible.
+
 The successful response includes `shape_valid`, `shape_type`, `solid_count`,
 `volume`, `base_volume`, `tool_volume`, `result_volume`, and `volume_delta`.
+It also reports `execution_mode`, `fuzzy_tolerance`, and actual refinement state.
 These fields verify material change without a routine follow-up inspection call.
 
 #### fuse_all and common_all
@@ -583,8 +596,10 @@ solid component; then create the required count with `polar_pattern_shape`.
 Every geometry-producing tool opens a FreeCAD transaction, validates before
 commit, and reports `transaction_state`.
 
-`defeature_faces` rejects an OCCT no-op when volume, area, and topology all stay
-unchanged. Both defeaturing and healing preserve a valid unrefined Shape when
+`defeature_faces` rejects an OCCT no-op when the raw result of `defeaturing`
+leaves volume, area, and topology unchanged. The check happens before
+`removeSplitter`, so refinement-only topology cleanup cannot masquerade as face
+removal. Both defeaturing and healing preserve a valid unrefined Shape when
 optional `removeSplitter` refinement fails and report the fallback explicitly.
 
 `extract_feature_material` accepts the same narrowly controlled fuzzy tolerance
@@ -1478,7 +1493,7 @@ validated material removal. `forward` uses the supplied vector exactly;
 `reversed` uses its negative. The selected world-space vector is returned as
 `effective_axis_direction` together with compact attempt diagnostics.
 
-The boolean `boolean_operation(op_type="cut")`, `subtractive_loft`, and
+The Boolean `boolean_operation(operation="cut")`, `subtractive_loft`, and
 `subtractive_pipe` have no two-sided direction property: their subtracting
 geometry or path already defines the operation, so `auto` is not applicable.
 
@@ -2369,7 +2384,11 @@ unbounded whole-shape booleans; `difference.skip_reason` makes this explicit.
 Use `difference_mode="exact"` (and raise `timeout_ms` if appropriate) when exact
 localized regions are required, or `metrics` to prohibit boolean work. Exact
 mode reports each added/removed connected solid with bounds and topology. If a
-boolean fails, `difference.available` is false and the error is explicit;
+Boolean throws, produces a nonempty invalid Shape or region, or reports
+negative/non-finite volume or area or non-finite bounds, then
+`difference.available` is false and the exact error is explicit. Diagnostic
+region records may remain present, but aggregate
+added/removed volumes and `geometric_change` are then `None`;
 metric deltas remain available. `volume_tolerance` controls exact
 `geometric_change`; `metric_change_detected` is a cheaper summary and is not a
 substitute for exact localization. Checkpoints live only for the current MCP

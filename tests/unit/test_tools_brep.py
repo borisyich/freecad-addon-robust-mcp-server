@@ -167,6 +167,11 @@ async def test_defeature_rejects_unchanged_geometry(brep_tools):
     code = bridge.execute_python.call_args.args[0]
     assert "OCCT defeaturing completed without changing" in code
     assert "measurable_change" in code
+    no_op_check = code.index("if not measurable_change:")
+    refinement = code.index("raw_healed.removeSplitter()")
+    assert no_op_check < refinement
+    assert "defeatured_counts != base_counts" in code
+    assert '"defeatured_topology_counts"' in code
     assert "raw_healed.removeSplitter()" in code
     assert "refine_fallback_reason" in code
     assert "expected_count is not None" in code

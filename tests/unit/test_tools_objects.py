@@ -1075,7 +1075,9 @@ class TestObjectTools:
         assert '"shape_type": shape_type' in generated_code
         assert '"base_volume": base_volume' in generated_code
         assert '"result_volume": result_volume' in generated_code
-        assert "expected 1 solid(s), got {solid_count}" in generated_code
+        assert "expected {expected_count} solid(s), got {solid_count}" in generated_code
+        assert 'execution_mode = "native_document_feature"' in generated_code
+        assert '"fuzzy_tolerance": 0.0' in generated_code
         assert "if rejection_reasons:" in generated_code
         assert generated_code.index("if rejection_reasons:") < generated_code.index(
             "doc.commitTransaction()"
@@ -1109,7 +1111,47 @@ class TestObjectTools:
         )
 
         generated_code = mock_bridge.execute_python.await_args.args[0]
-        assert "if None is not None" in generated_code
+        assert "expected_count = None" in generated_code
+        assert "if expected_count is not None" in generated_code
+        assert "if None is not None" not in generated_code
+
+    @pytest.mark.asyncio
+    async def test_boolean_operation_uses_direct_shape_api_for_fuzzy_cut(
+        self, register_tools, mock_bridge
+    ):
+        mock_bridge.execute_python = AsyncMock(
+            return_value=ExecutionResult(
+                success=True,
+                result={
+                    "name": "FuzzyCut",
+                    "type_id": "Part::Feature",
+                    "execution_mode": "direct_shape_fuzzy",
+                    "fuzzy_tolerance": 1e-6,
+                    "shape_valid": True,
+                    "solid_count": 1,
+                },
+                stdout="",
+                stderr="",
+                execution_time_ms=1.0,
+            )
+        )
+
+        result = await register_tools["boolean_operation"](
+            operation="cut",
+            object1_name="ImportedBase",
+            object2_name="ImportedTool",
+            fuzzy_tolerance=1e-6,
+        )
+
+        generated_code = mock_bridge.execute_python.await_args.args[0]
+        assert "getattr(base_shape, 'cut')(" in generated_code
+        assert "tool_shape, 1e-06" in generated_code
+        assert 'execution_mode = "direct_shape_fuzzy"' in generated_code
+        assert 'doc.addObject("Part::Feature",' in generated_code
+        assert '"BaseSource"' in generated_code
+        assert '"ToolSource"' in generated_code
+        assert "raw_shape.removeSplitter()" in generated_code
+        assert result["execution_mode"] == "direct_shape_fuzzy"
 
     @pytest.mark.asyncio
     async def test_boolean_operation_propagates_transaction_rejection(
@@ -1673,7 +1715,9 @@ class TestObjectTools:
     async def test_slice_shape_rejects_mixed_plane_and_path_modes(
         self, register_tools, mock_bridge
     ):
-        with pytest.raises(ValueError, match="either plane_point/plane_normal or section_path"):
+        with pytest.raises(
+            ValueError, match="either plane_point/plane_normal or section_path"
+        ):
             await register_tools["slice_shape"](
                 object_name="Box",
                 plane_point=[0, 0, 0],

@@ -255,6 +255,24 @@ try:
     raw_healed = source_shape.defeaturing(faces)
     if raw_healed.isNull() or not raw_healed.isValid():
         raise ValueError("OCCT defeaturing produced a null or invalid Shape")
+    base_volume = float(source_shape.Volume)
+    defeatured_volume = float(raw_healed.Volume)
+    base_area = float(source_shape.Area)
+    defeatured_area = float(raw_healed.Area)
+    base_counts = (len(source_shape.Faces), len(source_shape.Edges), len(source_shape.Vertexes))
+    defeatured_counts = (len(raw_healed.Faces), len(raw_healed.Edges), len(raw_healed.Vertexes))
+    volume_tolerance = max(1e-7, abs(base_volume) * 1e-10)
+    area_tolerance = max(1e-7, abs(base_area) * 1e-10)
+    measurable_change = bool(
+        abs(defeatured_volume - base_volume) > volume_tolerance
+        or abs(defeatured_area - base_area) > area_tolerance
+        or defeatured_counts != base_counts
+    )
+    if not measurable_change:
+        raise ValueError(
+            "OCCT defeaturing completed without changing volume, area, or topology; "
+            "the selected faces were not removed"
+        )
     healed = raw_healed
     refine_applied = False
     refine_fallback_reason = None
@@ -267,24 +285,9 @@ try:
             refine_applied = True
         except Exception as exc:
             refine_fallback_reason = str(exc)
-    base_volume = float(source_shape.Volume)
     result_volume = float(healed.Volume)
-    base_area = float(source_shape.Area)
     result_area = float(healed.Area)
-    base_counts = (len(source_shape.Faces), len(source_shape.Edges), len(source_shape.Vertexes))
     result_counts = (len(healed.Faces), len(healed.Edges), len(healed.Vertexes))
-    volume_tolerance = max(1e-7, abs(base_volume) * 1e-10)
-    area_tolerance = max(1e-7, abs(base_area) * 1e-10)
-    measurable_change = bool(
-        abs(result_volume - base_volume) > volume_tolerance
-        or abs(result_area - base_area) > area_tolerance
-        or result_counts != base_counts
-    )
-    if not measurable_change:
-        raise ValueError(
-            "OCCT defeaturing completed without changing volume, area, or topology; "
-            "the selected faces were not removed"
-        )
     solid_count = len(healed.Solids)
     expected_count = {expected_solid_count!r}
     if expected_count is not None and solid_count != expected_count:
@@ -304,12 +307,15 @@ try:
         "shape_type": healed.ShapeType,
         "solid_count": solid_count,
         "base_volume": base_volume,
+        "defeatured_volume": defeatured_volume,
         "result_volume": result_volume,
         "volume_delta": result_volume - base_volume,
         "base_area": base_area,
+        "defeatured_area": defeatured_area,
         "result_area": result_area,
         "area_delta": result_area - base_area,
         "base_topology_counts": {{"faces": base_counts[0], "edges": base_counts[1], "vertices": base_counts[2]}},
+        "defeatured_topology_counts": {{"faces": defeatured_counts[0], "edges": defeatured_counts[1], "vertices": defeatured_counts[2]}},
         "result_topology_counts": {{"faces": result_counts[0], "edges": result_counts[1], "vertices": result_counts[2]}},
         "measurable_change": measurable_change,
         "refined": refine_applied,

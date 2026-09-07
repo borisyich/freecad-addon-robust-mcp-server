@@ -15,7 +15,7 @@ that behavior so a missing target can receive imported STEP/STL data.
 | [Execution](#execution) | `src/freecad_mcp/tools/execution.py` | 5 |
 | [Prompt access](#prompt-access) | `src/freecad_mcp/tools/prompt_access.py` | 1 |
 | [Documents](#documents) | `src/freecad_mcp/tools/documents.py` | 7 |
-| [Objects / Part](#objects-part) | `src/freecad_mcp/tools/objects.py` | 35 |
+| [Objects / Part](#objects-part) | `src/freecad_mcp/tools/objects.py`, `brep.py` | 43 |
 | [Measurements](#measurements) | `src/freecad_mcp/tools/measurements.py` | 9 |
 | [PartDesign / Sketcher](#partdesign-sketcher) | `src/freecad_mcp/tools/partdesign.py` | 28 |
 | [Sheet Metal](#sheet-metal) | `src/freecad_mcp/tools/sheetmetal.py` | 5 |
@@ -27,7 +27,7 @@ that behavior so a missing target can receive imported STEP/STL data.
 | [Validation](#validation) | `src/freecad_mcp/tools/validation.py` | 7 |
 | [Export / Import](#export-import) | `src/freecad_mcp/tools/export.py` | 2 |
 | [Macros](#macros) | `src/freecad_mcp/tools/macros.py` | 6 |
-| **Total** |  | **136** |
+| **Total** |  | **145** |
 
 ## Execution
 
@@ -69,7 +69,7 @@ that behavior so a missing target can receive imported STEP/STL data.
 | `create_primitive` | Create a Box, Cylinder, Sphere, Cone, Torus, Wedge, or Helix. |
 | `edit_object` | Edit object properties; string names are resolved for FreeCAD link properties. |
 | `delete_object` | Delete an object from a FreeCAD document. |
-| `boolean_operation` | Transactional Boolean that rejects null/invalid or unexpected-solid results before commit. |
+| `boolean_operation` | Transactional native or fuzzy direct-Shape Boolean that rejects null/invalid or unexpected-solid results before commit. |
 | `set_placement` | Set the placement (position and rotation) of a FreeCAD object. |
 | `scale_object` | Scale an object uniformly or non-uniformly. |
 | `rotate_object` | Rotate an object around an axis. |
@@ -92,7 +92,7 @@ that behavior so a missing target can receive imported STEP/STL data.
 | `common_all` | Transactional multi-shape intersection with per-step diagnostics and strict final validation. |
 | `group_feature_faces` | Split selected faces into edge-connected feature regions. |
 | `detect_rotational_pattern` | Test face groups for equal angular spacing about an axis. |
-| `defeature_faces` | Remove selected faces with OCCT defeaturing, rejecting unchanged/no-op results. |
+| `defeature_faces` | Remove selected faces with OCCT defeaturing, rejecting raw no-op results before optional refinement. |
 | `extract_feature_material` | Recover valid material or void solids from imperfect Boolean containers; filter by index/volume and sort/limit semantically. |
 | `sew_shell` | Sew faces from one or more objects into a validated shell. |
 | `heal_shape` | Run OCCT shape fixing, tolerance control, and optional refinement. |
@@ -356,7 +356,7 @@ path without removing earlier valid bindings.
 | `validate_object` | Check the health and validity of a FreeCAD object. |
 | `validate_document` | Check the health of all objects in a FreeCAD document. |
 | `capture_shape_checkpoint` | Capture a canonical BREP-round-trip baseline without modifying the document; report stale imported bounds when normalized. |
-| `compare_shape_checkpoint` | Canonicalize current geometry, then report invariant metrics and exact added/removed B-rep regions. |
+| `compare_shape_checkpoint` | Canonicalize current geometry, then report metrics and only valid, physically meaningful exact B-rep regions. |
 | `validate_parametric_model` | Compact final diagnostic with expanded structure/full modes on request. |
 | `undo_if_invalid` | Check document health and undo the last operation if invalid objects exist. |
 | `safe_execute` | Execute Python transactionally with its own deadline and explicit timeout/continuation state. |

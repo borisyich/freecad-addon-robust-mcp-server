@@ -340,6 +340,12 @@
   Shape checkpoints use canonical BREP-round-trip metrics so stale imported
   bounds are normalized instead of producing false comparisons.
 - An explicit screenshot `output_path` now implies disk saving.
+- Hardened BREP follow-up checks: `defeature_faces` now detects no-op behavior
+  from the raw defeaturing result before refinement; `boolean_operation` accepts
+  fuzzy tolerance for generic fuse/cut/common operations through an auditable
+  direct-Shape branch; exact shape-checkpoint differences reject invalid or
+  nonphysical result regions; and compact capability metadata matches the full
+  tool contracts.
 
 This project uses **component-specific versioning**. Each component has its own
 release notes and version history.
