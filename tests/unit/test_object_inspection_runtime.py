@@ -85,7 +85,7 @@ class _SameShape:
     def __init__(self, token: str) -> None:
         self.token = token
 
-    def isSame(self, other) -> bool:  # noqa: N802
+    def isSame(self, other) -> bool:
         return getattr(other, "token", None) == self.token
 
 
@@ -111,6 +111,16 @@ class Cone:
     Radius = 6.0
     Axis = _Vector(0.0, 1.0, 0.0)
     Center = _Vector(3.0, 4.0, 5.0)
+
+    def parameter(self, _point):
+        return 0.5, 0.5
+
+
+class Toroid:
+    MajorRadius = 171.5
+    MinorRadius = 12.25
+    Axis = _Vector(0.0, 0.0, 1.0)
+    Center = _Vector(1.0, 2.0, 3.0)
 
     def parameter(self, _point):
         return 0.5, 0.5
@@ -145,10 +155,10 @@ class _Face:
         self.CenterOfMass = _Vector(5.0, 5.0, 0.0)
         self.BoundBox = _BoundBox()
 
-    def normalAt(self, _u, _v):  # noqa: N802
+    def normalAt(self, _u, _v):
         return _Vector(0.0, 0.0, 1.0)
 
-    def curvatureAt(self, _u, _v):  # noqa: N802
+    def curvatureAt(self, _u, _v):
         return 0.0, 0.0
 
 
@@ -162,6 +172,12 @@ class _ConicalFace(_Face):
     def __init__(self, edges) -> None:
         super().__init__(edges)
         self.Surface = Cone()
+
+
+class _ToroidalFace(_Face):
+    def __init__(self, edges) -> None:
+        super().__init__(edges)
+        self.Surface = Toroid()
 
 
 class _TopologicalShape(_Shape):
@@ -320,6 +336,34 @@ def test_conical_face_topology_contains_radius_and_axis() -> None:
     assert face["radius"] == 6.0
     assert face["axis_direction"] == {"x": 0.0, "y": 1.0, "z": 0.0}
     assert face["axis_point"] == {"x": 3.0, "y": 4.0, "z": 5.0}
+
+
+def test_toroidal_face_topology_contains_major_minor_radius_and_axis() -> None:
+    runtime = _load_runtime()
+    shape = _TopologicalShape()
+    shape.Faces = (_ToroidalFace((shape.edge1, shape.edge2)),)
+
+    result = runtime["_shape_topology_value"](
+        shape,
+        face_limit=None,
+        edge_limit=0,
+        vertex_limit=0,
+        topology_kinds=("faces",),
+        topology_fields=(
+            "surface_type",
+            "major_radius",
+            "minor_radius",
+            "axis_direction",
+            "axis_point",
+        ),
+    )
+
+    face = result["faces"][0]
+    assert face["surface_type"] == "Toroid"
+    assert face["major_radius"] == 171.5
+    assert face["minor_radius"] == 12.25
+    assert face["axis_direction"] == {"x": 0.0, "y": 0.0, "z": 1.0}
+    assert face["axis_point"] == {"x": 1.0, "y": 2.0, "z": 3.0}
 
 
 def test_shape_topology_is_paged_and_omitted_by_default() -> None:

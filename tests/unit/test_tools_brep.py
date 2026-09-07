@@ -70,7 +70,7 @@ def test_all_brep_tools_are_registered(brep_tools):
         (
             "extract_feature_material",
             {"source_name": "Impeller", "healed_name": "Core"},
-            "source_shape.cut(healed)",
+            "raw_recovered = left.cut(right)",
         ),
         (
             "sew_shell",
@@ -153,3 +153,79 @@ async def test_vector_contract_rejects_wrong_length(brep_tools):
         )
 
     bridge.execute_python.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_defeature_rejects_unchanged_geometry(brep_tools):
+    tools, bridge = brep_tools
+    bridge.execute_python.return_value = _success({"name": "Result"})
+
+    await tools["defeature_faces"](
+        object_name="Impeller", face_names=["Face1"], doc_name="Model"
+    )
+
+    code = bridge.execute_python.call_args.args[0]
+    assert "OCCT defeaturing completed without changing" in code
+    assert "measurable_change" in code
+    assert "raw_healed.removeSplitter()" in code
+    assert "refine_fallback_reason" in code
+    assert "expected_count is not None" in code
+    assert "1 is not None" not in code
+    assert "'Model' is None" not in code
+
+
+@pytest.mark.asyncio
+async def test_extract_feature_material_supports_fuzzy_cut_and_refine_fallback(
+    brep_tools,
+):
+    tools, bridge = brep_tools
+    bridge.execute_python.return_value = _success({"components": []})
+
+    await tools["extract_feature_material"](
+        source_name="Impeller",
+        healed_name="Core",
+        fuzzy_tolerance=1e-5,
+        component_volume_max=100000.0,
+        component_sort_by="volume",
+        component_limit=1,
+    )
+
+    code = bridge.execute_python.call_args.args[0]
+    assert "raw_recovered = left.cut(right, 1e-05)" in code
+    assert '"container_valid": container_valid' in code
+    assert "invalid_component_indices" in code
+    assert "Explicitly requested components are invalid" in code
+    assert '"total_valid_component_volume"' in code
+    assert "key=sort_keys['volume']" in code
+    assert "selected = selected[:1]" in code
+    assert "component_shape = refined" in code
+
+
+@pytest.mark.asyncio
+async def test_extract_feature_material_rejects_inverted_volume_range(brep_tools):
+    tools, bridge = brep_tools
+
+    with pytest.raises(ValueError, match="component_volume_min"):
+        await tools["extract_feature_material"](
+            source_name="Impeller",
+            healed_name="Core",
+            component_volume_min=20.0,
+            component_volume_max=10.0,
+        )
+
+    bridge.execute_python.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_polar_pattern_uses_single_multi_fuse_when_no_fuzzy_tolerance(
+    brep_tools,
+):
+    tools, bridge = brep_tools
+    bridge.execute_python.return_value = _success({"name": "Pattern"})
+
+    await tools["polar_pattern_shape"](object_name="Blade", occurrences=5, fuse=True)
+
+    code = bridge.execute_python.call_args.args[0]
+    assert 'hasattr(copies[0], "multiFuse")' in code
+    assert "copies[0].multiFuse(copies[1:])" in code
+    assert 'fuse_strategy = "multi_fuse"' in code

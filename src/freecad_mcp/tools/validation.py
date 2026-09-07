@@ -475,7 +475,8 @@ def _shape_metrics(shape):
         }},
     }}
 
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
+requested_doc_name = {doc_name!r}
+doc = FreeCAD.ActiveDocument if requested_doc_name is None else FreeCAD.getDocument(requested_doc_name)
 if doc is None:
     raise ValueError("No document found")
 if {recompute!r}:
@@ -542,6 +543,7 @@ bbox_errors = [
     for key in ("min", "max", "size")
     for index in range(3)
 ]
+max_bbox_error = max(bbox_errors)
 if round_trip_errors:
     raise ValueError(
         "Checkpoint BREP round-trip changed Shape metrics: "
@@ -551,7 +553,9 @@ _result_ = {{
     "success": True,
     "document": doc.Name,
     "object_name": obj.Name,
-    "metrics": source_metrics,
+    "metrics": baseline_metrics,
+    "metrics_basis": "brep_round_trip",
+    "source_reported_metrics": source_metrics,
     "shape_placement": {{
         "base": [
             float(shape_placement.Base.x),
@@ -561,7 +565,8 @@ _result_ = {{
         "rotation_quaternion": [float(value) for value in shape_placement.Rotation.Q],
     }},
     "round_trip_verified": True,
-    "round_trip_max_bbox_error": max(bbox_errors),
+    "round_trip_max_bbox_error": max_bbox_error,
+    "round_trip_bbox_normalized": max_bbox_error > 1e-7,
     "round_trip_max_placement_error": placement_max_error,
     "_brep": brep,
 }}
@@ -681,7 +686,8 @@ def _difference_regions(shape):
         for index, region in enumerate(regions, 1)
     ]
 
-doc = FreeCAD.ActiveDocument if {target_doc!r} is None else FreeCAD.getDocument({target_doc!r})
+requested_doc_name = {target_doc!r}
+doc = FreeCAD.ActiveDocument if requested_doc_name is None else FreeCAD.getDocument(requested_doc_name)
 if doc is None:
     raise ValueError("No document found")
 if {recompute!r}:
@@ -692,6 +698,12 @@ if obj is None:
 after = getattr(obj, "Shape", None)
 if after is None or after.isNull():
     raise ValueError(f"Object has no usable Shape: {target_object!r}")
+after_brep = after.exportBrepToString()
+canonical_after = Part.Shape()
+canonical_after.importBrepFromString(after_brep)
+if canonical_after.isNull() or not canonical_after.isValid():
+    raise ValueError("Current Shape could not be canonicalized through BREP")
+after = canonical_after
 before = Part.Shape()
 before.importBrepFromString({snapshot["brep"]!r})
 before_metrics = {snapshot["metrics"]!r}

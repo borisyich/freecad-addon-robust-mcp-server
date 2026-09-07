@@ -115,9 +115,11 @@ def register_view_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> N
                 model before ``saveImage``. FreeCAD GUI events and redraws are
                 processed during the delay. Defaults to 2 seconds; use 0 only for
                 controlled tests or when camera state is already stable.
-            save_to_disk: Persist the PNG on disk.
-            output_path: Optional PNG path. When omitted, FreeCAD creates a file
-                under ``./screenshots`` when disk saving is enabled.
+            save_to_disk: Persist the PNG on disk. An explicit ``output_path``
+                enables disk saving automatically.
+            output_path: Optional PNG path. Supplying it implies
+                ``save_to_disk=True``. When omitted, FreeCAD creates a file under
+                ``./screenshots`` when disk saving is enabled.
             return_image: Return pixels as MCP ``ImageContent``. Defaults to True.
             return_data: Also expose legacy base64 text in metadata. Avoid this for
                 agent vision because it wastes context and is not interpreted as an image.
@@ -152,8 +154,8 @@ def register_view_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) -> N
             return image_error("corner_cross_size must be between 1 and 100")
         if not 0 <= settle_time_seconds <= 10:
             return image_error("settle_time_seconds must be between 0 and 10")
-        if output_path is not None and not save_to_disk:
-            return image_error("output_path requires save_to_disk=True")
+        if output_path is not None:
+            save_to_disk = True
         if not save_to_disk and not return_image and not return_data:
             return image_error("Enable return_image, return_data, or save_to_disk")
 

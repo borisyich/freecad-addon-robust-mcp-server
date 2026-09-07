@@ -329,6 +329,17 @@
   used as exclusion rules. Final dimension evidence measures the same semantic
   elements in the reproduced source-view context.
 - `open_image_tiles`: tiles are never upscaled beyond their source crop resolution.
+- Hardened imported-BREP editing after a real impeller workflow: defeaturing now
+  rejects unchanged geometry and safely falls back from invalid refinement;
+  feature extraction decomposes imperfect Boolean containers, validates solids
+  independently, supports semantic volume/sort/limit selection, fuzzy cuts, and
+  per-component refinement fallback; toroidal face inspection exposes analytic
+  radii/axis/center; and non-fuzzy polar patterns use one multi-fuse operation.
+- STEP/IGES export now preflights the destination and performs a default
+  round-trip validity check; STEP also verifies solid count, volume, and bounds.
+  Shape checkpoints use canonical BREP-round-trip metrics so stale imported
+  bounds are normalized instead of producing false comparisons.
+- An explicit screenshot `output_path` now implies disk saving.
 
 This project uses **component-specific versioning**. Each component has its own
 release notes and version history.

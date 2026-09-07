@@ -41,7 +41,8 @@ def register_brep_tools(
         code = f"""
 import Part
 
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
+requested_doc_name = {doc_name!r}
+doc = FreeCAD.ActiveDocument if requested_doc_name is None else FreeCAD.getDocument(requested_doc_name)
 if doc is None:
     raise ValueError("No document found")
 obj = doc.getObject({object_name!r})
@@ -132,7 +133,8 @@ _result_ = {{
         code = f"""
 import math
 
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
+requested_doc_name = {doc_name!r}
+doc = FreeCAD.ActiveDocument if requested_doc_name is None else FreeCAD.getDocument(requested_doc_name)
 if doc is None:
     raise ValueError("No document found")
 obj = doc.getObject({object_name!r})
@@ -223,11 +225,12 @@ _result_ = {{
         doc_name: str | None = None,
         timeout_ms: PositiveTimeout = 120000,
     ) -> dict[str, Any]:
-        """Remove selected faces with OCCT defeaturing and store the healed Shape."""
+        """Remove selected faces with OCCT defeaturing and reject no-op results."""
         if not face_names:
             raise ValueError("face_names must not be empty")
         code = f"""
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
+requested_doc_name = {doc_name!r}
+doc = FreeCAD.ActiveDocument if requested_doc_name is None else FreeCAD.getDocument(requested_doc_name)
 if doc is None:
     raise ValueError("No document found")
 source = doc.getObject({object_name!r})
@@ -249,15 +252,44 @@ if not hasattr(source_shape, "defeaturing"):
 
 doc.openTransaction("Defeature Faces")
 try:
-    healed = source_shape.defeaturing(faces)
-    if {refine!r}:
-        healed = healed.removeSplitter()
-    if healed.isNull() or not healed.isValid():
+    raw_healed = source_shape.defeaturing(faces)
+    if raw_healed.isNull() or not raw_healed.isValid():
         raise ValueError("OCCT defeaturing produced a null or invalid Shape")
-    solid_count = len(healed.Solids)
-    if {expected_solid_count!r} is not None and solid_count != {expected_solid_count!r}:
+    healed = raw_healed
+    refine_applied = False
+    refine_fallback_reason = None
+    if {refine!r}:
+        try:
+            refined = raw_healed.removeSplitter()
+            if refined.isNull() or not refined.isValid():
+                raise ValueError("removeSplitter produced a null or invalid Shape")
+            healed = refined
+            refine_applied = True
+        except Exception as exc:
+            refine_fallback_reason = str(exc)
+    base_volume = float(source_shape.Volume)
+    result_volume = float(healed.Volume)
+    base_area = float(source_shape.Area)
+    result_area = float(healed.Area)
+    base_counts = (len(source_shape.Faces), len(source_shape.Edges), len(source_shape.Vertexes))
+    result_counts = (len(healed.Faces), len(healed.Edges), len(healed.Vertexes))
+    volume_tolerance = max(1e-7, abs(base_volume) * 1e-10)
+    area_tolerance = max(1e-7, abs(base_area) * 1e-10)
+    measurable_change = bool(
+        abs(result_volume - base_volume) > volume_tolerance
+        or abs(result_area - base_area) > area_tolerance
+        or result_counts != base_counts
+    )
+    if not measurable_change:
         raise ValueError(
-            f"Expected {expected_solid_count!r} solid(s), got {{solid_count}}"
+            "OCCT defeaturing completed without changing volume, area, or topology; "
+            "the selected faces were not removed"
+        )
+    solid_count = len(healed.Solids)
+    expected_count = {expected_solid_count!r}
+    if expected_count is not None and solid_count != expected_count:
+        raise ValueError(
+            f"Expected {{expected_count}} solid(s), got {{solid_count}}"
         )
     result_obj = doc.addObject("Part::Feature", {result_name!r} or "Defeatured")
     result_obj.Shape = healed
@@ -271,10 +303,19 @@ try:
         "shape_valid": True,
         "shape_type": healed.ShapeType,
         "solid_count": solid_count,
-        "base_volume": float(source_shape.Volume),
-        "result_volume": float(healed.Volume),
-        "volume_delta": float(healed.Volume - source_shape.Volume),
-        "refined": {refine!r},
+        "base_volume": base_volume,
+        "result_volume": result_volume,
+        "volume_delta": result_volume - base_volume,
+        "base_area": base_area,
+        "result_area": result_area,
+        "area_delta": result_area - base_area,
+        "base_topology_counts": {{"faces": base_counts[0], "edges": base_counts[1], "vertices": base_counts[2]}},
+        "result_topology_counts": {{"faces": result_counts[0], "edges": result_counts[1], "vertices": result_counts[2]}},
+        "measurable_change": measurable_change,
+        "refined": refine_applied,
+        "refine_requested": {refine!r},
+        "refine_applied": refine_applied,
+        "refine_fallback_reason": refine_fallback_reason,
         "transaction_state": "committed",
     }}
 except Exception:
@@ -289,16 +330,33 @@ except Exception:
         healed_name: str,
         mode: Literal["removed_material", "filled_void"] = "removed_material",
         component_indices: list[Annotated[int, Field(ge=1)]] | None = None,
+        component_volume_min: NonNegativeFloat | None = None,
+        component_volume_max: NonNegativeFloat | None = None,
+        component_sort_by: Literal[
+            "index", "volume", "center_x", "center_y", "center_z"
+        ] = "index",
+        component_sort_order: Literal["asc", "desc"] = "asc",
+        component_limit: Annotated[int, Field(ge=1, le=1000)] | None = None,
         result_prefix: str = "RecoveredFeature",
         refine: bool = True,
+        fuzzy_tolerance: NonNegativeFloat = 0.0,
         doc_name: str | None = None,
         timeout_ms: PositiveTimeout = 120000,
     ) -> dict[str, Any]:
-        """Extract exact material/void regions from source and defeatured Shapes."""
+        """Extract valid material/void solids using semantic component filters."""
+        if (
+            component_volume_min is not None
+            and component_volume_max is not None
+            and component_volume_min > component_volume_max
+        ):
+            raise ValueError(
+                "component_volume_min must not exceed component_volume_max"
+            )
         code = f"""
 import Part
 
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
+requested_doc_name = {doc_name!r}
+doc = FreeCAD.ActiveDocument if requested_doc_name is None else FreeCAD.getDocument(requested_doc_name)
 if doc is None:
     raise ValueError("No document found")
 source = doc.getObject({source_name!r})
@@ -312,26 +370,94 @@ if any(shape is None or shape.isNull() or not shape.isValid() for shape in (sour
 
 doc.openTransaction("Extract Feature Material")
 try:
-    recovered = (
-        source_shape.cut(healed)
+    left, right = (
+        (source_shape, healed)
         if {mode!r} == "removed_material"
-        else healed.cut(source_shape)
+        else (healed, source_shape)
     )
-    if {refine!r}:
-        recovered = recovered.removeSplitter()
-    if recovered.isNull() or not recovered.isValid():
-        raise ValueError("Shape difference produced a null or invalid feature region")
-    solids = list(recovered.Solids)
+    if {fuzzy_tolerance!r} > 0.0:
+        try:
+            raw_recovered = left.cut(right, {fuzzy_tolerance!r})
+        except TypeError as exc:
+            raise ValueError(
+                "This FreeCAD build does not expose fuzzy tolerance for Shape.cut"
+            ) from exc
+    else:
+        raw_recovered = left.cut(right)
+    if raw_recovered.isNull():
+        raise ValueError("Shape difference produced a null feature region")
+    container_valid = bool(raw_recovered.isValid())
+    solids = list(raw_recovered.Solids)
     if not solids:
         raise ValueError("Shape difference contains no solid feature components")
-    requested = {component_indices!r} or list(range(1, len(solids) + 1))
+    requested_indices = {component_indices!r}
+    requested = requested_indices or list(range(1, len(solids) + 1))
     if len(set(requested)) != len(requested):
         raise ValueError("component_indices contains duplicates")
     if any(index < 1 or index > len(solids) for index in requested):
         raise ValueError(f"component_indices must be between 1 and {{len(solids)}}")
+
+    records = []
+    invalid_component_indices = []
+    for component_index, component_shape in enumerate(solids, start=1):
+        component_valid = bool(component_shape.isValid())
+        if not component_valid:
+            invalid_component_indices.append(component_index)
+        center = component_shape.CenterOfMass
+        records.append({{
+            "component_index": component_index,
+            "shape": component_shape,
+            "valid": component_valid,
+            "volume": float(component_shape.Volume),
+            "center": [float(center.x), float(center.y), float(center.z)],
+        }})
+    invalid_requested = sorted(set(requested).intersection(invalid_component_indices))
+    if requested_indices is not None and invalid_requested:
+        raise ValueError(
+            f"Explicitly requested components are invalid: {{invalid_requested}}"
+        )
+    selected = [record for record in records if record["component_index"] in requested]
+    selected = [record for record in selected if record["valid"]]
+    if {component_volume_min!r} is not None:
+        selected = [record for record in selected if record["volume"] >= {component_volume_min!r}]
+    if {component_volume_max!r} is not None:
+        selected = [record for record in selected if record["volume"] <= {component_volume_max!r}]
+    sort_keys = {{
+        "index": lambda record: record["component_index"],
+        "volume": lambda record: record["volume"],
+        "center_x": lambda record: record["center"][0],
+        "center_y": lambda record: record["center"][1],
+        "center_z": lambda record: record["center"][2],
+    }}
+    selected.sort(
+        key=sort_keys[{component_sort_by!r}],
+        reverse={component_sort_order!r} == "desc",
+    )
+    if {component_limit!r} is not None:
+        selected = selected[:{component_limit!r}]
+    if not selected:
+        suffix = f"; invalid requested components: {{invalid_requested}}" if invalid_requested else ""
+        raise ValueError(f"No valid solid feature components matched the selection{{suffix}}")
+
     components = []
-    for component_index in requested:
-        component_shape = solids[component_index - 1]
+    refine_fallbacks = []
+    for record in selected:
+        component_index = record["component_index"]
+        component_shape = record["shape"]
+        component_refined = False
+        component_refine_fallback_reason = None
+        if {refine!r}:
+            try:
+                refined = component_shape.removeSplitter()
+                if refined.isNull() or not refined.isValid():
+                    raise ValueError("removeSplitter produced a null or invalid Shape")
+                component_shape = refined
+                component_refined = True
+            except Exception as exc:
+                component_refine_fallback_reason = str(exc)
+                refine_fallbacks.append(
+                    f"component {{component_index}}: {{component_refine_fallback_reason}}"
+                )
         result_obj = doc.addObject("Part::Feature", f"{result_prefix}{{component_index}}")
         result_obj.Shape = component_shape
         components.append({{
@@ -344,15 +470,37 @@ try:
                 float(component_shape.CenterOfMass.z),
             ],
             "face_count": len(component_shape.Faces),
+            "refined": component_refined,
+            "refine_fallback_reason": component_refine_fallback_reason,
         }})
     doc.recompute()
     doc.commitTransaction()
     _result_ = {{
         "mode": {mode!r},
+        "container_valid": container_valid,
         "available_component_count": len(solids),
+        "valid_component_count": len(solids) - len(invalid_component_indices),
+        "invalid_component_indices": invalid_component_indices,
         "created_component_count": len(components),
         "components": components,
-        "total_recovered_volume": float(recovered.Volume),
+        "total_recovered_volume": float(raw_recovered.Volume),
+        "total_valid_component_volume": sum(
+            record["volume"] for record in records if record["valid"]
+        ),
+        "selected_volume": sum(component["volume"] for component in components),
+        "component_selection": {{
+            "indices": requested_indices,
+            "volume_min": {component_volume_min!r},
+            "volume_max": {component_volume_max!r},
+            "sort_by": {component_sort_by!r},
+            "sort_order": {component_sort_order!r},
+            "limit": {component_limit!r},
+        }},
+        "fuzzy_tolerance": {fuzzy_tolerance!r},
+        "refine_requested": {refine!r},
+        "refine_applied": all(component["refined"] for component in components),
+        "refine_fallback_reason": "; ".join(refine_fallbacks) or None,
+        "refined": all(component["refined"] for component in components),
         "transaction_state": "committed",
     }}
 except Exception:
@@ -375,7 +523,8 @@ except Exception:
         code = f"""
 import Part
 
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
+requested_doc_name = {doc_name!r}
+doc = FreeCAD.ActiveDocument if requested_doc_name is None else FreeCAD.getDocument(requested_doc_name)
 if doc is None:
     raise ValueError("No document found")
 faces = []
@@ -429,7 +578,8 @@ except Exception:
     ) -> dict[str, Any]:
         """Run OCCT shape fixing, optional tolerance limiting, and refinement."""
         code = f"""
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
+requested_doc_name = {doc_name!r}
+doc = FreeCAD.ActiveDocument if requested_doc_name is None else FreeCAD.getDocument(requested_doc_name)
 if doc is None:
     raise ValueError("No document found")
 source = doc.getObject({object_name!r})
@@ -445,14 +595,24 @@ try:
     healed.fix({tolerance!r}, {tolerance!r}, max({tolerance!r}, 1e-7))
     if {tolerance!r} > 0.0:
         healed.limitTolerance({tolerance!r})
-    if {refine!r}:
-        healed = healed.removeSplitter()
     if healed.isNull() or not healed.isValid():
-        raise ValueError("Healing produced a null or invalid Shape")
+        raise ValueError("Shape fixing did not produce a valid Shape")
+    refine_applied = False
+    refine_fallback_reason = None
+    if {refine!r}:
+        try:
+            refined = healed.removeSplitter()
+            if refined.isNull() or not refined.isValid():
+                raise ValueError("removeSplitter produced a null or invalid Shape")
+            healed = refined
+            refine_applied = True
+        except Exception as exc:
+            refine_fallback_reason = str(exc)
     solid_count = len(healed.Solids)
-    if {expected_solid_count!r} is not None and solid_count != {expected_solid_count!r}:
+    expected_count = {expected_solid_count!r}
+    if expected_count is not None and solid_count != expected_count:
         raise ValueError(
-            f"Expected {expected_solid_count!r} solid(s), got {{solid_count}}"
+            f"Expected {{expected_count}} solid(s), got {{solid_count}}"
         )
     result_obj = doc.addObject("Part::Feature", {result_name!r} or "HealedShape")
     result_obj.Shape = healed
@@ -464,7 +624,10 @@ try:
         "shape_type": healed.ShapeType,
         "solid_count": solid_count,
         "volume": float(healed.Volume),
-        "refined": {refine!r},
+        "refine_requested": {refine!r},
+        "refine_applied": refine_applied,
+        "refine_fallback_reason": refine_fallback_reason,
+        "refined": refine_applied,
         "tolerance": {tolerance!r},
         "transaction_state": "committed",
     }}
@@ -487,7 +650,8 @@ except Exception:
         code = f"""
 import Part
 
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
+requested_doc_name = {doc_name!r}
+doc = FreeCAD.ActiveDocument if requested_doc_name is None else FreeCAD.getDocument(requested_doc_name)
 if doc is None:
     raise ValueError("No document found")
 source = doc.getObject({object_name!r})
@@ -514,9 +678,10 @@ try:
     volume = float(result_shape.Volume)
     if volume <= 0.0:
         raise ValueError(f"Solid volume must be positive; got {{volume}}")
-    if {expected_solid_count!r} is not None and solid_count != {expected_solid_count!r}:
+    expected_count = {expected_solid_count!r}
+    if expected_count is not None and solid_count != expected_count:
         raise ValueError(
-            f"Expected {expected_solid_count!r} solid(s), got {{solid_count}}"
+            f"Expected {{expected_count}} solid(s), got {{solid_count}}"
         )
     result_obj = doc.addObject("Part::Feature", {result_name!r} or "Solid")
     result_obj.Shape = result_shape
@@ -561,7 +726,8 @@ except Exception:
         code = f"""
 import Part
 
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
+requested_doc_name = {doc_name!r}
+doc = FreeCAD.ActiveDocument if requested_doc_name is None else FreeCAD.getDocument(requested_doc_name)
 if doc is None:
     raise ValueError("No document found")
 source = doc.getObject({object_name!r})
@@ -585,27 +751,34 @@ try:
             copy_shape.rotate(origin, axis, pitch * index)
         copies.append(copy_shape)
     if {fuse!r}:
-        result_shape = copies[0]
-        for copy_shape in copies[1:]:
-            if {fuzzy_tolerance!r} > 0.0:
-                try:
-                    result_shape = result_shape.fuse(copy_shape, {fuzzy_tolerance!r})
-                except TypeError as exc:
-                    raise ValueError(
-                        "This FreeCAD build does not expose fuzzy tolerance for fuse"
-                    ) from exc
-            else:
-                result_shape = result_shape.fuse(copy_shape)
+        if {fuzzy_tolerance!r} <= 0.0 and hasattr(copies[0], "multiFuse"):
+            result_shape = copies[0].multiFuse(copies[1:])
+            fuse_strategy = "multi_fuse"
+        else:
+            result_shape = copies[0]
+            fuse_strategy = "sequential_fuzzy" if {fuzzy_tolerance!r} > 0.0 else "sequential"
+            for copy_shape in copies[1:]:
+                if {fuzzy_tolerance!r} > 0.0:
+                    try:
+                        result_shape = result_shape.fuse(copy_shape, {fuzzy_tolerance!r})
+                    except TypeError as exc:
+                        raise ValueError(
+                            "This FreeCAD build does not expose fuzzy tolerance for fuse"
+                        ) from exc
+                else:
+                    result_shape = result_shape.fuse(copy_shape)
     else:
         result_shape = Part.makeCompound(copies)
+        fuse_strategy = "compound"
     if {refine!r}:
         result_shape = result_shape.removeSplitter()
     if result_shape.isNull() or not result_shape.isValid():
         raise ValueError("Polar pattern produced a null or invalid Shape")
     solid_count = len(result_shape.Solids)
-    if {expected_solid_count!r} is not None and solid_count != {expected_solid_count!r}:
+    expected_count = {expected_solid_count!r}
+    if expected_count is not None and solid_count != expected_count:
         raise ValueError(
-            f"Expected {expected_solid_count!r} solid(s), got {{solid_count}}"
+            f"Expected {{expected_count}} solid(s), got {{solid_count}}"
         )
     result_obj = doc.addObject("Part::Feature", {result_name!r} or "PolarPatternShape")
     result_obj.Shape = result_shape
@@ -620,6 +793,7 @@ try:
         "total_angle_deg": {total_angle_deg!r},
         "fused": {fuse!r},
         "fuzzy_tolerance": {fuzzy_tolerance!r},
+        "fuse_strategy": fuse_strategy,
         "refined": {refine!r},
         "shape_valid": True,
         "shape_type": result_shape.ShapeType,

@@ -661,6 +661,8 @@ def _selection_topology_request(  # noqa: PLR0912, PLR0915
                     "convexity",
                     "adjacent_faces",
                     "radius",
+                    "major_radius",
+                    "minor_radius",
                     "axis_direction",
                     "axis_point",
                 }
@@ -939,6 +941,8 @@ def _compact_subshape(item: dict[str, Any]) -> dict[str, Any]:
         "area",
         "length",
         "radius",
+        "major_radius",
+        "minor_radius",
         "axis_direction",
         "axis_point",
         "centroid",
@@ -968,6 +972,8 @@ def _compact_face_neighborhood_record(
         record["distance"] = distance
     for key in (
         "radius",
+        "major_radius",
+        "minor_radius",
         "axis_direction",
         "axis_point",
         "normal",

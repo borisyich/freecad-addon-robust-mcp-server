@@ -33,8 +33,9 @@ def _build_object_selection_code(object_names: list[str] | None) -> str:
     """Generate Python code for GUI-aware object selection."""
     return f"""
 # Get objects to export
-if {object_names!r} is not None:
-    objects = [doc.getObject(n) for n in {object_names!r}]
+requested_object_names = {object_names!r}
+if requested_object_names is not None:
+    objects = [doc.getObject(n) for n in requested_object_names]
 elif FreeCAD.GuiUp:
     objects = [
         obj for obj in doc.Objects
@@ -54,13 +55,16 @@ def _build_brep_export_code(
     file_path: str,
     object_names: list[str] | None,
     doc_name: str | None,
+    verify_round_trip: bool,
 ) -> str:
     """Build STEP or IGES export code."""
     export_method = "exportStep" if file_format == "step" else "exportIges"
     return f"""
 import Part
+import os
 
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
+requested_doc_name = {doc_name!r}
+doc = FreeCAD.ActiveDocument if requested_doc_name is None else FreeCAD.getDocument(requested_doc_name)
 if doc is None:
     raise ValueError("No document found")
 {_build_object_selection_code(object_names)}
@@ -69,13 +73,87 @@ if len(objects) == 1:
 else:
     shape = Part.makeCompound([obj.Shape for obj in objects])
 
-shape.{export_method}({file_path!r})
+output_path = os.path.abspath({file_path!r})
+output_directory = os.path.dirname(output_path)
+if not os.path.isdir(output_directory):
+    raise FileNotFoundError(
+        f"Output directory does not exist: {{output_directory}}"
+    )
+shape.{export_method}(output_path)
+if not os.path.isfile(output_path) or os.path.getsize(output_path) <= 0:
+    raise ValueError("BREP export did not create a non-empty output file")
+
+verification = {{"requested": {verify_round_trip!r}, "passed": None}}
+if {verify_round_trip!r}:
+    canonical_source = Part.Shape()
+    canonical_source.importBrepFromString(shape.exportBrepToString())
+    if canonical_source.isNull() or not canonical_source.isValid():
+        raise ValueError("Source Shape could not be canonicalized through BREP")
+    round_trip = Part.read(output_path)
+    if round_trip is None or round_trip.isNull():
+        raise ValueError("Export round-trip produced a null Shape")
+    if not round_trip.isValid():
+        raise ValueError(
+            "Export round-trip produced an invalid Shape; preserve upstream face "
+            "boundaries (for example, retry the Boolean with refine=False)"
+        )
+    source_solid_count = len(canonical_source.Solids)
+    restored_solid_count = len(round_trip.Solids)
+    if {file_format!r} == "step" and restored_solid_count != source_solid_count:
+        raise ValueError(
+            f"STEP round-trip changed solid count from {{source_solid_count}} "
+            f"to {{restored_solid_count}}"
+        )
+    source_volume = float(canonical_source.Volume)
+    restored_volume = float(round_trip.Volume)
+    volume_error = abs(restored_volume - source_volume)
+    volume_tolerance = max(1e-7, abs(source_volume) * 1e-9)
+    source_box = canonical_source.BoundBox
+    restored_box = round_trip.BoundBox
+    bbox_error = max(
+        abs(float(left) - float(right))
+        for left, right in zip(
+            (
+                source_box.XMin, source_box.YMin, source_box.ZMin,
+                source_box.XMax, source_box.YMax, source_box.ZMax,
+            ),
+            (
+                restored_box.XMin, restored_box.YMin, restored_box.ZMin,
+                restored_box.XMax, restored_box.YMax, restored_box.ZMax,
+            ),
+        )
+    )
+    bbox_tolerance = max(
+        1e-7,
+        max(source_box.XLength, source_box.YLength, source_box.ZLength, 1.0) * 1e-9,
+    )
+    if {file_format!r} == "step" and volume_error > volume_tolerance:
+        raise ValueError(
+            f"STEP round-trip changed volume by {{volume_error}} "
+            f"(tolerance {{volume_tolerance}})"
+        )
+    if {file_format!r} == "step" and bbox_error > bbox_tolerance:
+        raise ValueError(
+            f"STEP round-trip changed bounds by {{bbox_error}} "
+            f"(tolerance {{bbox_tolerance}})"
+        )
+    verification = {{
+        "requested": True,
+        "passed": True,
+        "shape_valid": True,
+        "source_solid_count": source_solid_count,
+        "restored_solid_count": restored_solid_count,
+        "volume_error": volume_error,
+        "bounding_box_error": bbox_error,
+    }}
 
 _result_ = {{
     "success": True,
     "format": {file_format!r},
-    "path": {file_path!r},
+    "path": output_path,
     "object_count": len(objects),
+    "file_size": os.path.getsize(output_path),
+    "round_trip_verification": verification,
 }}
 """
 
@@ -91,8 +169,10 @@ def _build_mesh_export_code(
     return f"""
 import Mesh
 import MeshPart
+import os
 
-doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
+requested_doc_name = {doc_name!r}
+doc = FreeCAD.ActiveDocument if requested_doc_name is None else FreeCAD.getDocument(requested_doc_name)
 if doc is None:
     raise ValueError("No document found")
 {_build_object_selection_code(object_names)}
@@ -108,13 +188,22 @@ else:
     for mesh in meshes:
         final_mesh.addMesh(mesh)
 
-final_mesh.write({file_path!r})
+output_path = os.path.abspath({file_path!r})
+output_directory = os.path.dirname(output_path)
+if not os.path.isdir(output_directory):
+    raise FileNotFoundError(
+        f"Output directory does not exist: {{output_directory}}"
+    )
+final_mesh.write(output_path)
+if not os.path.isfile(output_path) or os.path.getsize(output_path) <= 0:
+    raise ValueError("Mesh export did not create a non-empty output file")
 
 _result_ = {{
     "success": True,
     "format": {file_format!r},
-    "path": {file_path!r},
+    "path": output_path,
     "object_count": len(objects),
+    "file_size": os.path.getsize(output_path),
 }}
 """
 
@@ -186,6 +275,7 @@ def register_export_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
         object_names: list[str] | None = None,
         doc_name: str | None = None,
         mesh_tolerance: float = 0.1,
+        verify_round_trip: bool = True,
     ) -> dict[str, Any]:
         """Export FreeCAD objects to STEP, IGES, STL, 3MF, or OBJ.
 
@@ -198,6 +288,8 @@ def register_export_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
             doc_name: Source document. Uses the active document when omitted.
             mesh_tolerance: Linear deflection for mesh formats. Lower values create
                 finer meshes. Ignored for STEP and IGES.
+            verify_round_trip: Re-read STEP/IGES output and reject null or invalid
+                exchange geometry. STEP also verifies solid count, volume, and bounds.
 
         Returns:
             Export status, normalized format, output path, and object count.
@@ -220,6 +312,7 @@ def register_export_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
                 file_path,
                 object_names,
                 doc_name,
+                verify_round_trip,
             )
 
         bridge = await get_bridge()

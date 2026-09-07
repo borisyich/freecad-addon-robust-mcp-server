@@ -92,12 +92,12 @@ that behavior so a missing target can receive imported STEP/STL data.
 | `common_all` | Transactional multi-shape intersection with per-step diagnostics and strict final validation. |
 | `group_feature_faces` | Split selected faces into edge-connected feature regions. |
 | `detect_rotational_pattern` | Test face groups for equal angular spacing about an axis. |
-| `defeature_faces` | Remove selected faces with OCCT defeaturing and store the healed support. |
-| `extract_feature_material` | Recover exact material or void components by differencing source and healed Shapes. |
+| `defeature_faces` | Remove selected faces with OCCT defeaturing, rejecting unchanged/no-op results. |
+| `extract_feature_material` | Recover valid material or void solids from imperfect Boolean containers; filter by index/volume and sort/limit semantically. |
 | `sew_shell` | Sew faces from one or more objects into a validated shell. |
 | `heal_shape` | Run OCCT shape fixing, tolerance control, and optional refinement. |
 | `make_solid` | Convert closed shells to positive-volume validated solids. |
-| `polar_pattern_shape` | Pattern exact Shape copies about an axis, optionally fuse with fuzzy tolerance and refine. |
+| `polar_pattern_shape` | Pattern exact Shape copies about an axis, using an OCCT multi-fuse when possible. |
 | `make_wire` | Create a wire (polyline) from a list of points. |
 | `make_face` | Create a face from a closed wire. |
 | `extrude_shape` | Extrude a wire or face by a fixed vector; use `pad_sketch` for target-aware end conditions. |
@@ -355,8 +355,8 @@ path without removing earlier valid bindings.
 |---|---|
 | `validate_object` | Check the health and validity of a FreeCAD object. |
 | `validate_document` | Check the health of all objects in a FreeCAD document. |
-| `capture_shape_checkpoint` | Capture an in-memory Shape baseline without modifying the document. |
-| `compare_shape_checkpoint` | Report invariant metrics and exact added/removed B-rep regions after an edit. |
+| `capture_shape_checkpoint` | Capture a canonical BREP-round-trip baseline without modifying the document; report stale imported bounds when normalized. |
+| `compare_shape_checkpoint` | Canonicalize current geometry, then report invariant metrics and exact added/removed B-rep regions. |
 | `validate_parametric_model` | Compact final diagnostic with expanded structure/full modes on request. |
 | `undo_if_invalid` | Check document health and undo the last operation if invalid objects exist. |
 | `safe_execute` | Execute Python transactionally with its own deadline and explicit timeout/continuation state. |

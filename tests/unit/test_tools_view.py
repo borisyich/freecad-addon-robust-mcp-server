@@ -200,19 +200,32 @@ class TestViewTools:
         mock_bridge.get_screenshot.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_get_screenshot_rejects_unused_output_path(
+    async def test_get_screenshot_output_path_implies_disk_saving(
         self, register_tools, mock_bridge
     ):
-        """An output path without disk saving is an ambiguous request."""
+        """An explicit output path should not require a redundant save flag."""
+        mock_bridge.get_screenshot = AsyncMock(
+            return_value=ScreenshotResult(
+                success=True,
+                data=None,
+                format="png",
+                width=800,
+                height=600,
+                path="unused.png",
+                saved_to_disk=True,
+                file_size=100,
+            )
+        )
         result = await register_tools["get_screenshot"](
             output_path="unused.png",
             save_to_disk=False,
+            return_image=False,
         )
 
         assert isinstance(result, CallToolResult)
-        assert result.isError is True
-        assert "requires save_to_disk" in result.structuredContent["error"]
-        mock_bridge.get_screenshot.assert_not_called()
+        assert result.isError is False
+        assert result.structuredContent["saved_to_disk"] is True
+        assert mock_bridge.get_screenshot.await_args.kwargs["save_to_disk"] is True
 
     @pytest.mark.asyncio
     async def test_get_screenshot_headless_error(self, register_tools, mock_bridge):

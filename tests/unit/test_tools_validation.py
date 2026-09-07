@@ -110,6 +110,10 @@ class TestValidationTools:
         capture_code = mock_bridge.execute_python.await_args_list[0].args[0]
         assert "brep = shape.exportBrepToString()" in capture_code
         assert "baseline.importBrepFromString(brep)" in capture_code
+        assert '"metrics": baseline_metrics' in capture_code
+        assert '"metrics_basis": "brep_round_trip"' in capture_code
+        assert '"round_trip_bbox_normalized": max_bbox_error > 1e-7' in capture_code
+        assert "canonical_after.importBrepFromString(after_brep)" in compare_code
         assert "shape_for_export.Placement" not in capture_code
         assert "before.Placement =" not in compare_code
         assert "before_metrics = {'valid': True, 'volume': 1000.0}" in compare_code

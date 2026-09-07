@@ -101,6 +101,8 @@ cone.Radius1 = 6.0
 cone.Radius2 = 2.0
 cone.Height = 12.0
 cone.Placement.Base = FreeCAD.Vector(50.0, 0.0, 0.0)
+torus = doc.addObject("Part::Feature", "Torus")
+torus.Shape = Part.makeTorus(25.0, 4.0, FreeCAD.Vector(3.0, 5.0, 7.0))
 doc.recompute()
 _result_ = True
 """
@@ -250,6 +252,26 @@ _result_ = True
             },
         )
         assert selected_cone["references"] == [conical_faces[0]["name"]]
+
+        selected_torus = await tools["select_subshapes"](
+            object_name="Torus",
+            doc_name=doc_name,
+            criteria={
+                "kind": "face",
+                "surface_types": ["Toroid"],
+                "limit": 1,
+            },
+            detail_level="summary",
+        )
+        toroidal_face = selected_torus["matches"][0]
+        assert toroidal_face["major_radius"] == pytest.approx(25.0)
+        assert toroidal_face["minor_radius"] == pytest.approx(4.0)
+        assert toroidal_face["axis_direction"] == pytest.approx(
+            {"x": 0.0, "y": 0.0, "z": 1.0}
+        )
+        assert toroidal_face["axis_point"] == pytest.approx(
+            {"x": 3.0, "y": 5.0, "z": 7.0}
+        )
 
         serialized = json.dumps(result)
         assert " object at " not in serialized

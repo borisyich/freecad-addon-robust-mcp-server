@@ -138,15 +138,22 @@ _result_ = {{"feature_faces": feature_faces}}
         )
         assert healed["solid_count"] == 1
         assert healed["shape_valid"] is True
+        assert healed["measurable_change"] is True
 
         extracted = await brep_tools["extract_feature_material"](
             source_name="ImportedStatic",
             healed_name="RecoveredBase",
-            component_indices=[1],
+            component_volume_min=1.0,
+            component_sort_by="volume",
+            component_sort_order="desc",
+            component_limit=1,
             result_prefix="ExactBoss",
             doc_name=doc_name,
         )
+        assert extracted["container_valid"] is True
         assert extracted["available_component_count"] == 1
+        assert extracted["valid_component_count"] == 1
+        assert extracted["created_component_count"] == 1
         exact_boss = extracted["components"][0]["name"]
 
         patterned = await brep_tools["polar_pattern_shape"](
@@ -159,6 +166,20 @@ _result_ = {{"feature_faces": feature_faces}}
         )
         assert patterned["occurrences"] == 5
         assert patterned["solid_count"] == 5
+        assert patterned["fuse_strategy"] == "compound"
+
+        fused_pattern = await brep_tools["polar_pattern_shape"](
+            object_name=exact_boss,
+            occurrences=5,
+            axis_origin=[10, 10, 0],
+            result_name="FiveBossesMultiFuse",
+            fuse=True,
+            refine=False,
+            expected_solid_count=5,
+            doc_name=doc_name,
+        )
+        assert fused_pattern["solid_count"] == 5
+        assert fused_pattern["fuse_strategy"] == "multi_fuse"
 
         sewn = await brep_tools["sew_shell"](
             object_names=["RecoveredBase"],
@@ -183,5 +204,6 @@ _result_ = {{"feature_faces": feature_faces}}
         )
         assert repaired["shape_valid"] is True
         assert repaired["solid_count"] == 1
+        assert repaired["refined"] == repaired["refine_applied"]
     finally:
         await _close(live_bridge, doc_name)

@@ -553,7 +553,10 @@ defeature_faces(
 ) -> dict
 extract_feature_material(
     source_name, healed_name, mode="removed_material",
-    component_indices=None, result_prefix="RecoveredFeature", refine=True,
+    component_indices=None, component_volume_min=None,
+    component_volume_max=None, component_sort_by="index",
+    component_sort_order="asc", component_limit=None,
+    result_prefix="RecoveredFeature", refine=True, fuzzy_tolerance=0.0,
     doc_name=None,
 ) -> dict
 sew_shell(object_names, result_name=None, tolerance=1e-7, doc_name=None) -> dict
@@ -579,6 +582,26 @@ that support from the original with `extract_feature_material`; select one exact
 solid component; then create the required count with `polar_pattern_shape`.
 Every geometry-producing tool opens a FreeCAD transaction, validates before
 commit, and reports `transaction_state`.
+
+`defeature_faces` rejects an OCCT no-op when volume, area, and topology all stay
+unchanged. Both defeaturing and healing preserve a valid unrefined Shape when
+optional `removeSplitter` refinement fails and report the fallback explicitly.
+
+`extract_feature_material` accepts the same narrowly controlled fuzzy tolerance
+used by Boolean tools. OCCT can report an invalid compound from a Boolean even
+when some contained solids are valid. The tool therefore decomposes the result,
+reports `container_valid` and `invalid_component_indices`, and creates only valid
+solids. Use `component_volume_min`/`component_volume_max`, sorting, and a limit
+to select a component in the same Boolean call; raw `component_indices` remain
+available when topology order is known. Refinement is applied per selected solid
+and falls back independently, with diagnostics in each component record.
+`polar_pattern_shape(fuse=True)` uses a single OCCT multi-fuse when no fuzzy
+tolerance is requested and reports the chosen `fuse_strategy`.
+
+`select_subshapes(detail_level="summary"|"full")` and
+`inspect_subshape_neighborhood` expose `major_radius`, `minor_radius`, axis, and
+center (`axis_point`) for toroidal faces. This permits reconstruction of
+analytic support geometry without arbitrary Python inspection.
 
 ### Transformations
 
@@ -1951,12 +1974,19 @@ export(
     file_path: str,
     object_names: list[str] | None = None,
     doc_name: str | None = None,
-    mesh_tolerance: float = 0.1
+    mesh_tolerance: float = 0.1,
+    verify_round_trip: bool = True,
 ) -> dict
 ```
 
 `mesh_tolerance` is used only for STL, 3MF, and OBJ. STEP and IGES preserve
-BREP geometry.
+BREP geometry. The destination directory must already exist; a missing directory
+is reported explicitly before the writer is called. BREP exports are re-read by
+default and rejected when the exchange file is null or invalid. STEP verification
+also checks solid count, volume, and bounds against a canonical BREP baseline
+(avoiding stale cached bounds on imported objects), and returns the measurements in
+`round_trip_verification`. Set `verify_round_trip=False` only when a downstream
+application must receive a file that FreeCAD cannot read back.
 
 ### import
 
@@ -2030,6 +2060,8 @@ images. Any native interactive-view setting is restored after capture.
 view during this interval before calling `saveImage`. This prevents a screenshot
 from capturing a stale orientation or incomplete fit. Values from 0 to 10 are
 accepted; use 0 only when the view is already stable or in controlled tests.
+Supplying `output_path` automatically enables `save_to_disk`; callers do not
+need to repeat both arguments.
 
 **View/plane correspondence:**
 
@@ -2322,9 +2354,12 @@ counts, volume, surface area, bounding boxes and their deltas. Capture serialize
 the original Shape directly, preserving the complete native BREP location graph;
 it does not make a shallow copy, clear Placement, or reconstruct a quaternion.
 Capture verifies the restored topology, mass properties, and placement transform.
-Metric deltas use the metrics recorded at capture time because OCCT can calculate
-a slightly different tight bounding box after serialization even when the BREP is
-geometrically identical. Exact booleans still use the restored BREP. Empty,
+Checkpoint metrics use that restored BREP as the canonical baseline because an
+imported document object can retain a stale cached bounding box. Capture returns
+the original values as `source_reported_metrics` and flags normalization with
+`round_trip_bbox_normalized`; comparison canonicalizes the current Shape through
+the same BREP path before calculating deltas. Exact booleans also use the restored
+BREP. Empty,
 non-null OCCT Compounds with no topology are discarded rather than reported as
 added or removed regions with infinite bounds. In `auto` mode,
 OCCT computes both `before.cut(after)` and `after.cut(before)` only when the

@@ -404,12 +404,12 @@ The server currently registers **131 MCP tools**. The tables below list common t
 | ---- | ----------- | ---- |
 | `group_feature_faces` | Group selected faces into connected features | All |
 | `detect_rotational_pattern` | Detect equal angular spacing of face groups | All |
-| `defeature_faces` | Remove faces with OCCT defeaturing and heal support | All |
-| `extract_feature_material` | Recover exact removed material or filled voids | All |
+| `defeature_faces` | Remove faces with OCCT defeaturing and reject no-op results | All |
+| `extract_feature_material` | Recover valid material/void solids from imperfect Boolean containers with semantic filters | All |
 | `sew_shell` | Sew object faces into a validated shell | All |
 | `heal_shape` | Fix tolerances and refine a Shape | All |
 | `make_solid` | Convert closed shells into validated solids | All |
-| `polar_pattern_shape` | Pattern exact Shapes with optional controlled fuse | All |
+| `polar_pattern_shape` | Pattern exact Shapes with optional optimized controlled fuse | All |
 
 #### PartDesign - Sketching and Core Features (14 common tools)
 
@@ -542,8 +542,8 @@ endpoints, radius, arc side, datum, and the dimension chain are rechecked.
 | --- | --- | --- |
 | `validate_object` | Check one object's shape and FreeCAD state | All |
 | `validate_document` | Check geometric health across a document | All |
-| `capture_shape_checkpoint` | Capture a read-only in-memory B-rep baseline | All |
-| `compare_shape_checkpoint` | Report metric deltas and exact added/removed Shape regions | All |
+| `capture_shape_checkpoint` | Capture a read-only canonical BREP-round-trip baseline | All |
+| `compare_shape_checkpoint` | Canonicalize current geometry and report metric/exact Shape deltas | All |
 | `validate_parametric_model` | Compact final report; paged/expanded parametric diagnostics on request | All |
 | `undo_if_invalid` | Undo after invalid document state | All |
 | `safe_execute` | Run Python with optional validation and rollback | All |

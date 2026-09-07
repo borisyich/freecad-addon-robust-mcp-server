@@ -36,15 +36,18 @@ OBJECT_INSPECTION_RUNTIME = dedent(
         }
 
 
-    def _axial_surface_value(surface):
-        # Return stable cylinder/cone axis geometry without probing unrelated surfaces.
+    def _analytic_surface_value(surface):
+        # Return stable analytic parameters without probing unrelated surfaces.
         surface_name = type(surface).__name__.lower() if surface is not None else ""
-        if not any(kind in surface_name for kind in ("cylinder", "cone")):
+        supported = ("cylinder", "cone", "sphere", "torus", "toroid")
+        if not any(kind in surface_name for kind in supported):
             return None
         axis = _safe_attr(surface, "Axis")
         center = _safe_attr(surface, "Center")
         return {
             "radius": _finite_number(_safe_attr(surface, "Radius")),
+            "major_radius": _finite_number(_safe_attr(surface, "MajorRadius")),
+            "minor_radius": _finite_number(_safe_attr(surface, "MinorRadius")),
             "axis_direction": _vector_value(axis) if axis is not None else None,
             "axis_point": _vector_value(center) if center is not None else None,
         }
@@ -371,12 +374,21 @@ OBJECT_INSPECTION_RUNTIME = dedent(
                 value["surface_type"] = (
                     type(surface).__name__ if surface is not None else None
                 )
-            if any(wants(field) for field in ("radius", "axis_direction", "axis_point")):
-                axial_surface = _axial_surface_value(surface)
-                if axial_surface is not None:
-                    for field in ("radius", "axis_direction", "axis_point"):
+            analytic_fields = (
+                "radius",
+                "major_radius",
+                "minor_radius",
+                "axis_direction",
+                "axis_point",
+            )
+            if any(wants(field) for field in analytic_fields):
+                analytic_surface = _analytic_surface_value(surface)
+                if analytic_surface is not None:
+                    for field in analytic_fields:
                         if wants(field):
-                            value[field] = axial_surface[field]
+                            parameter = analytic_surface[field]
+                            if parameter is not None:
+                                value[field] = parameter
             if wants("normal"):
                 value["normal"] = normal
             if wants("area"):

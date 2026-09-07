@@ -79,6 +79,10 @@ class TestExportTools:
         code = mock_bridge.execute_python.call_args.args[0]
         assert expected_method in code
         assert "Part.makeCompound" in code
+        assert "Part.read(output_path)" in code
+        assert "canonical_source.importBrepFromString" in code
+        assert "round_trip.isValid()" in code
+        assert "Output directory does not exist" in code
         assert "MeshPart.meshFromShape" not in code
         assert result["format"] == file_format
         assert result["object_count"] == 2
@@ -115,7 +119,32 @@ class TestExportTools:
         assert "MeshPart.meshFromShape" in code
         assert "LinearDeflection=0.025" in code
         assert "final_mesh.write" in code
+        assert "Output directory does not exist" in code
         assert result["format"] == file_format
+
+    @pytest.mark.asyncio
+    async def test_brep_export_can_disable_round_trip_verification(
+        self, register_tools, mock_bridge
+    ):
+        mock_bridge.execute_python = AsyncMock(
+            return_value=ExecutionResult(
+                success=True,
+                result={"success": True, "format": "step"},
+                stdout="",
+                stderr="",
+                execution_time_ms=1.0,
+            )
+        )
+
+        await register_tools["export"](
+            file_format="step",
+            file_path="/tmp/part.step",
+            verify_round_trip=False,
+        )
+
+        code = mock_bridge.execute_python.call_args.args[0]
+        assert 'verification = {"requested": False' in code
+        assert "if False:" in code
 
     @pytest.mark.asyncio
     async def test_export_rejects_invalid_mesh_tolerance_before_bridge(
