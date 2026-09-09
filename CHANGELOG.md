@@ -346,6 +346,26 @@
   direct-Shape branch; exact shape-checkpoint differences reject invalid or
   nonphysical result regions; and compact capability metadata matches the full
   tool contracts.
+- Fixed STEP/checkpoint validation so export and shape checkpoint metrics retain the
+  original in-document Shape as the reference. BREP normalization now fails on
+  volume, topology, placement, or bounding-box drift instead of silently rebasing
+  the baseline and reporting a zero round-trip error.
+- Added geometry-preservation guards to BREP healing and `removeSplitter`
+  refinement. Volume, bounds, center of mass, and solid count are checked with
+  explicit absolute/relative tolerances; unsafe refinement falls back and unsafe
+  healing aborts unless the caller explicitly allows drift. Unfused polar patterns
+  also verify `seed volume × occurrence count` before refinement.
+- Added representative-candidate diagnostics (topology groups, volume/area
+  spreads, placement evidence, and no automatic winner) to extracted repeated
+  features, plus engineering guidance that forbids choosing a seed by generated
+  name/order.
+- Added session-local `start_tool_job`, `get_tool_job`, and `cancel_tool_job` for
+  long-running FreeCAD operations. Running in-process OCCT work is explicitly
+  reported as non-interruptible instead of pretending cancellation succeeded.
+- Split non-dimensional source requirements from physical dimensions in the
+  acceptance manifest. Empty dimension lists are valid; counts belong in
+  `requirements`. Caller-authored evidence and image-review attestations no longer
+  promote a structurally healthy model to machine-verified acceptance.
 
 This project uses **component-specific versioning**. Each component has its own
 release notes and version history.

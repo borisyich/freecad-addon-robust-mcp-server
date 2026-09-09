@@ -1,6 +1,6 @@
 # Tools Reference
 
-The server currently registers **145 MCP tools**. This page is generated from the actual `@mcp.tool()` definitions in `src/freecad_mcp/tools` and is the exact inventory.
+The server currently registers **148 MCP tools**. This page is generated from the actual `@mcp.tool()` definitions in `src/freecad_mcp/tools` and is the exact inventory.
 
 Geometry-changing operations are transaction-backed where applicable. Use `history(action="undo")` for explicit recovery, `get_console_output` for console diagnostics, and `recompute_document` for document recomputation.
 
@@ -14,6 +14,7 @@ that behavior so a missing target can receive imported STEP/STL data.
 |---|---|---:|
 | [Execution](#execution) | `src/freecad_mcp/tools/execution.py` | 5 |
 | [Prompt access](#prompt-access) | `src/freecad_mcp/tools/prompt_access.py` | 1 |
+| [Background jobs](#background-jobs) | `src/freecad_mcp/tools/jobs.py` | 3 |
 | [Documents](#documents) | `src/freecad_mcp/tools/documents.py` | 7 |
 | [Objects / Part](#objects-part) | `src/freecad_mcp/tools/objects.py`, `brep.py` | 43 |
 | [Measurements](#measurements) | `src/freecad_mcp/tools/measurements.py` | 9 |
@@ -27,7 +28,7 @@ that behavior so a missing target can receive imported STEP/STL data.
 | [Validation](#validation) | `src/freecad_mcp/tools/validation.py` | 7 |
 | [Export / Import](#export-import) | `src/freecad_mcp/tools/export.py` | 2 |
 | [Macros](#macros) | `src/freecad_mcp/tools/macros.py` | 6 |
-| **Total** |  | **145** |
+| **Total** |  | **148** |
 
 ## Execution
 
@@ -92,12 +93,12 @@ that behavior so a missing target can receive imported STEP/STL data.
 | `common_all` | Transactional multi-shape intersection with per-step diagnostics and strict final validation. |
 | `group_feature_faces` | Split selected faces into edge-connected feature regions. |
 | `detect_rotational_pattern` | Test face groups for equal angular spacing about an axis. |
-| `defeature_faces` | Remove selected faces with OCCT defeaturing, rejecting raw no-op results before optional refinement. |
-| `extract_feature_material` | Recover valid material or void solids from imperfect Boolean containers; filter by index/volume and sort/limit semantically. |
+| `defeature_faces` | Remove selected faces; reject raw no-ops and geometry-changing refinement. |
+| `extract_feature_material` | Recover valid material/void solids with guarded refinement and representative-candidate evidence. |
 | `sew_shell` | Sew faces from one or more objects into a validated shell. |
-| `heal_shape` | Run OCCT shape fixing, tolerance control, and optional refinement. |
-| `make_solid` | Convert closed shells to positive-volume validated solids. |
-| `polar_pattern_shape` | Pattern exact Shape copies about an axis, using an OCCT multi-fuse when possible. |
+| `heal_shape` | Run OCCT shape fixing with volume/bounds/centroid/solid-count drift guards. |
+| `make_solid` | Convert closed shells to positive-volume solids with guarded refinement. |
+| `polar_pattern_shape` | Pattern exact copies with copy-volume and refinement guards. |
 | `make_wire` | Create a wire (polyline) from a list of points. |
 | `make_face` | Create a face from a closed wire. |
 | `extrude_shape` | Extrude a wire or face by a fixed vector; use `pad_sketch` for target-aware end conditions. |
@@ -355,11 +356,19 @@ path without removing earlier valid bindings.
 |---|---|
 | `validate_object` | Check the health and validity of a FreeCAD object. |
 | `validate_document` | Check the health of all objects in a FreeCAD document. |
-| `capture_shape_checkpoint` | Capture a canonical BREP-round-trip baseline without modifying the document; report stale imported bounds when normalized. |
-| `compare_shape_checkpoint` | Canonicalize current geometry, then report metrics and only valid, physically meaningful exact B-rep regions. |
+| `capture_shape_checkpoint` | Capture original-source metrics and reject non-preserving BREP serialization. |
+| `compare_shape_checkpoint` | Compare original-source metrics; use verified canonical BREP only for exact regions. |
 | `validate_parametric_model` | Compact final diagnostic with expanded structure/full modes on request. |
 | `undo_if_invalid` | Check document health and undo the last operation if invalid objects exist. |
 | `safe_execute` | Execute Python transactionally with its own deadline and explicit timeout/continuation state. |
+
+## Background jobs
+
+| Tool | Description |
+|---|---|
+| `start_tool_job` | Run any ordinary MCP tool asynchronously and return a session-local job ID. |
+| `get_tool_job` | Poll state and optionally retrieve the final MCP result. |
+| `cancel_tool_job` | Cancel queued work; explicitly report running FreeCAD/OCCT work as non-interruptible. |
 
 The final validator is diagnostic, not a target for destructive model rewrites.
 It uses a proxy-specific contract for the Dynamic geometry properties of native

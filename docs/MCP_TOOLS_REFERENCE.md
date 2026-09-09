@@ -1,6 +1,6 @@
 # FreeCAD Robust MCP Server Tools Reference
 
-This document provides detailed signatures and examples for core MCP tools. It is not the exact inventory of all registered tools. Use [Tools Overview](guide/tools.md) or the MCP client's discovered tool list for the authoritative 145-tool inventory.
+This document provides detailed signatures and examples for core MCP tools. It is not the exact inventory of all registered tools. Use [Tools Overview](guide/tools.md) or the MCP client's discovered tool list for the authoritative 148-tool inventory.
 
 ---
 
@@ -14,6 +14,7 @@ The exact generated inventory is grouped as follows:
 | --- | ---: |
 | Execution | 5 |
 | Prompt access | 1 |
+| Background jobs | 3 |
 | Documents | 7 |
 | Objects / Part and BREP surgery | 43 |
 | Measurements | 9 |
@@ -27,7 +28,7 @@ The exact generated inventory is grouped as follows:
 | Validation | 7 |
 | Export / Import | 2 |
 | Macros | 6 |
-| **Total** | **145** |
+| **Total** | **148** |
 
 The sections below retain deeper examples for commonly used tools; they do not repeat every generated entry.
 
@@ -562,6 +563,8 @@ detect_rotational_pattern(
 ) -> dict
 defeature_faces(
     object_name, face_names, result_name=None, refine=True,
+    max_volume_drift_absolute=1e-4, max_volume_drift_relative=1e-7,
+    max_linear_drift=1e-6, allow_geometry_drift=False,
     expected_solid_count=1, hide_source=True, doc_name=None,
 ) -> dict
 extract_feature_material(
@@ -570,21 +573,29 @@ extract_feature_material(
     component_volume_max=None, component_sort_by="index",
     component_sort_order="asc", component_limit=None,
     result_prefix="RecoveredFeature", refine=True, fuzzy_tolerance=0.0,
+    max_volume_drift_absolute=1e-4, max_volume_drift_relative=1e-7,
+    max_linear_drift=1e-6, allow_geometry_drift=False,
     doc_name=None,
 ) -> dict
 sew_shell(object_names, result_name=None, tolerance=1e-7, doc_name=None) -> dict
 heal_shape(
     object_name, result_name=None, tolerance=1e-7, refine=True,
+    max_volume_drift_absolute=1e-4, max_volume_drift_relative=1e-7,
+    max_linear_drift=1e-6, allow_geometry_drift=False,
     expected_solid_count=None, doc_name=None,
 ) -> dict
 make_solid(
     object_name, result_name=None, refine=True, expected_solid_count=1,
+    max_volume_drift_absolute=1e-4, max_volume_drift_relative=1e-7,
+    max_linear_drift=1e-6, allow_geometry_drift=False,
     doc_name=None,
 ) -> dict
 polar_pattern_shape(
     object_name, occurrences, total_angle_deg=360.0,
     axis_origin=None, axis_direction=None, result_name=None, fuse=False,
     fuzzy_tolerance=0.0, refine=True, expected_solid_count=None,
+    max_volume_drift_absolute=1e-4, max_volume_drift_relative=1e-7,
+    max_linear_drift=1e-6, allow_geometry_drift=False,
     hide_source=True, doc_name=None,
 ) -> dict
 ```
@@ -599,8 +610,12 @@ commit, and reports `transaction_state`.
 `defeature_faces` rejects an OCCT no-op when the raw result of `defeaturing`
 leaves volume, area, and topology unchanged. The check happens before
 `removeSplitter`, so refinement-only topology cleanup cannot masquerade as face
-removal. Both defeaturing and healing preserve a valid unrefined Shape when
-optional `removeSplitter` refinement fails and report the fallback explicitly.
+removal. Every optional refinement compares volume, bounding box, center of mass,
+and solid count before accepting the result. Excess drift keeps the valid
+unrefined Shape and is reported; `heal_shape` aborts its transaction when the
+healing step itself exceeds the guard. `allow_geometry_drift=True` is an explicit
+auditable override, not the default. Small floating-point noise is handled by
+combined absolute/relative tolerances.
 
 `extract_feature_material` accepts the same narrowly controlled fuzzy tolerance
 used by Boolean tools. OCCT can report an invalid compound from a Boolean even
@@ -610,8 +625,16 @@ solids. Use `component_volume_min`/`component_volume_max`, sorting, and a limit
 to select a component in the same Boolean call; raw `component_indices` remain
 available when topology order is known. Refinement is applied per selected solid
 and falls back independently, with diagnostics in each component record.
+The response groups equal topology signatures in `representative_analysis` and
+reports per-candidate volume, area, centre, plus absolute/relative spreads. It
+never auto-selects a seed. That group is candidate evidence only: compare local
+neighborhood, attachment, geometry, and source views before choosing a repeated
+feature; generated names and component order are not proof that an instance is
+intact.
 `polar_pattern_shape(fuse=True)` uses a single OCCT multi-fuse when no fuzzy
-tolerance is requested and reports the chosen `fuse_strategy`.
+tolerance is requested and reports the chosen `fuse_strategy`. An unfused
+pattern must preserve `source volume × occurrences` before refinement; its
+response includes expected, observed, delta, and tolerance.
 
 `select_subshapes(detail_level="summary"|"full")` and
 `inspect_subshape_neighborhood` expose `major_radius`, `minor_radius`, axis, and
@@ -1991,6 +2014,7 @@ export(
     doc_name: str | None = None,
     mesh_tolerance: float = 0.1,
     verify_round_trip: bool = True,
+    round_trip_linear_tolerance: float = 0.01,
 ) -> dict
 ```
 
@@ -1998,10 +2022,16 @@ export(
 BREP geometry. The destination directory must already exist; a missing directory
 is reported explicitly before the writer is called. BREP exports are re-read by
 default and rejected when the exchange file is null or invalid. STEP verification
-also checks solid count, volume, and bounds against a canonical BREP baseline
-(avoiding stale cached bounds on imported objects), and returns the measurements in
-`round_trip_verification`. Set `verify_round_trip=False` only when a downstream
-application must receive a file that FreeCAD cannot read back.
+checks solid count, volume, and bounds against the original in-document Shape,
+not against a BREP-normalized copy of that same export. The diagnostic
+canonicalization is also checked against the original and fails if it changes
+those invariants, so repeated exchange cannot silently rebase the reference.
+Measurements and the explicit `baseline="original_source_shape"` marker are
+returned in `round_trip_verification`. `round_trip_linear_tolerance` admits only
+small bounding-box noise from FreeCAD/OCC serialization (0.01 mm by default);
+it does not rebase the comparison or relax volume/solid-count checks. Set
+`verify_round_trip=False` only when a downstream application must receive a file
+that FreeCAD cannot read back.
 
 ### import
 
@@ -2350,6 +2380,7 @@ capture_shape_checkpoint(
     checkpoint_name="before_holes",
     object_name="Body",
     doc_name="Bracket",
+    round_trip_linear_tolerance=0.01,
 )
 
 compare_shape_checkpoint(
@@ -2358,6 +2389,7 @@ compare_shape_checkpoint(
     doc_name="Bracket",  # optional; defaults to captured document
     volume_tolerance=1e-7,
     linear_tolerance=1e-7,
+    round_trip_linear_tolerance=0.01,
     difference_mode="auto",       # auto | exact | metrics
     exact_face_product_limit=10000,
     timeout_ms=30000,
@@ -2368,13 +2400,14 @@ The report always includes before/after validity, solid/shell/face/edge/vertex
 counts, volume, surface area, bounding boxes and their deltas. Capture serializes
 the original Shape directly, preserving the complete native BREP location graph;
 it does not make a shallow copy, clear Placement, or reconstruct a quaternion.
-Capture verifies the restored topology, mass properties, and placement transform.
-Checkpoint metrics use that restored BREP as the canonical baseline because an
-imported document object can retain a stale cached bounding box. Capture returns
-the original values as `source_reported_metrics` and flags normalization with
-`round_trip_bbox_normalized`; comparison canonicalizes the current Shape through
-the same BREP path before calculating deltas. Exact booleans also use the restored
-BREP. Empty,
+Capture verifies restored topology, mass properties, placement, and every
+bounding-box component. Any mismatch rejects capture; a changed bound can no
+longer be labelled as a successful normalization. The separate default
+round-trip bound tolerance is 0.01 mm to accommodate observed OCCT compound
+serialization noise; it is returned in the report and can be tightened. Checkpoint metrics retain the
+original in-document Shape as the immutable comparison origin. Comparison uses
+the current in-document metrics for deltas and permits the restored BREP only
+for exact booleans after another round-trip invariant check. Empty,
 non-null OCCT Compounds with no topology are discarded rather than reported as
 added or removed regions with infinite bounds. In `auto` mode,
 OCCT computes both `before.cut(after)` and `after.cut(before)` only when the
@@ -2394,6 +2427,20 @@ metric deltas remain available. `volume_tolerance` controls exact
 substitute for exact localization. Checkpoints live only for the current MCP
 server session (up to 32 named baselines) and may be replaced with
 `overwrite=True`.
+
+### Background tool jobs
+
+Use `start_tool_job(tool_name, arguments)` for FreeCAD operations that may
+outlive a client request timeout, then poll `get_tool_job(job_id)`. The job and
+its final MCP result are retained only in the current server session. This
+wrapper applies to every ordinary registered tool, including
+`defeature_faces`; job-control tools cannot recursively submit themselves.
+
+`cancel_tool_job(job_id)` can cancel work only while it is still queued. Once
+FreeCAD/OCCT has entered a main-thread operation, safe hard interruption is not
+available: cancellation is recorded, the response explicitly sets
+`cancellable=false`, and the caller must keep polling. This preserves MCP
+responsiveness without pretending that an in-process OCCT call was stopped.
 
 ### Prompt access fallback
 
@@ -2415,6 +2462,7 @@ validate_parametric_model(
     recompute: bool = True,
     include_sketch_constraints: bool = False,
     required_dimension_names: list[str] | None = None,
+    acceptance_manifest: dict | None = None,
     target: dict | None = None,  # {"kind":"sketch", "name":"SketchName"}
     workflow: str = "native_parametric",  # or imported_brep_edit
     detail_level: str = "summary",  # summary | structure | full
@@ -2436,9 +2484,14 @@ the complete driving list through `required_dimension_names`. Separately check
 every driving and verification dimension by reproducing its source-view context
 and measuring between the same semantic elements with matching dimension
 semantics. Retain expected, observed, tolerance, pass/fail, and tool evidence.
-The validator can verify only identifiers supplied by the caller; it cannot
-discover an omitted dimension, inspect source pixels, or replace the separate
-same-view geometric measurement.
+Store counts, topology, feature presence, material/process constraints, and
+other non-dimensional acceptance criteria in `requirements`; `dimensions` may
+legitimately be empty. The validator can verify only structure and identifiers
+supplied by the caller. Evidence strings, `review_attestation`, and the legacy
+`image_content_reviewed` boolean are not proof of tool execution or image
+semantics. Consequently a structurally complete manifest is reported with
+`verification_scope="caller_attested"`, `machine_verified=false`, and a review
+finding rather than upgrading the model assessment to `healthy`.
 
 Omit `target` for the existing whole-model/final-solid diagnostic. When the
 deliverable is a sketch, pass for example

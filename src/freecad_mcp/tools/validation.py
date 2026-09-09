@@ -53,8 +53,34 @@ class SourceDimensionAcceptance(BaseModel):
     reason: str | None = None
 
 
+class SourceRequirementAcceptance(BaseModel):
+    """One non-dimensional source requirement and its final evidence."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(min_length=1)
+    kind: Literal[
+        "count",
+        "topology",
+        "feature",
+        "material",
+        "process",
+        "other",
+    ]
+    status: Literal["verified", "failed", "source_issue"]
+    source_view_ids: list[str] = Field(default_factory=list)
+    expected: float | int | str | bool | None = None
+    observed: float | int | str | bool | None = None
+    tolerance: float | str | None = None
+    passed: bool | None = None
+    evidence_references: list[str] = Field(default_factory=list)
+    source_evidence: list[str] = Field(default_factory=list)
+    attempted_interpretations: list[str] = Field(default_factory=list)
+    reason: str | None = None
+
+
 class SourceViewAcceptance(BaseModel):
-    """One source view and evidence that its final comparison was reviewed."""
+    """One source view and caller-attested final comparison evidence."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -67,6 +93,9 @@ class SourceViewAcceptance(BaseModel):
     cutting_line_changes_direction: bool = False
     cutting_path: list[list[float]] | None = None
     comparison_image_path: str | None = None
+    review_attestation: str | None = None
+    # Compatibility only. A caller-controlled boolean is never treated as
+    # machine verification and no longer contributes to acceptance.
     image_content_reviewed: bool = False
     visual_observation: str | None = None
     decision: Literal["accept", "rework", "source_issue"]
@@ -79,7 +108,8 @@ class SourceAcceptanceManifest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    dimensions: list[SourceDimensionAcceptance] = Field(min_length=1)
+    dimensions: list[SourceDimensionAcceptance] = Field(default_factory=list)
+    requirements: list[SourceRequirementAcceptance] = Field(default_factory=list)
     views: list[SourceViewAcceptance] = Field(min_length=1)
 
 
@@ -101,7 +131,7 @@ def _acceptance_record(
     }
 
 
-def _assess_source_acceptance(
+def _assess_source_acceptance(  # noqa: PLR0912
     manifest: dict[str, Any] | None,
     *,
     source_evidence_expected: bool,
@@ -115,13 +145,17 @@ def _assess_source_acceptance(
             "driving_dimension_ids": [],
             "counts": {
                 "dimensions": 0,
+                "requirements": 0,
                 "driving": 0,
                 "verification": 0,
                 "source_issue": 0,
                 "views": 0,
             },
             "dimension_records": [],
+            "requirement_records": [],
             "view_records": [],
+            "verification_scope": "not_applicable",
+            "machine_verified": not source_evidence_expected,
             "limitations": [
                 "Manifest completeness is checked only from caller-supplied records."
             ],
@@ -172,6 +206,39 @@ def _assess_source_acceptance(
             )
         )
 
+    requirement_records = []
+    for item in manifest.get("requirements") or []:
+        item_id = item["id"].strip()
+        missing = []
+        referenced_views = _normalized_nonempty(item.get("source_view_ids") or [])
+        if any(view_id not in manifest_view_ids for view_id in referenced_views):
+            missing.append("source_view_record")
+        if item["status"] == "source_issue":
+            if not _normalized_nonempty(item.get("source_evidence") or []):
+                missing.append("source_evidence")
+            if not _normalized_nonempty(item.get("attempted_interpretations") or []):
+                missing.append("attempted_interpretations")
+            if not (item.get("reason") or "").strip():
+                missing.append("reason")
+        else:
+            if item["status"] != "verified":
+                missing.append("status=verified")
+            if item.get("passed") is not True:
+                missing.append("passed=true")
+            for field in ("expected", "observed"):
+                if item.get(field) is None:
+                    missing.append(field)
+            if not _normalized_nonempty(item.get("evidence_references") or []):
+                missing.append("evidence_references")
+        requirement_records.append(
+            _acceptance_record(
+                record_id=item_id,
+                role=item["kind"],
+                complete=not missing,
+                missing=missing,
+            )
+        )
+
     view_records = []
     for item in manifest["views"]:
         view_id = item["view_id"].strip()
@@ -194,8 +261,8 @@ def _assess_source_acceptance(
                 missing.append("candidate_recipe")
             if not item.get("comparison_image_path"):
                 missing.append("comparison_image_path")
-            if item.get("image_content_reviewed") is not True:
-                missing.append("image_content_reviewed=true")
+            if not (item.get("review_attestation") or "").strip():
+                missing.append("review_attestation")
             if not (item.get("visual_observation") or "").strip():
                 missing.append("visual_observation")
 
@@ -219,7 +286,10 @@ def _assess_source_acceptance(
             )
         )
 
-    complete = all(item["complete"] for item in [*dimension_records, *view_records])
+    complete = all(
+        item["complete"]
+        for item in [*dimension_records, *requirement_records, *view_records]
+    )
     return {
         "provided": True,
         "required": True,
@@ -227,14 +297,19 @@ def _assess_source_acceptance(
         "driving_dimension_ids": driving_ids,
         "counts": {
             "dimensions": len(dimension_records),
+            "requirements": len(requirement_records),
             **role_counts,
             "views": len(view_records),
         },
         "dimension_records": dimension_records,
+        "requirement_records": requirement_records,
         "view_records": view_records,
+        "verification_scope": "caller_attested",
+        "machine_verified": False,
         "limitations": [
-            "Manifest coverage and image_content_reviewed are caller attestations; "
-            "the validator does not inspect source pixels or the model's visual reasoning."
+            "Manifest records, evidence references, and review_attestation are "
+            "caller attestations. The validator checks structure but does not inspect "
+            "source pixels, tool-call history, or the model's visual reasoning."
         ],
     }
 
@@ -262,6 +337,7 @@ def _merge_source_acceptance(
             item["id"]
             for item in [
                 *source_acceptance["dimension_records"],
+                *source_acceptance["requirement_records"],
                 *source_acceptance["view_records"],
             ]
             if not item["complete"]
@@ -277,11 +353,25 @@ def _merge_source_acceptance(
                 ),
             }
         )
+    elif source_acceptance["provided"] and not source_acceptance["machine_verified"]:
+        findings.append(
+            {
+                "severity": "warning",
+                "category": "source_acceptance_caller_attested",
+                "object": None,
+                "message": (
+                    "Source manifest is structurally complete, but its image review "
+                    "and evidence provenance are caller attestations and were not "
+                    "machine-verified by the server."
+                ),
+            }
+        )
 
     merged["findings"] = findings
     merged["source_acceptance"] = source_acceptance
     counts = dict(merged.get("counts") or {})
     counts["source_dimensions"] = source_acceptance["counts"]["dimensions"]
+    counts["source_requirements"] = source_acceptance["counts"]["requirements"]
     counts["source_views"] = source_acceptance["counts"]["views"]
     merged["counts"] = counts
 
@@ -426,6 +516,7 @@ def register_validation_tools(
         doc_name: str | None = None,
         recompute: bool = True,
         overwrite: bool = False,
+        round_trip_linear_tolerance: float = 0.01,
     ) -> dict[str, Any]:
         """Capture an in-memory B-rep baseline; example: checkpoint_name="before_holes", object_name="Body". Use compare_shape_checkpoint after the edit.
 
@@ -440,6 +531,8 @@ def register_validation_tools(
             raise ValueError("checkpoint_name must not exceed 80 characters")
         if not object_name.strip():
             raise ValueError("object_name must not be empty")
+        if round_trip_linear_tolerance < 0:
+            raise ValueError("round_trip_linear_tolerance must be non-negative")
         if normalized_name in shape_checkpoints and not overwrite:
             raise ValueError(
                 f"Shape checkpoint already exists: {normalized_name!r}; "
@@ -544,6 +637,10 @@ bbox_errors = [
     for index in range(3)
 ]
 max_bbox_error = max(bbox_errors)
+if max_bbox_error > {round_trip_linear_tolerance!r}:
+    round_trip_errors.append(
+        "bounding_box: max_component_error=%r" % max_bbox_error
+    )
 if round_trip_errors:
     raise ValueError(
         "Checkpoint BREP round-trip changed Shape metrics: "
@@ -553,8 +650,9 @@ _result_ = {{
     "success": True,
     "document": doc.Name,
     "object_name": obj.Name,
-    "metrics": baseline_metrics,
-    "metrics_basis": "brep_round_trip",
+    "metrics": source_metrics,
+    "metrics_basis": "original_source_shape",
+    "canonical_metrics": baseline_metrics,
     "source_reported_metrics": source_metrics,
     "shape_placement": {{
         "base": [
@@ -566,7 +664,8 @@ _result_ = {{
     }},
     "round_trip_verified": True,
     "round_trip_max_bbox_error": max_bbox_error,
-    "round_trip_bbox_normalized": max_bbox_error > 1e-7,
+    "round_trip_linear_tolerance": {round_trip_linear_tolerance!r},
+    "round_trip_bbox_normalized": False,
     "round_trip_max_placement_error": placement_max_error,
     "_brep": brep,
 }}
@@ -585,7 +684,11 @@ _result_ = {{
             "document": payload.get("document"),
             "object_name": payload.get("object_name"),
             "metrics": payload.get("metrics"),
+            "canonical_metrics": payload.get("canonical_metrics"),
             "shape_placement": payload.get("shape_placement"),
+            "round_trip_linear_tolerance": payload.get(
+                "round_trip_linear_tolerance"
+            ),
         }
         payload["checkpoint_name"] = normalized_name
         payload["storage"] = "server_session_memory"
@@ -600,6 +703,7 @@ _result_ = {{
         recompute: bool = True,
         volume_tolerance: float = 1e-7,
         linear_tolerance: float = 1e-7,
+        round_trip_linear_tolerance: float = 0.01,
         difference_mode: Literal["auto", "exact", "metrics"] = "auto",
         exact_face_product_limit: int = 10000,
         timeout_ms: int = 30000,
@@ -619,7 +723,11 @@ _result_ = {{
                 f"Shape checkpoint not found: {normalized_name!r}; "
                 f"available={available}"
             )
-        if volume_tolerance < 0 or linear_tolerance < 0:
+        if (
+            volume_tolerance < 0
+            or linear_tolerance < 0
+            or round_trip_linear_tolerance < 0
+        ):
             raise ValueError("comparison tolerances must be non-negative")
         if exact_face_product_limit < 0:
             raise ValueError("exact_face_product_limit must be non-negative")
@@ -745,31 +853,62 @@ if {recompute!r}:
 obj = doc.getObject({target_object!r})
 if obj is None:
     raise ValueError(f"Object not found: {target_object!r}")
-after = getattr(obj, "Shape", None)
-if after is None or after.isNull():
+after_source = getattr(obj, "Shape", None)
+if after_source is None or after_source.isNull():
     raise ValueError(f"Object has no usable Shape: {target_object!r}")
-after_brep = after.exportBrepToString()
+after_metrics = _metrics(after_source)
+after_brep = after_source.exportBrepToString()
 canonical_after = Part.Shape()
 canonical_after.importBrepFromString(after_brep)
 if canonical_after.isNull() or not canonical_after.isValid():
     raise ValueError("Current Shape could not be canonicalized through BREP")
-after = canonical_after
+canonical_after_metrics = _metrics(canonical_after)
 before = Part.Shape()
 before.importBrepFromString({snapshot["brep"]!r})
 before_metrics = {snapshot["metrics"]!r}
-after_metrics = _metrics(after)
 face_product = before_metrics["face_count"] * after_metrics["face_count"]
 requested_mode = {difference_mode!r}
 run_exact = requested_mode == "exact" or (
     requested_mode == "auto" and face_product <= {exact_face_product_limit!r}
 )
 
+round_trip_errors = []
+for name in ("shape_type", "solid_count", "shell_count", "face_count", "edge_count", "vertex_count", "valid"):
+    if after_metrics[name] != canonical_after_metrics[name]:
+        round_trip_errors.append(
+            "%s: source=%r restored=%r" % (
+                name,
+                after_metrics[name],
+                canonical_after_metrics[name],
+            )
+        )
+for name in ("volume", "area"):
+    tolerance = max(1e-7, 1e-11 * max(abs(after_metrics[name]), abs(canonical_after_metrics[name])))
+    if abs(after_metrics[name] - canonical_after_metrics[name]) > tolerance:
+        round_trip_errors.append(
+            "%s: source=%r restored=%r" % (
+                name,
+                after_metrics[name],
+                canonical_after_metrics[name],
+            )
+        )
+current_bbox_error = max(
+    abs(after_metrics["bounding_box"][key][index] - canonical_after_metrics["bounding_box"][key][index])
+    for key in ("min", "max", "size")
+    for index in range(3)
+)
+if current_bbox_error > {round_trip_linear_tolerance!r}:
+    round_trip_errors.append(
+        "bounding_box: max_component_error=%r" % current_bbox_error
+    )
+round_trip_verified = not round_trip_errors
+
 boolean_error = None
 skip_reason = None
-if run_exact:
+if run_exact and round_trip_verified:
     try:
-        removed = before.cut(after)
-        added = after.cut(before)
+        removed = before.cut(canonical_after)
+        added = canonical_after.cut(before)
         removed = _safe_refine_difference(removed)
         added = _safe_refine_difference(added)
         removed_regions = _difference_regions(removed)
@@ -787,7 +926,10 @@ if run_exact:
 else:
     removed_regions = []
     added_regions = []
-    if requested_mode == "metrics":
+    if not round_trip_verified:
+        skip_reason = "current BREP round-trip is not metric-preserving"
+        boolean_error = "; ".join(round_trip_errors)
+    elif requested_mode == "metrics":
         skip_reason = "difference_mode_metrics"
     else:
         skip_reason = "face_product %s exceeds exact_face_product_limit {exact_face_product_limit!r}" % face_product
@@ -833,12 +975,20 @@ _result_ = {{
     "object_name": obj.Name,
     "before": before_metrics,
     "after": after_metrics,
+    "canonical_after": canonical_after_metrics,
     "delta": {{**deltas, "bounding_box": bbox_delta}},
     "invariants": {{
         "valid_before": before_metrics["valid"],
         "valid_after": after_metrics["valid"],
         "solid_count_unchanged": deltas["solid_count"] == 0,
         "bounding_box_unchanged": not bbox_changed,
+    }},
+    "round_trip_verification": {{
+        "verified": round_trip_verified,
+        "max_bbox_error": current_bbox_error,
+        "linear_tolerance": {round_trip_linear_tolerance!r},
+        "errors": round_trip_errors,
+        "comparison_metrics_basis": "original_source_shapes",
     }},
     "difference": {{
         "method": (
@@ -1166,7 +1316,7 @@ else:
         }
 
     @mcp.tool()
-    async def validate_parametric_model(
+    async def validate_parametric_model(  # noqa: PLR0912
         doc_name: str | None = None,
         recompute: bool = True,
         include_sketch_constraints: bool = False,
@@ -1220,8 +1370,11 @@ else:
                 objects do not count as usage.
             acceptance_manifest: Complete final source-evidence manifest. Every
                 driving and verification dimension must include same-view semantic
-                expected/observed/pass evidence; every source view must include a
-                reviewed ``compare_images`` artifact and concrete visual observation.
+                expected/observed/pass evidence. Put counts, topology, features,
+                material, and process criteria in ``requirements``; dimensions may
+                be empty. Every source view must include a ``compare_images``
+                artifact, concrete visual observation, and review attestation.
+                These records remain caller-attested rather than machine-verified.
                 ``source_issue`` needs source evidence, attempted interpretations,
                 and a reason. For a cutting line that changes direction, the view
                 recipe must use ``slice_shape`` ``section_path`` mode with aligned
@@ -1290,6 +1443,26 @@ else:
             if len(dimension_ids) != len(set(dimension_ids)):
                 raise ValueError(
                     "acceptance_manifest contains duplicate dimension identifiers"
+                )
+            requirement_ids = []
+            for item in normalized_acceptance_manifest["requirements"]:
+                item["id"] = item["id"].strip()
+                item["source_view_ids"] = [
+                    view_id.strip() for view_id in item["source_view_ids"]
+                ]
+                requirement_ids.append(item["id"])
+            if len(requirement_ids) != len(set(requirement_ids)):
+                raise ValueError(
+                    "acceptance_manifest contains duplicate requirement identifiers"
+                )
+            duplicate_cross_kind_ids = sorted(
+                set(dimension_ids).intersection(requirement_ids)
+            )
+            if duplicate_cross_kind_ids:
+                raise ValueError(
+                    "acceptance_manifest identifiers must be unique across "
+                    "dimensions and requirements: "
+                    + ", ".join(duplicate_cross_kind_ids)
                 )
             view_ids = []
             for item in normalized_acceptance_manifest["views"]:

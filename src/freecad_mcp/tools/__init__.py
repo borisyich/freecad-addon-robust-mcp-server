@@ -15,6 +15,7 @@ Tools are organized by category:
 - images: Local image delivery and comparison tools
 - measurements: Tolerance-aware geometric evidence
 - prompt_access: Prompt fallback for clients without native prompt controls
+- jobs: Session-local asynchronous wrappers for long-running tools
 - checkpoints: Deterministic ACT-OBSERVE-REACT workflow gates
 - brep: General-purpose imported/static BREP surgery and repair
 - view: View and screenshot tools
@@ -31,6 +32,7 @@ from freecad_mcp.tools.draft import register_draft_tools
 from freecad_mcp.tools.execution import register_execution_tools
 from freecad_mcp.tools.export import register_export_tools
 from freecad_mcp.tools.images import register_image_tools
+from freecad_mcp.tools.jobs import register_job_tools
 from freecad_mcp.tools.macros import register_macro_tools
 from freecad_mcp.tools.measurements import register_measurement_tools
 from freecad_mcp.tools.objects import register_object_tools
@@ -50,6 +52,7 @@ __all__ = [
     "register_execution_tools",
     "register_export_tools",
     "register_image_tools",
+    "register_job_tools",
     "register_macro_tools",
     "register_measurement_tools",
     "register_object_tools",
@@ -85,3 +88,4 @@ def register_all_tools(mcp: Any, get_bridge_func: Callable[[], Awaitable[Any]]) 
     register_image_tools(mcp)
     register_view_tools(mcp, get_bridge_func)
     register_validation_tools(mcp, get_bridge_func)
+    register_job_tools(mcp)

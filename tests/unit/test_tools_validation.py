@@ -111,15 +111,18 @@ class TestValidationTools:
         capture_code = mock_bridge.execute_python.await_args_list[0].args[0]
         assert "brep = shape.exportBrepToString()" in capture_code
         assert "baseline.importBrepFromString(brep)" in capture_code
-        assert '"metrics": baseline_metrics' in capture_code
-        assert '"metrics_basis": "brep_round_trip"' in capture_code
-        assert '"round_trip_bbox_normalized": max_bbox_error > 1e-7' in capture_code
+        assert '"metrics": source_metrics' in capture_code
+        assert '"metrics_basis": "original_source_shape"' in capture_code
+        assert '"canonical_metrics": baseline_metrics' in capture_code
+        assert '"round_trip_bbox_normalized": False' in capture_code
+        assert '"bounding_box: max_component_error=%r"' in capture_code
         assert "canonical_after.importBrepFromString(after_brep)" in compare_code
         assert "shape_for_export.Placement" not in capture_code
         assert "before.Placement =" not in compare_code
         assert "before_metrics = {'valid': True, 'volume': 1000.0}" in compare_code
-        assert "before.cut(after)" in compare_code
-        assert "after.cut(before)" in compare_code
+        assert "before.cut(canonical_after)" in compare_code
+        assert "canonical_after.cut(before)" in compare_code
+        assert '"comparison_metrics_basis": "original_source_shapes"' in compare_code
         assert "if not _has_topology(shape)" in compare_code
         assert "def _difference_issues(" in compare_code
         assert 'region["valid"]' in compare_code
@@ -774,6 +777,7 @@ class TestValidationTools:
                     "candidate_reference": "final_top.png",
                     "candidate_recipe": {"camera": "Top"},
                     "comparison_image_path": "compare_top.png",
+                    "review_attestation": "Reviewed in the final top-view comparison.",
                     "image_content_reviewed": True,
                     "visual_observation": "Silhouette and hole positions agree.",
                     "decision": "accept",
@@ -786,6 +790,7 @@ class TestValidationTools:
                     "candidate_reference": "final_side.png",
                     "candidate_recipe": {"camera": "Left"},
                     "comparison_image_path": "compare_side.png",
+                    "review_attestation": "Reviewed in the final side-view comparison.",
                     "image_content_reviewed": True,
                     "visual_observation": "Underside step agrees.",
                     "decision": "accept",
@@ -797,10 +802,15 @@ class TestValidationTools:
             acceptance_manifest=manifest
         )
 
-        assert result["assessment"] == "healthy"
+        assert result["assessment"] == "review_recommended"
         assert result["source_acceptance"]["complete"] is True
+        assert result["source_acceptance"]["machine_verified"] is False
+        assert result["findings"][-1]["category"] == (
+            "source_acceptance_caller_attested"
+        )
         assert result["source_acceptance"]["counts"] == {
             "dimensions": 2,
+            "requirements": 0,
             "driving": 1,
             "verification": 1,
             "source_issue": 0,
@@ -875,7 +885,7 @@ class TestValidationTools:
         dimension = result["source_acceptance"]["dimension_records"][0]
         assert "status=verified" in dimension["missing_or_failed"]
         view = result["source_acceptance"]["view_records"][0]
-        assert "image_content_reviewed=true" in view["missing_or_failed"]
+        assert "review_attestation" in view["missing_or_failed"]
         assert "candidate_recipe.mode=section_path" in view["missing_or_failed"]
 
     @pytest.mark.asyncio
@@ -909,6 +919,66 @@ class TestValidationTools:
         assert result["findings"][0]["category"] == (
             "source_acceptance_manifest_missing"
         )
+
+    @pytest.mark.asyncio
+    async def test_manifest_separates_non_dimensional_requirements_from_dimensions(
+        self, register_tools, mock_bridge
+    ):
+        mock_bridge.execute_python = AsyncMock(
+            return_value=ExecutionResult(
+                success=True,
+                result={
+                    "informational": True,
+                    "assessment": "healthy",
+                    "summary": "Structurally healthy.",
+                    "counts": {},
+                    "findings": [],
+                    "limitations": [],
+                },
+                stdout="",
+                stderr="",
+                execution_time_ms=1.0,
+            )
+        )
+        manifest = {
+            "dimensions": [],
+            "requirements": [
+                {
+                    "id": "blade_count",
+                    "kind": "count",
+                    "status": "verified",
+                    "source_view_ids": ["V_ISO"],
+                    "expected": 5,
+                    "observed": 5,
+                    "passed": True,
+                    "evidence_references": ["detect_rotational_pattern result"],
+                }
+            ],
+            "views": [
+                {
+                    "view_id": "V_ISO",
+                    "drawing_role": "pictorial",
+                    "status": "verified",
+                    "source_reference": "source.png",
+                    "candidate_reference": "candidate.png",
+                    "candidate_recipe": {"camera": "Isometric"},
+                    "comparison_image_path": "compare.png",
+                    "review_attestation": "Reviewed side by side.",
+                    "visual_observation": "Five repeated blades are visible.",
+                    "decision": "accept",
+                }
+            ],
+        }
+
+        result = await register_tools["validate_parametric_model"](
+            acceptance_manifest=manifest
+        )
+
+        assert result["source_acceptance"]["complete"] is True
+        assert result["source_acceptance"]["counts"]["dimensions"] == 0
+        assert result["source_acceptance"]["counts"]["requirements"] == 1
+        assert result["source_acceptance"]["driving_dimension_ids"] == []
+        assert result["assessment"] == "review_recommended"
 
     @pytest.mark.asyncio
     async def test_validate_parametric_model_rejects_manifest_driving_id_mismatch(

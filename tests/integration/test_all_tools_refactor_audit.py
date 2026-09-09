@@ -29,6 +29,9 @@ TOOL_SCENARIOS: dict[str, str] = {
     # Checkpoint/execution/document lifecycle.
     "evaluate_model_checkpoint": "contracts",
     "get_freecad_prompt": "contracts",
+    "start_tool_job": "contracts",
+    "get_tool_job": "contracts",
+    "cancel_tool_job": "contracts",
     "execute_python": "contracts",
     "get_freecad_version": "contracts",
     "get_connection_status": "contracts",
@@ -394,12 +397,12 @@ _result_ = True
     )
 
 
-def test_runtime_registry_has_explicit_145_tool_coverage() -> None:
+def test_runtime_registry_has_explicit_148_tool_coverage() -> None:
     async def registered() -> set[str]:
         return {tool.name for tool in await production_mcp.list_tools()}
 
     actual = asyncio.run(registered())
-    assert len(actual) == 145
+    assert len(actual) == 148
     assert set(TOOL_SCENARIOS) == actual
 
 
@@ -692,6 +695,7 @@ async def test_generic_part_object_workflow(live_tools: dict[str, Any]) -> None:
         object1_name="P_box_copy",
         object2_name="P_cylinder",
         result_name="BoolCut",
+        expected_solid_count=None,
         doc_name=doc,
     )
     await _call(
@@ -1225,7 +1229,11 @@ async def test_spreadsheet_macro_export_image_gui_and_validation_workflow(
         tools,
         "safe_execute",
         doc_name=doc,
-        code='obj = doc.getObject("Box"); obj.Length = obj.Length.Value + 1; doc.recompute(); _result_ = True',
+        # Length is expression-bound to Params.BoxLength above, so mutate an
+        # unbound dimension. The former Length assignment was restored by
+        # recompute and only appeared changed because checkpoint BREP
+        # normalization introduced a false-positive bounding-box difference.
+        code='obj = doc.getObject("Box"); obj.Width = obj.Width.Value + 1; doc.recompute(); _result_ = True',
     )
     difference = await _call(
         tools,

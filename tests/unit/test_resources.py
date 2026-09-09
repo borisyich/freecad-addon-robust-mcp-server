@@ -433,7 +433,8 @@ class TestFreecadResources:
         assert "fixed/moving panels" in result
         assert "required_dimension_names" in result
         assert "acceptance_manifest" in result
-        assert "image_content_reviewed=true" in result
+        assert "review_attestation" in result
+        assert "caller-attested" in result
         assert "compare_images" in result
         assert "every record in the source view manifest" in result
         assert "source_issue" in result

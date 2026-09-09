@@ -85,11 +85,17 @@ The manifest connects that structural trace to dimension/view acceptance. Every
 recorded source-view/section/detail context, the same semantic elements, and the
 same measurement semantics. Retain expected, observed, tolerance, pass/fail, and
 tool evidence. Every view must retain its candidate recipe, comparison artifact,
-`image_content_reviewed=true`, concrete visual observation, and decision. Measure
+`review_attestation`, concrete visual observation, and decision. These are
+caller attestations, not server-verified tool history or image semantics. Measure
 the finished model between the same semantic elements using the same
 dimension semantics. Retain expected, observed, tolerance, pass/fail, and tool
 evidence. A parameter path that drives the model does not prove that the final
 geometry matches the source relationship.
+
+Keep non-dimensional criteria—counts, topology, feature presence, material, and
+process—in `acceptance_manifest.requirements`. An empty `dimensions` list is
+valid when the source contains no physical dimensions; never relabel a count as
+a dimension to satisfy the schema.
 
 `source_issue` is an exceptional source-data classification, not a convenience
 bucket. It is allowed only with concrete source evidence, attempted

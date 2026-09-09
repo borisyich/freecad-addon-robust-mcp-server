@@ -463,7 +463,7 @@ class TestStdioProtocolCleanliness:
 
         # Start the MCP server process
         # Use a non-existent FreeCAD host so it won't actually connect
-        proc = subprocess.Popen(  # noqa: S603
+        proc = subprocess.Popen(
             [
                 sys.executable,
                 "-m",
@@ -543,7 +543,7 @@ class TestStdioProtocolCleanliness:
         import os
         import subprocess
 
-        proc = subprocess.Popen(  # noqa: S603
+        proc = subprocess.Popen(
             [
                 sys.executable,
                 "-m",
@@ -797,5 +797,6 @@ class TestMcpInstructions:
         # discovery on four PartDesign tools add focused invariant evidence. The
         # bounded face-neighborhood contract adds one compact topology tool.
         # Eight general BREP surgery contracts add explicit repair/pattern
-        # parameters while keeping the complete registry below 130 KB.
-        assert payload_bytes < 130_000
+        # parameters plus three generic job-control contracts while keeping the
+        # complete registry below 135 KB.
+        assert payload_bytes < 135_000

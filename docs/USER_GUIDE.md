@@ -460,9 +460,17 @@ metric; use formal checkpoints only when the task benefits from them.
 - Around direct edits, call `capture_shape_checkpoint` before mutation and `compare_shape_checkpoint` after it. The comparison always reports solid/topology counts, validity, and bounding-box/volume/area deltas. Its default `difference_mode="auto"` localizes added/removed regions with OCCT only below the configured face-product complexity limit; use `metrics` for imported B-reps when no booleans are wanted, or `exact` with an explicit timeout when localization is essential.
 - Shape checkpoints serialize the original Shape directly so OCCT preserves the
   full native location graph. Capture verifies topology, mass properties, and the
-  placement transform after BREP import. Both baseline and current metrics use
-  canonical BREP-round-trip geometry; stale imported bounds are preserved only
-  as diagnostics and explicitly marked as normalized.
+  placement transform after BREP import, including every bounding-box component.
+  A mismatch beyond the explicit 0.01 mm round-trip tolerance rejects capture
+  instead of silently normalizing the baseline.
+  Baseline and current metric deltas therefore use the original in-document
+  Shapes; restored BREP is used only for exact differences after its own
+  invariant check.
+- For operations that may exceed a client deadline, call
+  `start_tool_job(tool_name, arguments)` and poll `get_tool_job`. Queued jobs can
+  be cancelled. A FreeCAD/OCCT call already running on the main thread cannot be
+  interrupted safely; `cancel_tool_job` reports this explicitly and polling
+  remains available without holding the original MCP request open.
 - For imported/static B-reps, `move_faces(method="feature_rebuild")` is the
   topology-aware path for recognized local planar boundaries and transition
   chains. Inspect `performed_method`; `prism_boolean_fallback` is only a sharp

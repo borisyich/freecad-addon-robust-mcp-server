@@ -81,6 +81,11 @@ class TestExportTools:
         assert "Part.makeCompound" in code
         assert "Part.read(output_path)" in code
         assert "canonical_source.importBrepFromString" in code
+        assert "source_volume = float(shape.Volume)" in code
+        assert "source_box = shape.BoundBox" in code
+        assert "bbox_tolerance = max(\n        0.01," in code
+        assert '"baseline": "original_source_shape"' in code
+        assert "Source BREP normalization changed bounds" in code
         assert "round_trip.isValid()" in code
         assert "Output directory does not exist" in code
         assert "MeshPart.meshFromShape" not in code
@@ -154,6 +159,20 @@ class TestExportTools:
         with pytest.raises(ValueError, match="mesh_tolerance must be positive"):
             await register_tools["export"](
                 file_format="stl", file_path="/tmp/part.stl", mesh_tolerance=0
+            )
+        mock_bridge.execute_python.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_export_rejects_negative_round_trip_tolerance_before_bridge(
+        self, register_tools, mock_bridge
+    ):
+        with pytest.raises(
+            ValueError, match="round_trip_linear_tolerance must be non-negative"
+        ):
+            await register_tools["export"](
+                file_format="step",
+                file_path="/tmp/part.step",
+                round_trip_linear_tolerance=-0.01,
             )
         mock_bridge.execute_python.assert_not_awaited()
 

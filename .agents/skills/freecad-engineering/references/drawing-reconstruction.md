@@ -249,10 +249,12 @@ linear, polar, mirrored, or multi-transform pattern, compare the single seed
 element first; repeating an unverified seed multiplies its error.
 
 For each completed view comparison, retain the comparison path,
-`image_content_reviewed=true`, a concrete visual observation, and the
+`review_attestation`, a concrete visual observation, and the
 accept/rework decision. These records belong in the final
 `acceptance_manifest`; creating comparison artifacts without reviewing their
-image content leaves the view incomplete.
+image content leaves the view incomplete. The record proves only what the caller
+attests; the server does not independently inspect the pixels or tool-call
+history and must not label it machine-verified.
 
 Before final acceptance, iterate through **every view-manifest record** and
 reproduce its candidate view from the finished model. Compare every pair,

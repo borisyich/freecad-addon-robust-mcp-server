@@ -560,8 +560,9 @@ The comparison is incomplete until its returned MCP `ImageContent` has been
 surfaced to and inspected by the vision model. When orchestrating multiple calls,
 forward image blocks; never retain only text/metadata. Saving a comparison file
 or receiving its structured metadata is not visual review. Record the comparison
-path, `image_content_reviewed=true`, a concrete visual observation, and the
-accept/rework decision in the view manifest.
+path, a concrete `review_attestation`, the visual observation, and the
+accept/rework decision in the view manifest. This is an audit record, not
+server-verified image semantics; the validator cannot prove pixel inspection.
 
 Before final acceptance, however, the rule is exhaustive: iterate through
 **every record in the source view manifest**, reproduce its candidate
@@ -612,6 +613,26 @@ For imported STEP/static B-reps this pattern is mandatory and stricter: capture
 a shape checkpoint immediately before mutation and compare it afterwards.
 Whole-model volume and bounds do not replace neighborhood comparison; verify
 both the changed region and nearby regions expected to remain unchanged.
+
+### Repeated-instance seed selection
+
+Before replacing, repairing, or repatterning repeated geometry, establish the
+seed from evidence across the candidate population. This applies to blades,
+teeth, lugs, bosses, holes, pockets, ribs, tabs, and any repeated feature.
+
+1. Inventory every viable instance and compare validity, volume/area, topology
+   signature, placement/spacing, and local neighborhood/transition structure.
+2. Identify the majority-consistent group and treat outliers as possibly damaged
+   or incompletely extracted. A majority group narrows the candidates; it does
+   not prove that any one member is intact.
+3. Inspect at least one candidate from the consistent group against the source
+   views and attachment geometry. Record why it is representative.
+4. Never select a seed from generated `Name`, component index, list order, or a
+   single isolated screenshot. If no candidate is supported, reconstruct the
+   common geometry instead of multiplying an arbitrary instance.
+5. For an unfused pattern, verify pre-refinement volume against
+   `seed volume × occurrence count`. Reject or fall back when refinement or
+   healing exceeds the declared geometry-preservation tolerances.
 
 ### Native editable history
 
@@ -724,6 +745,13 @@ After a major feature or any suspicious result, use the smallest relevant check:
 - screenshots/crops for visual correspondence;
 - `evaluate_model_checkpoint` only when a formal discrepancy ledger is useful.
 
+For potentially long imported-BREP or OCCT operations, use
+`start_tool_job(tool_name, arguments)` and poll `get_tool_job` instead of holding
+one MCP request open. Set the wrapped tool's own `timeout_ms` for the expected
+complexity. `cancel_tool_job` can discard queued work, but an OCCT call already
+running in FreeCAD's main thread is not safely interruptible; report and poll
+that state rather than claiming it was cancelled.
+
 Do not continue blindly after an invalid shape, implausible before/after volume ratio, ineffective cut, wrong Body Tip, unexpected solid count, disconnected additive feature, or clearly wrong view.
 Undo or repair the most recent causal feature rather than rebuilding in a new
 hidden document.
@@ -800,6 +828,9 @@ Before reporting completion:
   exceptional `source_issue` to contain concrete evidence; for a
   sketch-only
   deliverable also pass `target={"kind":"sketch","name":...}`;
+- keep counts, topology, feature presence, material, process, and other
+  non-dimensional criteria in `acceptance_manifest.requirements`; never invent
+  a physical dimension merely to make `dimensions` non-empty;
 - inspect each Spreadsheet alias: determine why it exists, connect it to the
   feature tree if required, or delete it if redundant;
 - treat 0 DoF as necessary solver evidence only: also verify outer/hole nesting,
@@ -808,6 +839,9 @@ Before reporting completion:
 - call `validate_parametric_model` and report its findings accurately. Do not
   finish while it reports missing/unlinked required dimensions or unused
   Spreadsheet parameters.
+- report source-manifest verification as caller-attested unless an independent
+  verifier checked it; structural completeness is not machine proof of image
+  review or tool-call provenance;
 - Never bulk-delete or recreate an already accepted sketch constraint graph
   solely to turn a validator status green. Diagnose the existing dependency
   path and change the semantic owner only when the model itself is wrong. If

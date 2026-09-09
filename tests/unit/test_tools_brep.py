@@ -201,6 +201,13 @@ async def test_extract_feature_material_supports_fuzzy_cut_and_refine_fallback(
     assert "invalid_component_indices" in code
     assert "Explicitly requested components are invalid" in code
     assert '"total_valid_component_volume"' in code
+    assert '"representative_analysis"' in code
+    assert '"candidate_metrics"' in code
+    assert '"volume_spread_relative"' in code
+    assert '"auto_selected": None' in code
+    assert '"selection_required": True' in code
+    assert '"largest_equal_topology_group"' in code
+    assert "do not choose" in code
     assert "key=sort_keys['volume']" in code
     assert "selected = selected[:1]" in code
     assert "component_shape = refined" in code
@@ -234,3 +241,65 @@ async def test_polar_pattern_uses_single_multi_fuse_when_no_fuzzy_tolerance(
     assert 'hasattr(copies[0], "multiFuse")' in code
     assert "copies[0].multiFuse(copies[1:])" in code
     assert 'fuse_strategy = "multi_fuse"' in code
+
+
+@pytest.mark.asyncio
+async def test_pattern_and_healing_guard_geometry_before_commit(brep_tools):
+    tools, bridge = brep_tools
+    bridge.execute_python.return_value = _success({"name": "Guarded"})
+
+    await tools["polar_pattern_shape"](
+        object_name="Blade", occurrences=5, refine=True
+    )
+    pattern_code = bridge.execute_python.call_args.args[0]
+    assert "pattern_expected_volume = float(source_shape.Volume) * 5" in pattern_code
+    assert "Unfused polar pattern changed the sum of copy volumes" in pattern_code
+    assert "_brep_geometry_preservation(" in pattern_code
+    assert pattern_code.index("refine_geometry_guard") < pattern_code.index(
+        "doc.commitTransaction()"
+    )
+    assert '"pattern_volume_delta"' in pattern_code
+
+    await tools["heal_shape"](object_name="Imported", refine=True)
+    heal_code = bridge.execute_python.call_args.args[0]
+    assert "Shape healing rejected by geometry-preservation guard" in heal_code
+    assert "healing_geometry_guard" in heal_code
+    assert heal_code.index("healing_geometry_guard") < heal_code.index(
+        "doc.addObject"
+    )
+
+
+def test_geometry_preservation_runtime_rejects_material_drift():
+    from freecad_mcp.tools.brep import _GEOMETRY_PRESERVATION_RUNTIME
+
+    class Vector:
+        def __init__(self, x, y, z):
+            self.x, self.y, self.z = x, y, z
+
+        def __sub__(self, other):
+            return Vector(self.x - other.x, self.y - other.y, self.z - other.z)
+
+        @property
+        def Length(self):
+            return (self.x**2 + self.y**2 + self.z**2) ** 0.5
+
+    class Box:
+        XMin = YMin = ZMin = 0.0
+        XMax = YMax = ZMax = 10.0
+        XLength = YLength = ZLength = 10.0
+
+    class Shape:
+        def __init__(self, volume):
+            self.Volume = volume
+            self.BoundBox = Box()
+            self.CenterOfMass = Vector(5.0, 5.0, 5.0)
+            self.Solids = [object()]
+
+    namespace = {}
+    exec(_GEOMETRY_PRESERVATION_RUNTIME, namespace)  # noqa: S102
+    report = namespace["_brep_geometry_preservation"](
+        Shape(268377.6), Shape(259465.3), 1e-4, 1e-7, 1e-6
+    )
+
+    assert report["within_tolerance"] is False
+    assert any("volume drift" in issue for issue in report["issues"])

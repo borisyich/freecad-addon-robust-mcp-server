@@ -83,7 +83,7 @@ An [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server that 
 
 ## Features
 
-- **145 MCP Tools**: Compact CAD operations including primitives, PartDesign, measurements, booleans, and export
+- **148 MCP Tools**: Compact CAD operations including primitives, PartDesign, measurements, booleans, jobs, and export
 - **Multiple Connection Modes**: XML-RPC (recommended), JSON-RPC socket, or embedded
 - **GUI & Headless Support**: Full modeling in headless mode, plus screenshots/colors in GUI mode
 - **Macro Development**: Create, edit, run, and template FreeCAD macros via MCP
@@ -348,7 +348,7 @@ FREECAD_MODE=embedded freecad-mcp
 
 ### Available Tools
 
-The server currently registers **145 MCP tools**. The tables below list common tools rather than duplicating the exact inventory. See the generated [Tools Overview](docs/guide/tools.md) or the MCP client's discovered tool list for the authoritative inventory; [MCP Tools Reference](docs/MCP_TOOLS_REFERENCE.md) provides detailed examples for core tools, while `freecad://capabilities` is a curated runtime overview. Tools marked with **GUI** require FreeCAD to be running in GUI mode; they return a structured error in headless mode.
+The server currently registers **148 MCP tools**. The tables below list common tools rather than duplicating the exact inventory. See the generated [Tools Overview](docs/guide/tools.md) or the MCP client's discovered tool list for the authoritative inventory; [MCP Tools Reference](docs/MCP_TOOLS_REFERENCE.md) provides detailed examples for core tools, while `freecad://capabilities` is a curated runtime overview. Tools marked with **GUI** require FreeCAD to be running in GUI mode; they return a structured error in headless mode.
 
 #### Execution & Debugging (5 tools)
 
@@ -404,12 +404,12 @@ The server currently registers **145 MCP tools**. The tables below list common t
 | ---- | ----------- | ---- |
 | `group_feature_faces` | Group selected faces into connected features | All |
 | `detect_rotational_pattern` | Detect equal angular spacing of face groups | All |
-| `defeature_faces` | Remove faces and reject raw defeaturing no-ops before refinement | All |
-| `extract_feature_material` | Recover valid material/void solids from imperfect Boolean containers with semantic filters | All |
+| `defeature_faces` | Remove faces; reject no-ops and geometry-changing refinement | All |
+| `extract_feature_material` | Recover valid material/void solids with guarded refinement and representative-candidate evidence | All |
 | `sew_shell` | Sew object faces into a validated shell | All |
-| `heal_shape` | Fix tolerances and refine a Shape | All |
-| `make_solid` | Convert closed shells into validated solids | All |
-| `polar_pattern_shape` | Pattern exact Shapes with optional optimized controlled fuse | All |
+| `heal_shape` | Fix tolerances with mass-property/bounds drift guards | All |
+| `make_solid` | Convert closed shells with guarded refinement | All |
+| `polar_pattern_shape` | Pattern exact Shapes with copy-volume and refinement guards | All |
 
 #### PartDesign - Sketching and Core Features (14 common tools)
 
@@ -505,6 +505,11 @@ between the same semantic elements in its reproduced source-view context.
 `compare_images` is required for feature-relevant views after major features,
 before a pattern multiplies a seed element, and exhaustively for every source
 view before final acceptance.
+Counts, topology, material/process constraints, and other non-dimensional
+requirements belong in `acceptance_manifest.requirements`, not in
+`dimensions`. Manifest evidence and visual-review fields are caller
+attestations: a structurally complete manifest therefore yields
+`review_recommended`, never machine-verified drawing acceptance.
 
 After any model creation or geometry change, call `validate_parametric_model`
 immediately before the final response and summarize the actual Bodies, Tips,
@@ -542,11 +547,19 @@ endpoints, radius, arc side, datum, and the dimension chain are rechecked.
 | --- | --- | --- |
 | `validate_object` | Check one object's shape and FreeCAD state | All |
 | `validate_document` | Check geometric health across a document | All |
-| `capture_shape_checkpoint` | Capture a read-only canonical BREP-round-trip baseline | All |
-| `compare_shape_checkpoint` | Canonicalize current geometry and report metric/exact Shape deltas | All |
+| `capture_shape_checkpoint` | Capture the original source metrics and reject non-preserving BREP serialization | All |
+| `compare_shape_checkpoint` | Compare original-source metrics and use canonical BREP only for verified exact differences | All |
 | `validate_parametric_model` | Compact final report; paged/expanded parametric diagnostics on request | All |
 | `undo_if_invalid` | Undo after invalid document state | All |
 | `safe_execute` | Run Python with optional validation and rollback | All |
+
+#### Background jobs (3 tools)
+
+| Tool | Description | Mode |
+| --- | --- | --- |
+| `start_tool_job` | Start any ordinary MCP tool without holding the client request open | Both |
+| `get_tool_job` | Poll state and retrieve a completed result | Both |
+| `cancel_tool_job` | Cancel queued work or report running OCCT work as non-interruptible | Both |
 
 #### History (1 tool)
 

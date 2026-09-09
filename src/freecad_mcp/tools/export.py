@@ -56,6 +56,7 @@ def _build_brep_export_code(
     object_names: list[str] | None,
     doc_name: str | None,
     verify_round_trip: bool,
+    round_trip_linear_tolerance: float,
 ) -> str:
     """Build STEP or IGES export code."""
     export_method = "exportStep" if file_format == "step" else "exportIges"
@@ -85,10 +86,45 @@ if not os.path.isfile(output_path) or os.path.getsize(output_path) <= 0:
 
 verification = {{"requested": {verify_round_trip!r}, "passed": None}}
 if {verify_round_trip!r}:
+    source_solid_count = len(shape.Solids)
+    source_volume = float(shape.Volume)
+    source_box = shape.BoundBox
+    volume_tolerance = max(1e-7, abs(source_volume) * 1e-9)
+    bbox_tolerance = max(
+        {round_trip_linear_tolerance!r},
+        max(source_box.XLength, source_box.YLength, source_box.ZLength, 1.0) * 1e-9,
+    )
     canonical_source = Part.Shape()
     canonical_source.importBrepFromString(shape.exportBrepToString())
     if canonical_source.isNull() or not canonical_source.isValid():
         raise ValueError("Source Shape could not be canonicalized through BREP")
+    canonical_volume_error = abs(float(canonical_source.Volume) - source_volume)
+    canonical_box = canonical_source.BoundBox
+    canonical_bbox_error = max(
+        abs(float(left) - float(right))
+        for left, right in zip(
+            (
+                source_box.XMin, source_box.YMin, source_box.ZMin,
+                source_box.XMax, source_box.YMax, source_box.ZMax,
+            ),
+            (
+                canonical_box.XMin, canonical_box.YMin, canonical_box.ZMin,
+                canonical_box.XMax, canonical_box.YMax, canonical_box.ZMax,
+            ),
+        )
+    )
+    if len(canonical_source.Solids) != source_solid_count:
+        raise ValueError("Source BREP normalization changed solid count")
+    if canonical_volume_error > volume_tolerance:
+        raise ValueError(
+            f"Source BREP normalization changed volume by {{canonical_volume_error}} "
+            f"(tolerance {{volume_tolerance}})"
+        )
+    if canonical_bbox_error > bbox_tolerance:
+        raise ValueError(
+            f"Source BREP normalization changed bounds by {{canonical_bbox_error}} "
+            f"(tolerance {{bbox_tolerance}})"
+        )
     round_trip = Part.read(output_path)
     if round_trip is None or round_trip.isNull():
         raise ValueError("Export round-trip produced a null Shape")
@@ -97,18 +133,14 @@ if {verify_round_trip!r}:
             "Export round-trip produced an invalid Shape; preserve upstream face "
             "boundaries (for example, retry the Boolean with refine=False)"
         )
-    source_solid_count = len(canonical_source.Solids)
     restored_solid_count = len(round_trip.Solids)
     if {file_format!r} == "step" and restored_solid_count != source_solid_count:
         raise ValueError(
             f"STEP round-trip changed solid count from {{source_solid_count}} "
             f"to {{restored_solid_count}}"
         )
-    source_volume = float(canonical_source.Volume)
     restored_volume = float(round_trip.Volume)
     volume_error = abs(restored_volume - source_volume)
-    volume_tolerance = max(1e-7, abs(source_volume) * 1e-9)
-    source_box = canonical_source.BoundBox
     restored_box = round_trip.BoundBox
     bbox_error = max(
         abs(float(left) - float(right))
@@ -122,10 +154,6 @@ if {verify_round_trip!r}:
                 restored_box.XMax, restored_box.YMax, restored_box.ZMax,
             ),
         )
-    )
-    bbox_tolerance = max(
-        1e-7,
-        max(source_box.XLength, source_box.YLength, source_box.ZLength, 1.0) * 1e-9,
     )
     if {file_format!r} == "step" and volume_error > volume_tolerance:
         raise ValueError(
@@ -145,6 +173,9 @@ if {verify_round_trip!r}:
         "restored_solid_count": restored_solid_count,
         "volume_error": volume_error,
         "bounding_box_error": bbox_error,
+        "baseline": "original_source_shape",
+        "canonicalization_volume_error": canonical_volume_error,
+        "canonicalization_bounding_box_error": canonical_bbox_error,
     }}
 
 _result_ = {{
@@ -276,6 +307,7 @@ def register_export_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
         doc_name: str | None = None,
         mesh_tolerance: float = 0.1,
         verify_round_trip: bool = True,
+        round_trip_linear_tolerance: float = 0.01,
     ) -> dict[str, Any]:
         """Export FreeCAD objects to STEP, IGES, STL, 3MF, or OBJ.
 
@@ -290,6 +322,8 @@ def register_export_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
                 finer meshes. Ignored for STEP and IGES.
             verify_round_trip: Re-read STEP/IGES output and reject null or invalid
                 exchange geometry. STEP also verifies solid count, volume, and bounds.
+            round_trip_linear_tolerance: Allowed absolute bounding-box noise in
+                millimetres during BREP canonicalization and STEP round-trip.
 
         Returns:
             Export status, normalized format, output path, and object count.
@@ -297,6 +331,8 @@ def register_export_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
         normalized_format = _normalise_format(file_format, _EXPORT_FORMATS, "export")
         if normalized_format in _MESH_EXPORT_FORMATS and mesh_tolerance <= 0:
             raise ValueError("mesh_tolerance must be positive for mesh exports")
+        if round_trip_linear_tolerance < 0:
+            raise ValueError("round_trip_linear_tolerance must be non-negative")
 
         if normalized_format in _MESH_EXPORT_FORMATS:
             code = _build_mesh_export_code(
@@ -313,6 +349,7 @@ def register_export_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
                 object_names,
                 doc_name,
                 verify_round_trip,
+                round_trip_linear_tolerance,
             )
 
         bridge = await get_bridge()
