@@ -368,6 +368,19 @@ class FreecadBridge(ABC):
             ExecutionResult with success status, output, and any errors.
         """
 
+    async def get_execution_status(self, request_id: str) -> dict[str, Any]:
+        """Return retained execution state when the transport supports it.
+
+        Embedded and legacy transports cannot observe work after a request
+        timeout. Concrete remote bridges override this method.
+        """
+        return {
+            "found": False,
+            "request_id": request_id,
+            "operation_state": "unknown",
+            "continues_running": None,
+        }
+
     # =========================================================================
     # Document Management
     # =========================================================================

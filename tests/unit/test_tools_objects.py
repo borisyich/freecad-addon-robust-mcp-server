@@ -1077,6 +1077,11 @@ class TestObjectTools:
         assert '"result_volume": result_volume' in generated_code
         assert "expected {expected_count} solid(s), got {solid_count}" in generated_code
         assert 'execution_mode = "native_document_feature"' in generated_code
+        assert "raw_native_shape = shape.copy()" in generated_code
+        assert "result.Refine = False" in generated_code
+        assert "result.Refine = True" in generated_code
+        assert "_geometry_preservation_check(" in generated_code
+        assert '"refine_geometry_guard": refine_geometry_guard' in generated_code
         assert '"fuzzy_tolerance": 0.0' in generated_code
         assert "if rejection_reasons:" in generated_code
         assert generated_code.index("if rejection_reasons:") < generated_code.index(
@@ -1151,6 +1156,9 @@ class TestObjectTools:
         assert '"BaseSource"' in generated_code
         assert '"ToolSource"' in generated_code
         assert "raw_shape.removeSplitter()" in generated_code
+        assert "_geometry_preservation_check(" in generated_code
+        assert "raw_shape," in generated_code
+        assert "refined_shape," in generated_code
         assert result["execution_mode"] == "direct_shape_fuzzy"
 
     @pytest.mark.asyncio
@@ -1621,6 +1629,9 @@ class TestObjectTools:
         assert "result.DirectEditMethod = performed_method" in generated_code
         assert '"fallback_reason": fallback_reason' in generated_code
         assert '"rebuild_variant": rebuild_variant' in generated_code
+        assert "def _guarded_refine(candidate, stage):" in generated_code
+        assert "_geometry_preservation_check(" in generated_code
+        assert '"refine_diagnostics": refine_diagnostics' in generated_code
 
     @pytest.mark.asyncio
     async def test_move_faces_rejects_invalid_input_before_freecad(
@@ -1842,6 +1853,10 @@ class TestObjectTools:
 
         assert result["name"] == "Fusion"
         assert result["type_id"] == "Part::MultiFuse"
+        generated_code = mock_bridge.execute_python.await_args.args[0]
+        assert "refined = current.removeSplitter()" in generated_code
+        assert "_geometry_preservation_check(" in generated_code
+        assert '"refine_geometry_guard": refine_geometry_guard' in generated_code
         mock_bridge.execute_python.assert_called_once()
 
     @pytest.mark.asyncio
@@ -1866,6 +1881,9 @@ class TestObjectTools:
 
         assert result["name"] == "Common"
         assert result["type_id"] == "Part::MultiCommon"
+        generated_code = mock_bridge.execute_python.await_args.args[0]
+        assert "refined = current.removeSplitter()" in generated_code
+        assert "_geometry_preservation_check(" in generated_code
         mock_bridge.execute_python.assert_called_once()
 
     # Tests for Part wire/face operations

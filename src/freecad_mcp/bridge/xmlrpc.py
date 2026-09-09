@@ -481,6 +481,31 @@ The FreeCAD Robust MCP Bridge server is not running. To fix this:
                 continues_running=None,
             )
 
+    async def get_execution_status(self, request_id: str) -> dict[str, Any]:
+        """Poll a retained FreeCAD-side execution after a client timeout."""
+        if self._proxy is None:
+            return {
+                "found": False,
+                "request_id": request_id,
+                "operation_state": "unknown",
+                "continues_running": None,
+            }
+        result = await self._call_rpc(
+            "get_execution_status",
+            request_id,
+            timeout=max(self._transport_timeout, 2.0),
+        )
+        return (
+            dict(result)
+            if isinstance(result, dict)
+            else {
+                "found": False,
+                "request_id": request_id,
+                "operation_state": "unknown",
+                "continues_running": None,
+            }
+        )
+
     # =========================================================================
     # Document Management
     # =========================================================================

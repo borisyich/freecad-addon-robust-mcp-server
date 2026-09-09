@@ -468,9 +468,14 @@ metric; use formal checkpoints only when the task benefits from them.
   invariant check.
 - For operations that may exceed a client deadline, call
   `start_tool_job(tool_name, arguments)` and poll `get_tool_job`. Queued jobs can
-  be cancelled. A FreeCAD/OCCT call already running on the main thread cannot be
-  interrupted safely; `cancel_tool_job` reports this explicitly and polling
-  remains available without holding the original MCP request open.
+  be cancelled. Jobs are in-process, not isolated workers: a FreeCAD/OCCT call
+  already running on the main thread keeps FreeCAD busy and cannot be interrupted
+  safely. If its execution deadline expires, the job follows the retained bridge
+  request to its actual completion; an older bridge without status support yields
+  `unknown_after_timeout`, not a false failure.
+- Export writes a same-directory candidate first. The destination is replaced
+  only after the candidate is nonempty and any requested STEP/IGES round-trip
+  checks pass, so a rejected export cannot overwrite a previously good file.
 - For imported/static B-reps, `move_faces(method="feature_rebuild")` is the
   topology-aware path for recognized local planar boundaries and transition
   chains. Inspect `performed_method`; `prism_boolean_fallback` is only a sharp

@@ -420,14 +420,28 @@ def test_runtime_contracts_are_strict_and_include_boolean_expectations() -> None
         "expected_solid_count",
         "fuzzy_tolerance",
         "refine",
+        "max_volume_drift_absolute",
+        "max_volume_drift_relative",
+        "max_linear_drift",
+        "allow_geometry_drift",
         "timeout_ms",
     }.issubset(input_schemas["boolean_operation"]["properties"])
     assert {
         "fuzzy_tolerance",
         "refine",
+        "max_volume_drift_absolute",
+        "max_volume_drift_relative",
+        "max_linear_drift",
+        "allow_geometry_drift",
         "expected_solid_count",
         "timeout_ms",
     }.issubset(input_schemas["fuse_all"]["properties"])
+    assert {
+        "max_volume_drift_absolute",
+        "max_volume_drift_relative",
+        "max_linear_drift",
+        "allow_geometry_drift",
+    }.issubset(input_schemas["common_all"]["properties"])
 
 
 def test_dedicated_measurement_runtime_schemas_are_operation_specific() -> None:
@@ -679,7 +693,7 @@ async def test_generic_part_object_workflow(live_tools: dict[str, Any]) -> None:
             result_name=f"ConeMirror{plane}",
             doc_name=doc,
         )
-    await _call(
+    native_boolean = await _call(
         tools,
         "boolean_operation",
         operation="fuse",
@@ -688,6 +702,20 @@ async def test_generic_part_object_workflow(live_tools: dict[str, Any]) -> None:
         result_name="BoolFuse",
         doc_name=doc,
     )
+    assert native_boolean["execution_mode"] == "native_document_feature"
+    assert native_boolean["refine_geometry_guard"]["within_tolerance"] is True
+    fuzzy_boolean = await _call(
+        tools,
+        "boolean_operation",
+        operation="fuse",
+        object1_name="RawBox",
+        object2_name="P_box",
+        result_name="BoolFuzzyFuse",
+        fuzzy_tolerance=1e-7,
+        doc_name=doc,
+    )
+    assert fuzzy_boolean["execution_mode"] == "direct_shape_fuzzy"
+    assert fuzzy_boolean["refine_geometry_guard"]["within_tolerance"] is True
     await _call(
         tools,
         "boolean_operation",
@@ -837,20 +865,22 @@ async def test_generic_part_object_workflow(live_tools: dict[str, Any]) -> None:
         doc_name=doc,
     )
     await _call(tools, "explode_compound", object_name="Compound", doc_name=doc)
-    await _call(
+    fused_all = await _call(
         tools,
         "fuse_all",
         object_names=["P_box", "P_box_copy"],
         result_name="FuseAll",
         doc_name=doc,
     )
-    await _call(
+    assert fused_all["refine_geometry_guard"]["within_tolerance"] is True
+    common_all_result = await _call(
         tools,
         "common_all",
         object_names=["P_sphere", "SphereScaled"],
         result_name="CommonAll",
         doc_name=doc,
     )
+    assert common_all_result["refine_geometry_guard"]["within_tolerance"] is True
     await _call(
         tools,
         "execute_python",

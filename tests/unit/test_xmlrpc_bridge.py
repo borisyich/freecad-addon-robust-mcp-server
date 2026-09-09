@@ -137,3 +137,26 @@ async def test_execute_preserves_timeout_continuation_metadata():
     assert result.continues_running is True
     assert result.transaction_state == "unknown"
     assert result.request_id == "xml-9"
+
+
+@pytest.mark.asyncio
+async def test_get_execution_status_uses_nonexecuting_rpc():
+    bridge = XmlRpcBridge()
+    bridge._proxy = MagicMock()
+    bridge._call_rpc = AsyncMock(
+        return_value={
+            "found": True,
+            "request_id": "xml-9",
+            "operation_state": "running",
+            "continues_running": True,
+        }
+    )
+
+    status = await bridge.get_execution_status("xml-9")
+
+    assert status["operation_state"] == "running"
+    bridge._call_rpc.assert_awaited_once_with(
+        "get_execution_status",
+        "xml-9",
+        timeout=5.0,
+    )

@@ -61,6 +61,29 @@ class TestSocketBridge:
         assert result.success is False
         assert result.error_type == "ConnectionError"
 
+    @pytest.mark.asyncio
+    async def test_get_execution_status_delegates_to_socket_rpc(self):
+        bridge = SocketBridge()
+        bridge._send_request = mock.AsyncMock(
+            return_value={
+                "found": True,
+                "request_id": "socket-4",
+                "operation_state": "completed",
+                "continues_running": False,
+                "success": True,
+                "result": {"value": 4},
+            }
+        )
+
+        status = await bridge.get_execution_status("socket-4")
+
+        assert status["result"] == {"value": 4}
+        bridge._send_request.assert_awaited_once_with(
+            "get_execution_status",
+            {"request_id": "socket-4"},
+            response_timeout=2.0,
+        )
+
 
 class TestSocketBridgeCommunication:
     """Tests for socket communication."""

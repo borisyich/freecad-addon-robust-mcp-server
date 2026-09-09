@@ -1,5 +1,8 @@
 """Tests for the consolidated import and export tools."""
 
+import sys
+import types
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -79,7 +82,7 @@ class TestExportTools:
         code = mock_bridge.execute_python.call_args.args[0]
         assert expected_method in code
         assert "Part.makeCompound" in code
-        assert "Part.read(output_path)" in code
+        assert "Part.read(candidate_path)" in code
         assert "canonical_source.importBrepFromString" in code
         assert "source_volume = float(shape.Volume)" in code
         assert "source_box = shape.BoundBox" in code
@@ -88,6 +91,13 @@ class TestExportTools:
         assert "Source BREP normalization changed bounds" in code
         assert "round_trip.isValid()" in code
         assert "Output directory does not exist" in code
+        assert "tempfile.mkstemp" in code
+        assert "os.replace(temporary_path, output_path)" in code
+        assert code.index("verification = _verify_candidate(temporary_path)") < (
+            code.index("os.replace(temporary_path, output_path)")
+        )
+        assert "if os.path.exists(temporary_path):" in code
+        assert '"atomic_commit": True' in code
         assert "MeshPart.meshFromShape" not in code
         assert result["format"] == file_format
         assert result["object_count"] == 2
@@ -124,6 +134,8 @@ class TestExportTools:
         assert "MeshPart.meshFromShape" in code
         assert "LinearDeflection=0.025" in code
         assert "final_mesh.write" in code
+        assert "final_mesh.write(temporary_path)" in code
+        assert "os.replace(temporary_path, output_path)" in code
         assert "Output directory does not exist" in code
         assert result["format"] == file_format
 
@@ -149,7 +161,42 @@ class TestExportTools:
 
         code = mock_bridge.execute_python.call_args.args[0]
         assert 'verification = {"requested": False' in code
-        assert "if False:" in code
+        assert "if not False:" in code
+        assert code.index("verification = _verify_candidate(temporary_path)") < (
+            code.index("os.replace(temporary_path, output_path)")
+        )
+
+    def test_rejected_candidate_preserves_existing_destination(
+        self, tmp_path, monkeypatch
+    ):
+        from freecad_mcp.tools.export import _build_brep_export_code
+
+        destination = tmp_path / "part.step"
+        destination.write_text("known-good", encoding="utf-8")
+
+        class PartialShape:
+            def exportStep(self, path):
+                Path(path).write_text("rejected-partial", encoding="utf-8")
+                raise RuntimeError("simulated writer failure")
+
+        source = types.SimpleNamespace(Shape=PartialShape())
+        document = types.SimpleNamespace(getObject=lambda _name: source)
+        freecad = types.SimpleNamespace(ActiveDocument=document, GuiUp=False)
+        monkeypatch.setitem(sys.modules, "Part", types.ModuleType("Part"))
+        code = _build_brep_export_code(
+            "step",
+            str(destination),
+            ["Part"],
+            None,
+            False,
+            0.01,
+        )
+
+        with pytest.raises(RuntimeError, match="simulated writer failure"):
+            exec(code, {"FreeCAD": freecad})  # noqa: S102
+
+        assert destination.read_text(encoding="utf-8") == "known-good"
+        assert list(tmp_path.glob(".part.step.*.step")) == []
 
     @pytest.mark.asyncio
     async def test_export_rejects_invalid_mesh_tolerance_before_bridge(

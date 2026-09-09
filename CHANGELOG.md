@@ -366,6 +366,23 @@
   acceptance manifest. Empty dimension lists are valid; counts belong in
   `requirements`. Caller-authored evidence and image-review attestations no longer
   promote a structurally healthy model to machine-verified acceptance.
+- Hardened general imported-BREP repeated-feature editing: defeaturing now
+- Made file export transactional at the filesystem boundary: every format is
+  written to a same-directory candidate, BREP verification runs against that
+  candidate, and only an accepted file atomically replaces the destination.
+- Applied one geometry-preservation guard to native and fuzzy two-object
+  Booleans, n-ary fuse/common cleanup, and direct face-edit cleanup. Unsafe
+  refinement retains the valid unrefined shape unless drift is explicitly
+  allowed and reported.
+- Moved repeated-component representative analysis ahead of indices, filters,
+  sorting, and limits, so candidate spread and topology evidence always describe
+  the complete valid population rather than the caller's selected subset.
+- Added retained FreeCAD execution status over XML-RPC and JSON-RPC. Background
+  jobs now follow an in-process operation past its request timeout to the real
+  result and expose busy/isolation/cancellation capability; older bridges yield
+  `unknown_after_timeout` instead of a false failure.
+- Generalized engineering guidance, examples, and regression fixtures from one
+  named rotating-part scenario to arbitrary local and repeated BREP features.
 
 This project uses **component-specific versioning**. Each component has its own
 release notes and version history.

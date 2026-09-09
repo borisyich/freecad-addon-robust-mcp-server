@@ -61,6 +61,56 @@ def test_queue_timeout_reports_already_running_request(monkeypatch):
     assert result["operation_state"] == "running"
     assert result["continues_running"] is True
     assert result["transaction_state"] == "unknown"
+    assert plugin._get_execution_status(result["request_id"])["operation_state"] == (
+        "running"
+    )
+
+
+def test_retained_execution_status_distinguishes_queue_run_and_completion():
+    plugin = MODULE.FreecadMCPPlugin(enable_xmlrpc=False)
+    request = MODULE.ExecutionRequest(
+        "_result_ = {'value': 3}",
+        timeout_ms=100,
+        request_id="request-3",
+    )
+    plugin._execution_requests[request.request_id] = request
+
+    queued = plugin._get_execution_status(request.request_id)
+    assert queued["operation_state"] == "queued"
+    assert queued["continues_running"] is True
+
+    request.started.set()
+    running = plugin._get_execution_status(request.request_id)
+    assert running["operation_state"] == "running"
+    assert running["continues_running"] is True
+
+    request.result = {
+        "success": True,
+        "result": {"value": 3},
+        "operation_state": "completed",
+    }
+    request.completed.set()
+    completed = plugin._get_execution_status(request.request_id)
+    assert completed["operation_state"] == "completed"
+    assert completed["continues_running"] is False
+    assert completed["result"] == {"value": 3}
+
+
+def test_retained_execution_limit_rejects_new_work_before_queueing():
+    plugin = MODULE.FreecadMCPPlugin(enable_xmlrpc=False)
+    for index in range(MODULE.MAX_RETAINED_EXECUTIONS):
+        request = MODULE.ExecutionRequest(
+            "_result_ = True",
+            request_id=f"active-{index}",
+        )
+        plugin._execution_requests[request.request_id] = request
+
+    result = plugin._execute_via_queue("_result_ = False", timeout_ms=1)
+
+    assert result["error_type"] == "ResourceLimitError"
+    assert result["operation_state"] == "not_started"
+    assert result["continues_running"] is False
+    assert plugin._request_queue.empty()
 
 
 def test_report_view_error_turns_successful_exec_into_failure(monkeypatch):

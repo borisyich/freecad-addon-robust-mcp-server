@@ -120,6 +120,7 @@ DEFAULT_XMLRPC_PORT = 9875
 QUEUE_POLL_INTERVAL_MS = 50
 STATUS_UPDATE_INTERVAL_MS = 5000  # Update status bar every 5 seconds
 HEADLESS_POLL_INTERVAL_S = 0.1  # Headless mode poll interval in seconds
+MAX_RETAINED_EXECUTIONS = 128
 
 
 def _get_qt_core() -> Any:
@@ -229,6 +230,7 @@ class ExecutionRequest:
         self.cancelled = threading.Event()
         self.started = threading.Event()
         self.state_lock = threading.Lock()
+        self.created_at = time.time()
 
 
 class FreecadMCPPlugin:
@@ -279,6 +281,8 @@ class FreecadMCPPlugin:
 
         # Queue-based execution for thread safety (learned from neka-nat)
         self._request_queue: queue.Queue[ExecutionRequest] = queue.Queue()
+        self._execution_requests: dict[str, ExecutionRequest] = {}
+        self._execution_requests_lock = threading.Lock()
         self._timer = None
         self._queue_thread: threading.Thread | None = None
         self._headless = False
@@ -822,6 +826,35 @@ class FreecadMCPPlugin:
             Execution result dictionary.
         """
         request = ExecutionRequest(code, timeout_ms, request_id=str(uuid.uuid4()))
+        if request.request_id is None:
+            request.request_id = str(uuid.uuid4())
+        with self._execution_requests_lock:
+            completed = sorted(
+                (
+                    existing
+                    for existing in self._execution_requests.values()
+                    if existing.completed.is_set()
+                ),
+                key=lambda existing: existing.created_at,
+            )
+            while (
+                len(self._execution_requests) >= MAX_RETAINED_EXECUTIONS and completed
+            ):
+                expired = completed.pop(0)
+                self._execution_requests.pop(expired.request_id, None)
+            if len(self._execution_requests) >= MAX_RETAINED_EXECUTIONS:
+                return {
+                    "success": False,
+                    "error_type": "ResourceLimitError",
+                    "error_message": (
+                        "Retained execution limit reached while every request is active"
+                    ),
+                    "operation_state": "not_started",
+                    "continues_running": False,
+                    "transaction_state": "not_started",
+                    "request_id": request.request_id,
+                }
+            self._execution_requests[request.request_id] = request
         self._request_queue.put(request)
 
         # Wait for completion
@@ -852,6 +885,42 @@ class FreecadMCPPlugin:
                 "transaction_state": transaction_state,
                 "request_id": request.request_id,
             }
+
+    def _get_execution_status(self, request_id: str) -> dict[str, Any]:
+        """Return retained queue state/result without blocking FreeCAD."""
+        with self._execution_requests_lock:
+            request = self._execution_requests.get(str(request_id))
+        if request is None:
+            return {
+                "found": False,
+                "request_id": str(request_id),
+                "operation_state": "unknown",
+                "continues_running": None,
+            }
+        if request.completed.is_set():
+            result = dict(request.result or {})
+            result.update(
+                {
+                    "found": True,
+                    "request_id": request.request_id,
+                    "operation_state": result.get("operation_state", "completed"),
+                    "continues_running": False,
+                }
+            )
+            return result
+        if request.started.is_set():
+            state = "running"
+        elif request.cancelled.is_set():
+            state = "cancelled"
+        else:
+            state = "queued"
+        return {
+            "found": True,
+            "request_id": request.request_id,
+            "operation_state": state,
+            "continues_running": state in {"queued", "running"},
+            "transaction_state": "unknown" if state == "running" else "not_started",
+        }
 
     def _get_report_view_text(self) -> str | None:
         """Read Report View text without clearing or changing the user's UI."""
@@ -1142,6 +1211,13 @@ class FreecadMCPPlugin:
                 "result": {"instance_id": self._instance_id},
             }
 
+        if method == "get_execution_status":
+            return {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "result": self._get_execution_status(params.get("request_id", "")),
+            }
+
         # Handle execute via queue
         if method == "execute":
             code = params.get("code", "")
@@ -1269,6 +1345,10 @@ class FreecadMCPPlugin:
             self._xmlrpc_execute_with_timeout,
             "execute_with_timeout",
         )  # type: ignore[arg-type]
+        self._xmlrpc_server.register_function(
+            self._xmlrpc_get_execution_status,
+            "get_execution_status",
+        )  # type: ignore[arg-type]
         self._xmlrpc_server.register_function(self._xmlrpc_ping, "ping")  # type: ignore[arg-type]
         self._xmlrpc_server.register_function(
             self._xmlrpc_get_health,
@@ -1334,6 +1414,10 @@ class FreecadMCPPlugin:
                 "error_message": "timeout_ms must be an integer",
             }
         return self._execute_via_queue(code, bounded_timeout_ms)
+
+    def _xmlrpc_get_execution_status(self, request_id: str) -> dict[str, Any]:
+        """Return status for a retained bounded-execution request."""
+        return self._get_execution_status(request_id)
 
     def _xmlrpc_get_health(self) -> dict[str, Any]:
         """Return lightweight bridge and queue diagnostics without execution."""

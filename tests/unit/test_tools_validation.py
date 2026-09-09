@@ -944,12 +944,12 @@ class TestValidationTools:
             "dimensions": [],
             "requirements": [
                 {
-                    "id": "blade_count",
+                    "id": "repeated_feature_count",
                     "kind": "count",
                     "status": "verified",
                     "source_view_ids": ["V_ISO"],
-                    "expected": 5,
-                    "observed": 5,
+                    "expected": 4,
+                    "observed": 4,
                     "passed": True,
                     "evidence_references": ["detect_rotational_pattern result"],
                 }
@@ -964,7 +964,7 @@ class TestValidationTools:
                     "candidate_recipe": {"camera": "Isometric"},
                     "comparison_image_path": "compare.png",
                     "review_attestation": "Reviewed side by side.",
-                    "visual_observation": "Five repeated blades are visible.",
+                    "visual_observation": "Four repeated features are visible.",
                     "decision": "accept",
                 }
             ],

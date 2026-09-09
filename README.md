@@ -557,9 +557,9 @@ endpoints, radius, arc side, datum, and the dimension chain are rechecked.
 
 | Tool | Description | Mode |
 | --- | --- | --- |
-| `start_tool_job` | Start any ordinary MCP tool without holding the client request open | Both |
-| `get_tool_job` | Poll state and retrieve a completed result | Both |
-| `cancel_tool_job` | Cancel queued work or report running OCCT work as non-interruptible | Both |
+| `start_tool_job` | Track an ordinary in-process MCP tool without holding the client request open | Both |
+| `get_tool_job` | Poll retained bridge state and retrieve the actual final result | Both |
+| `cancel_tool_job` | Cancel queued work or report running OCCT work as busy/non-interruptible | Both |
 
 #### History (1 tool)
 
@@ -571,7 +571,7 @@ endpoints, radius, arc side, datum, and the dimension chain are rechecked.
 
 | Tool     | Description                                      | Mode |
 | -------- | ------------------------------------------------ | ---- |
-| `export` | Export to STEP, IGES, STL, 3MF, or OBJ          | All  |
+| `export` | Atomically publish verified STEP/IGES or completed mesh output | All  |
 | `import` | Import STEP/STL; create a missing named target document | All  |
 
 All other modeling, Spreadsheet, Draft, PartDesign, and library-insertion tools

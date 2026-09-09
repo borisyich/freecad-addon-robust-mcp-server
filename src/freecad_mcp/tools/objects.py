@@ -18,6 +18,7 @@ from pydantic import (
 )
 
 from freecad_mcp.bridge._document_runtime import DOCUMENT_RESOLUTION_RUNTIME
+from freecad_mcp.bridge._geometry_runtime import GEOMETRY_PRESERVATION_RUNTIME
 
 
 class _PrimitiveBase(BaseModel):
@@ -30,6 +31,7 @@ FiniteVector3 = Annotated[
     list[Annotated[float, Field(allow_inf_nan=False)]],
     Field(min_length=3, max_length=3),
 ]
+NonNegativeFloat = Annotated[float, Field(ge=0, allow_inf_nan=False)]
 
 
 class BoxPrimitive(_PrimitiveBase):
@@ -1630,6 +1632,10 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
         expected_solid_count: Annotated[int, Field(ge=1)] | None = 1,
         fuzzy_tolerance: Annotated[float, Field(ge=0, allow_inf_nan=False)] = 0.0,
         refine: bool = True,
+        max_volume_drift_absolute: NonNegativeFloat = 1e-4,
+        max_volume_drift_relative: NonNegativeFloat = 1e-7,
+        max_linear_drift: NonNegativeFloat = 1e-6,
+        allow_geometry_drift: bool = False,
         timeout_ms: Annotated[int, Field(ge=1, le=600000)] = 30000,
     ) -> dict[str, Any]:
         """Perform a transactional Boolean and reject unusable geometry.
@@ -1650,6 +1656,10 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
                 static ``Part::Feature`` result with operand links.
             refine: Remove unnecessary splitter edges when the FreeCAD feature
                 exposes a Refine property.
+            max_volume_drift_absolute: Absolute volume tolerance for refinement.
+            max_volume_drift_relative: Relative volume tolerance for refinement.
+            max_linear_drift: Bounding-box and centre-of-mass tolerance.
+            allow_geometry_drift: Explicitly accept refinement outside the guard.
             timeout_ms: Bridge execution deadline in milliseconds.
 
         Returns:
@@ -1681,6 +1691,7 @@ def register_object_tools(mcp: Any, get_bridge: Callable[[], Awaitable[Any]]) ->
 
         code = f"""
 import Part
+{GEOMETRY_PRESERVATION_RUNTIME}
 
 requested_doc_name = {doc_name!r}
 doc = FreeCAD.ActiveDocument if requested_doc_name is None else FreeCAD.getDocument(requested_doc_name)
@@ -1710,6 +1721,8 @@ try:
     refine_requested = {refine!r}
     refine_applied = False
     refine_fallback_reason = None
+    refine_geometry_guard = None
+    native_refine_supported = False
     if {fuzzy_tolerance!r} > 0.0:
         execution_mode = "direct_shape_fuzzy"
         try:
@@ -1729,8 +1742,21 @@ try:
                 refined_shape = raw_shape.removeSplitter()
                 if refined_shape.isNull() or not refined_shape.isValid():
                     raise ValueError("removeSplitter produced a null or invalid Shape")
-                shape = refined_shape
-                refine_applied = True
+                refine_geometry_guard = _geometry_preservation_check(
+                    raw_shape,
+                    refined_shape,
+                    {max_volume_drift_absolute!r},
+                    {max_volume_drift_relative!r},
+                    {max_linear_drift!r},
+                )
+                if refine_geometry_guard["within_tolerance"] or {allow_geometry_drift!r}:
+                    shape = refined_shape
+                    refine_applied = True
+                else:
+                    refine_fallback_reason = (
+                        "removeSplitter rejected by geometry-preservation guard: "
+                        + "; ".join(refine_geometry_guard["issues"])
+                    )
             except Exception as exc:
                 refine_fallback_reason = str(exc)
         result = doc.addObject("Part::Feature", {result_name!r})
@@ -1755,8 +1781,8 @@ try:
             result = doc.addObject({op_type!r}, {result_name!r})
             result.Shapes = [obj1, obj2]
         if hasattr(result, "Refine"):
-            result.Refine = refine_requested
-            refine_applied = refine_requested
+            native_refine_supported = True
+            result.Refine = False
 
     doc.recompute()
     shape = getattr(result, "Shape", None)
@@ -1764,20 +1790,46 @@ try:
     shape_valid = bool(not shape_is_null and shape.isValid())
     if (
         execution_mode == "native_document_feature"
-        and refine_applied
-        and (shape_is_null or not shape_valid)
+        and refine_requested
+        and native_refine_supported
     ):
-        result.Refine = False
+        if shape_is_null or not shape_valid:
+            raise ValueError("Native Boolean produced an invalid unrefined Shape")
+        raw_native_shape = shape.copy()
+        result.Refine = True
         doc.recompute()
-        fallback_shape = getattr(result, "Shape", None)
-        fallback_is_null = fallback_shape is None or fallback_shape.isNull()
-        fallback_valid = bool(not fallback_is_null and fallback_shape.isValid())
-        if fallback_valid:
-            shape = fallback_shape
+        refined_shape = getattr(result, "Shape", None)
+        refined_is_null = refined_shape is None or refined_shape.isNull()
+        refined_valid = bool(not refined_is_null and refined_shape.isValid())
+        if refined_valid:
+            refine_geometry_guard = _geometry_preservation_check(
+                raw_native_shape,
+                refined_shape,
+                {max_volume_drift_absolute!r},
+                {max_volume_drift_relative!r},
+                {max_linear_drift!r},
+            )
+        if refined_valid and (
+            refine_geometry_guard["within_tolerance"] or {allow_geometry_drift!r}
+        ):
+            shape = refined_shape
             shape_is_null = False
             shape_valid = True
-            refine_applied = False
-            refine_fallback_reason = "Native Refine produced an invalid Shape"
+            refine_applied = True
+        else:
+            result.Refine = False
+            doc.recompute()
+            shape = getattr(result, "Shape", None)
+            shape_is_null = shape is None or shape.isNull()
+            shape_valid = bool(not shape_is_null and shape.isValid())
+            refine_fallback_reason = (
+                "Native Refine produced a null or invalid Shape"
+                if not refined_valid
+                else "Native Refine rejected by geometry-preservation guard: "
+                + "; ".join(refine_geometry_guard["issues"])
+            )
+    elif execution_mode == "native_document_feature" and refine_requested:
+        refine_fallback_reason = "Native Boolean feature has no Refine property"
     shape_type = "Null" if shape_is_null else str(shape.ShapeType)
     solid_count = 0 if shape_is_null else len(shape.Solids)
     result_volume = 0.0 if shape_is_null else float(shape.Volume)
@@ -1822,6 +1874,8 @@ _result_ = {{
     "refine_requested": refine_requested,
     "refine_applied": refine_applied,
     "refine_fallback_reason": refine_fallback_reason,
+    "refine_geometry_guard": refine_geometry_guard,
+    "allow_geometry_drift": {allow_geometry_drift!r},
     "transaction_state": "committed",
 }}
 """
@@ -2626,6 +2680,10 @@ except Exception:
         doc_name: str | None = None,
         method: Literal["auto", "feature_rebuild", "prism"] = "auto",
         feature_face_names: list[str] | None = None,
+        max_volume_drift_absolute: NonNegativeFloat = 1e-4,
+        max_volume_drift_relative: NonNegativeFloat = 1e-7,
+        max_linear_drift: NonNegativeFloat = 1e-6,
+        allow_geometry_drift: bool = False,
     ) -> dict[str, Any]:
         """Move selected planar boundaries by a signed normal distance.
 
@@ -2665,6 +2723,10 @@ except Exception:
                 Include the selected boundary, walls, fillets, chamfers, and
                 blends, but not the parallel support face. When omitted, the
                 region is discovered automatically.
+            max_volume_drift_absolute: Absolute volume tolerance for cleanup.
+            max_volume_drift_relative: Relative volume tolerance for cleanup.
+            max_linear_drift: Bounding-box and center-of-mass tolerance.
+            allow_geometry_drift: Explicitly accept cleanup outside the guard.
 
         Returns:
             Result identity, operation evidence, and static/direct-edit status.
@@ -2696,6 +2758,7 @@ except Exception:
         code = f"""
 import math
 import Part
+{GEOMETRY_PRESERVATION_RUNTIME}
 
 doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
 if doc is None:
@@ -2894,6 +2957,36 @@ feature_kind = None
 rebuild_variant = None
 base_volume = float(source_shape.Volume)
 volume_tolerance = max(1e-7, abs(base_volume) * 1e-10)
+refine_diagnostics = []
+
+def _guarded_refine(candidate, stage):
+    try:
+        refined = candidate.removeSplitter()
+        if refined.isNull() or not refined.isValid():
+            raise ValueError("removeSplitter produced a null or invalid Shape")
+        guard = _geometry_preservation_check(
+            candidate,
+            refined,
+            {max_volume_drift_absolute!r},
+            {max_volume_drift_relative!r},
+            {max_linear_drift!r},
+        )
+        accepted = guard["within_tolerance"] or {allow_geometry_drift!r}
+        refine_diagnostics.append({{
+            "stage": stage,
+            "applied": accepted,
+            "guard": guard,
+            "override": bool({allow_geometry_drift!r} and not guard["within_tolerance"]),
+        }})
+        return refined if accepted else candidate
+    except Exception as exc:
+        refine_diagnostics.append({{
+            "stage": stage,
+            "applied": False,
+            "guard": None,
+            "error": str(exc),
+        }})
+        return candidate
 
 def _feature_rebuild():
     if not hasattr(source_shape, "defeaturing"):
@@ -2955,10 +3048,7 @@ def _feature_rebuild():
         if local_feature_kind == "additive_material"
         else healed.cut(updated_tool)
     )
-    try:
-        candidate = candidate.removeSplitter()
-    except Exception:
-        pass
+    candidate = _guarded_refine(candidate, "translated_tangent_feature")
     return candidate, local_feature_kind, "translated_tangent_feature"
 
 def _prism_boolean():
@@ -2967,10 +3057,7 @@ def _prism_boolean():
         normal = _face_normal(face)
         prism = face.extrude(normal * {distance!r})
         candidate = candidate.fuse(prism) if mode == "add" else candidate.cut(prism)
-    try:
-        candidate = candidate.removeSplitter()
-    except Exception:
-        pass
+    candidate = _guarded_refine(candidate, "prism_boolean")
     return candidate
 
 doc.openTransaction("Move Faces")
@@ -3059,6 +3146,8 @@ try:
         "base_volume": base_volume,
         "result_volume": result_volume,
         "volume_delta": volume_delta,
+        "refine_diagnostics": refine_diagnostics,
+        "allow_geometry_drift": {allow_geometry_drift!r},
         "static_snapshot": True,
         "direct_edit": True,
         "response_guidance": (
@@ -3595,6 +3684,10 @@ except Exception:
         doc_name: str | None,
         fuzzy_tolerance: float,
         refine: bool,
+        max_volume_drift_absolute: float,
+        max_volume_drift_relative: float,
+        max_linear_drift: float,
+        allow_geometry_drift: bool,
         expected_solid_count: int | None,
         timeout_ms: int,
     ) -> dict[str, Any]:
@@ -3604,6 +3697,7 @@ except Exception:
         default_name = "Fusion" if operation == "fuse" else "Common"
         code = f"""
 import Part
+{GEOMETRY_PRESERVATION_RUNTIME}
 
 doc = FreeCAD.ActiveDocument if {doc_name!r} is None else FreeCAD.getDocument({doc_name!r})
 if doc is None:
@@ -3647,8 +3741,31 @@ try:
             "valid": True,
         }})
 
+    refine_applied = False
+    refine_fallback_reason = None
+    refine_geometry_guard = None
     if {refine!r}:
-        current = current.removeSplitter()
+        try:
+            refined = current.removeSplitter()
+            if refined.isNull() or not refined.isValid():
+                raise ValueError("removeSplitter produced a null or invalid Shape")
+            refine_geometry_guard = _geometry_preservation_check(
+                current,
+                refined,
+                {max_volume_drift_absolute!r},
+                {max_volume_drift_relative!r},
+                {max_linear_drift!r},
+            )
+            if refine_geometry_guard["within_tolerance"] or {allow_geometry_drift!r}:
+                current = refined
+                refine_applied = True
+            else:
+                refine_fallback_reason = (
+                    "removeSplitter rejected by geometry-preservation guard: "
+                    + "; ".join(refine_geometry_guard["issues"])
+                )
+        except Exception as exc:
+            refine_fallback_reason = str(exc)
     if current.isNull() or not current.isValid():
         raise ValueError("Final {operation} Shape is null or invalid")
     solid_count = len(current.Solids)
@@ -3676,7 +3793,12 @@ try:
         "solid_count": solid_count,
         "volume": volume,
         "fuzzy_tolerance": {fuzzy_tolerance!r},
-        "refined": {refine!r},
+        "refined": refine_applied,
+        "refine_requested": {refine!r},
+        "refine_applied": refine_applied,
+        "refine_fallback_reason": refine_fallback_reason,
+        "refine_geometry_guard": refine_geometry_guard,
+        "allow_geometry_drift": {allow_geometry_drift!r},
         "steps": steps,
         "transaction_state": "committed",
     }}
@@ -3698,6 +3820,10 @@ except Exception:
         doc_name: str | None = None,
         fuzzy_tolerance: Annotated[float, Field(ge=0, allow_inf_nan=False)] = 0.0,
         refine: bool = True,
+        max_volume_drift_absolute: NonNegativeFloat = 1e-4,
+        max_volume_drift_relative: NonNegativeFloat = 1e-7,
+        max_linear_drift: NonNegativeFloat = 1e-6,
+        allow_geometry_drift: bool = False,
         expected_solid_count: Annotated[int, Field(ge=1)] | None = 1,
         timeout_ms: Annotated[int, Field(ge=1, le=600000)] = 30000,
     ) -> dict[str, Any]:
@@ -3709,6 +3835,10 @@ except Exception:
             doc_name,
             fuzzy_tolerance,
             refine,
+            max_volume_drift_absolute,
+            max_volume_drift_relative,
+            max_linear_drift,
+            allow_geometry_drift,
             expected_solid_count,
             timeout_ms,
         )
@@ -3720,6 +3850,10 @@ except Exception:
         doc_name: str | None = None,
         fuzzy_tolerance: Annotated[float, Field(ge=0, allow_inf_nan=False)] = 0.0,
         refine: bool = True,
+        max_volume_drift_absolute: NonNegativeFloat = 1e-4,
+        max_volume_drift_relative: NonNegativeFloat = 1e-7,
+        max_linear_drift: NonNegativeFloat = 1e-6,
+        allow_geometry_drift: bool = False,
         expected_solid_count: Annotated[int, Field(ge=1)] | None = 1,
         timeout_ms: Annotated[int, Field(ge=1, le=600000)] = 30000,
     ) -> dict[str, Any]:
@@ -3731,6 +3865,10 @@ except Exception:
             doc_name,
             fuzzy_tolerance,
             refine,
+            max_volume_drift_absolute,
+            max_volume_drift_relative,
+            max_linear_drift,
+            allow_geometry_drift,
             expected_solid_count,
             timeout_ms,
         )

@@ -63,6 +63,7 @@ def _build_brep_export_code(
     return f"""
 import Part
 import os
+import tempfile
 
 requested_doc_name = {doc_name!r}
 doc = FreeCAD.ActiveDocument if requested_doc_name is None else FreeCAD.getDocument(requested_doc_name)
@@ -74,18 +75,10 @@ if len(objects) == 1:
 else:
     shape = Part.makeCompound([obj.Shape for obj in objects])
 
-output_path = os.path.abspath({file_path!r})
-output_directory = os.path.dirname(output_path)
-if not os.path.isdir(output_directory):
-    raise FileNotFoundError(
-        f"Output directory does not exist: {{output_directory}}"
-    )
-shape.{export_method}(output_path)
-if not os.path.isfile(output_path) or os.path.getsize(output_path) <= 0:
-    raise ValueError("BREP export did not create a non-empty output file")
-
-verification = {{"requested": {verify_round_trip!r}, "passed": None}}
-if {verify_round_trip!r}:
+def _verify_candidate(candidate_path):
+    verification = {{"requested": {verify_round_trip!r}, "passed": None}}
+    if not {verify_round_trip!r}:
+        return verification
     source_solid_count = len(shape.Solids)
     source_volume = float(shape.Volume)
     source_box = shape.BoundBox
@@ -125,7 +118,7 @@ if {verify_round_trip!r}:
             f"Source BREP normalization changed bounds by {{canonical_bbox_error}} "
             f"(tolerance {{bbox_tolerance}})"
         )
-    round_trip = Part.read(output_path)
+    round_trip = Part.read(candidate_path)
     if round_trip is None or round_trip.isNull():
         raise ValueError("Export round-trip produced a null Shape")
     if not round_trip.isValid():
@@ -165,7 +158,7 @@ if {verify_round_trip!r}:
             f"STEP round-trip changed bounds by {{bbox_error}} "
             f"(tolerance {{bbox_tolerance}})"
         )
-    verification = {{
+    return {{
         "requested": True,
         "passed": True,
         "shape_valid": True,
@@ -178,12 +171,37 @@ if {verify_round_trip!r}:
         "canonicalization_bounding_box_error": canonical_bbox_error,
     }}
 
+output_path = os.path.abspath({file_path!r})
+output_directory = os.path.dirname(output_path)
+if not os.path.isdir(output_directory):
+    raise FileNotFoundError(
+        f"Output directory does not exist: {{output_directory}}"
+    )
+temporary_fd, temporary_path = tempfile.mkstemp(
+    prefix="." + os.path.basename(output_path) + ".",
+    suffix=os.path.splitext(output_path)[1] or ".candidate",
+    dir=output_directory,
+)
+os.close(temporary_fd)
+try:
+    os.unlink(temporary_path)
+    shape.{export_method}(temporary_path)
+    if not os.path.isfile(temporary_path) or os.path.getsize(temporary_path) <= 0:
+        raise ValueError("BREP export did not create a non-empty candidate file")
+    verification = _verify_candidate(temporary_path)
+    os.replace(temporary_path, output_path)
+except BaseException:
+    if os.path.exists(temporary_path):
+        os.unlink(temporary_path)
+    raise
+
 _result_ = {{
     "success": True,
     "format": {file_format!r},
     "path": output_path,
     "object_count": len(objects),
     "file_size": os.path.getsize(output_path),
+    "atomic_commit": True,
     "round_trip_verification": verification,
 }}
 """
@@ -201,6 +219,7 @@ def _build_mesh_export_code(
 import Mesh
 import MeshPart
 import os
+import tempfile
 
 requested_doc_name = {doc_name!r}
 doc = FreeCAD.ActiveDocument if requested_doc_name is None else FreeCAD.getDocument(requested_doc_name)
@@ -225,9 +244,22 @@ if not os.path.isdir(output_directory):
     raise FileNotFoundError(
         f"Output directory does not exist: {{output_directory}}"
     )
-final_mesh.write(output_path)
-if not os.path.isfile(output_path) or os.path.getsize(output_path) <= 0:
-    raise ValueError("Mesh export did not create a non-empty output file")
+temporary_fd, temporary_path = tempfile.mkstemp(
+    prefix="." + os.path.basename(output_path) + ".",
+    suffix=os.path.splitext(output_path)[1] or ".candidate",
+    dir=output_directory,
+)
+os.close(temporary_fd)
+try:
+    os.unlink(temporary_path)
+    final_mesh.write(temporary_path)
+    if not os.path.isfile(temporary_path) or os.path.getsize(temporary_path) <= 0:
+        raise ValueError("Mesh export did not create a non-empty candidate file")
+    os.replace(temporary_path, output_path)
+except BaseException:
+    if os.path.exists(temporary_path):
+        os.unlink(temporary_path)
+    raise
 
 _result_ = {{
     "success": True,
@@ -235,6 +267,7 @@ _result_ = {{
     "path": output_path,
     "object_count": len(objects),
     "file_size": os.path.getsize(output_path),
+    "atomic_commit": True,
 }}
 """
 

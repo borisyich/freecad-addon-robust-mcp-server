@@ -492,6 +492,10 @@ boolean_operation(
     expected_solid_count: int | None = 1,
     fuzzy_tolerance: float = 0.0,
     refine: bool = True,
+    max_volume_drift_absolute: float = 1e-4,
+    max_volume_drift_relative: float = 1e-7,
+    max_linear_drift: float = 1e-6,
+    allow_geometry_drift: bool = False,
     timeout_ms: int = 30000,
 ) -> dict
 ```
@@ -513,8 +517,11 @@ With `fuzzy_tolerance=0`, the tool keeps FreeCAD's native parametric `Part::Cut`
 the same transaction and stores a static `Part::Feature` with `BaseSource` and
 `ToolSource` provenance links plus the operation and tolerance. This is the
 generic tolerant path for imported/static B-reps. Use the smallest defensible
-tolerance. Optional refinement falls back to the valid unrefined result when
-possible.
+tolerance. Every refine path—direct/fuzzy and native document features—compares
+the refined result with its unrefined input. Volume, bounds, center of mass, and
+solid count must stay within the declared tolerances; otherwise the valid
+unrefined result is retained. `allow_geometry_drift=True` is an explicit,
+reported override.
 
 The successful response includes `shape_valid`, `shape_type`, `solid_count`,
 `volume`, `base_volume`, `tool_volume`, `result_volume`, and `volume_delta`.
@@ -530,6 +537,10 @@ fuse_all(
     doc_name: str | None = None,
     fuzzy_tolerance: float = 0.0,
     refine: bool = True,
+    max_volume_drift_absolute: float = 1e-4,
+    max_volume_drift_relative: float = 1e-7,
+    max_linear_drift: float = 1e-6,
+    allow_geometry_drift: bool = False,
     expected_solid_count: int | None = 1,
     timeout_ms: int = 30000,
 ) -> dict
@@ -539,6 +550,10 @@ common_all(  # same arguments
     doc_name: str | None = None,
     fuzzy_tolerance: float = 0.0,
     refine: bool = True,
+    max_volume_drift_absolute: float = 1e-4,
+    max_volume_drift_relative: float = 1e-7,
+    max_linear_drift: float = 1e-6,
+    allow_geometry_drift: bool = False,
     expected_solid_count: int | None = 1,
     timeout_ms: int = 30000,
 ) -> dict
@@ -548,7 +563,10 @@ Both tools validate every intermediate Boolean and abort before commit when a
 Shape is null/invalid, has non-positive volume, or has the wrong final solid
 count. `steps` reports intermediate solid counts and volumes. `fuse_all` is the
 general controlled fuse entry point: use `fuzzy_tolerance` only when exact
-topology is insufficient, and keep the smallest defensible value.
+topology is insufficient, and keep the smallest defensible value. Final
+`removeSplitter()` cleanup uses the same geometry-preservation guard as the
+two-object Boolean and reports `refine_geometry_guard`, application/fallback
+state, and any explicit override.
 
 ### General BREP Surgery
 
@@ -600,10 +618,13 @@ polar_pattern_shape(
 ) -> dict
 ```
 
-A typical impeller repair is: group the known feature faces; confirm equal
-rotational spacing; defeature all blade faces to recover the support; subtract
-that support from the original with `extract_feature_material`; select one exact
-solid component; then create the required count with `polar_pattern_shape`.
+For any imported BREP with repeated local geometry, first group the feature
+faces and establish the actual repetition transform. Recover the common support,
+extract every viable repeated component, compare the complete candidate
+population, select a representative component from geometric and neighborhood
+evidence, and only then rebuild the repetition. The same method applies to
+rotational and linear families; `polar_pattern_shape` is merely the rotational
+construction tool.
 Every geometry-producing tool opens a FreeCAD transaction, validates before
 commit, and reports `transaction_state`.
 
@@ -625,11 +646,14 @@ solids. Use `component_volume_min`/`component_volume_max`, sorting, and a limit
 to select a component in the same Boolean call; raw `component_indices` remain
 available when topology order is known. Refinement is applied per selected solid
 and falls back independently, with diagnostics in each component record.
-The response groups equal topology signatures in `representative_analysis` and
-reports per-candidate volume, area, centre, plus absolute/relative spreads. It
-never auto-selects a seed. That group is candidate evidence only: compare local
-neighborhood, attachment, geometry, and source views before choosing a repeated
-feature; generated names and component order are not proof that an instance is
+Before applying `component_indices`, volume filters, sorting, or
+`component_limit`, the response analyzes every valid difference component.
+`representative_analysis.scope="all_valid_components_before_selection"` reports
+the analyzed count, equal-topology candidates, per-candidate volume, area and
+centre, plus absolute/relative spreads. It never auto-selects a seed. This is
+candidate evidence only: compare local neighborhood, attachment, geometry, and
+source views before choosing a repeated feature; generated names, component
+order, and a zero spread after filtering are not proof that an instance is
 intact.
 `polar_pattern_shape(fuse=True)` uses a single OCCT multi-fuse when no fuzzy
 tolerance is requested and reports the chosen `fuse_strategy`. An unfused
@@ -800,8 +824,17 @@ move_faces(
     doc_name=None,
     method="feature_rebuild",     # auto | feature_rebuild | prism
     feature_face_names=None,       # optional explicit local feature region
+    max_volume_drift_absolute=1e-4,
+    max_volume_drift_relative=1e-7,
+    max_linear_drift=1e-6,
+    allow_geometry_drift=False,
 ) -> dict
 ```
+
+Any `removeSplitter()` cleanup performed during either direct-edit path is
+guarded against changes in volume, bounds, center of mass, and solid count.
+`refine_diagnostics` reports each attempted cleanup and whether the guarded
+result was applied or the unrefined candidate was retained.
 
 `feature_rebuild` is intended for imported/static solids. Starting from the
 selected planar cap or pocket floor, it discovers adjacent wall, fillet,
@@ -2020,8 +2053,12 @@ export(
 
 `mesh_tolerance` is used only for STL, 3MF, and OBJ. STEP and IGES preserve
 BREP geometry. The destination directory must already exist; a missing directory
-is reported explicitly before the writer is called. BREP exports are re-read by
-default and rejected when the exchange file is null or invalid. STEP verification
+is reported explicitly before the writer is called. Every format is first
+written to a uniquely named candidate in the destination directory. BREP
+candidates are re-read by default and rejected when the exchange file is null or
+invalid. Only a fully written and accepted candidate is atomically replaced into
+the destination path; a rejected candidate is removed and an existing good file
+is left untouched. STEP verification
 checks solid count, volume, and bounds against the original in-document Shape,
 not against a BREP-normalized copy of that same export. The diagnostic
 canonicalization is also checked against the original and fails if it changes
@@ -2436,11 +2473,17 @@ its final MCP result are retained only in the current server session. This
 wrapper applies to every ordinary registered tool, including
 `defeature_faces`; job-control tools cannot recursively submit themselves.
 
-`cancel_tool_job(job_id)` can cancel work only while it is still queued. Once
-FreeCAD/OCCT has entered a main-thread operation, safe hard interruption is not
-available: cancellation is recorded, the response explicitly sets
-`cancellable=false`, and the caller must keep polling. This preserves MCP
-responsiveness without pretending that an in-process OCCT call was stopped.
+`cancel_tool_job(job_id)` can cancel work only while it is still queued. Jobs run
+in the same FreeCAD process (`isolation="in_process"` and
+`hard_cancel_supported=false`), so an OCCT call on the main thread keeps FreeCAD
+busy and cannot be interrupted safely. A bridge-side request ID is retained when
+the original execution deadline expires. The job then enters
+`freecad_running`, reports `freecad_busy=true`, polls the non-executing status
+endpoint, and adopts the operation's real final result instead of falsely
+becoming failed at the client timeout. If an older bridge cannot report retained
+status, the terminal state is `unknown_after_timeout`, never a fabricated
+failure or cancellation. Process isolation would require a separate FreeCAD
+document/process lifecycle and is not implied by this job API.
 
 ### Prompt access fallback
 

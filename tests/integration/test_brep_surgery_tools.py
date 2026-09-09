@@ -101,6 +101,56 @@ _result_ = True
 
 
 @pytest.mark.asyncio
+async def test_representative_analysis_precedes_component_limit(
+    live_bridge: XmlRpcBridge,
+    brep_tools: dict[str, Any],
+) -> None:
+    doc_name = "MCPBrepCandidatePopulation"
+    setup = await live_bridge.execute_python(
+        f"""
+import Part
+if {doc_name!r} in FreeCAD.listDocuments():
+    FreeCAD.closeDocument({doc_name!r})
+doc = FreeCAD.newDocument({doc_name!r})
+source = doc.addObject("Part::Feature", "ImportedRepeatedFeatures")
+support = doc.addObject("Part::Feature", "RecoveredSupport")
+base = Part.makeBox(24, 12, 5)
+source_shape = base
+for x_value in (4, 12, 20):
+    local_feature = Part.makeCylinder(
+        1.5,
+        3,
+        FreeCAD.Vector(x_value, 6, 5),
+    )
+    source_shape = source_shape.fuse(local_feature)
+source.Shape = source_shape
+support.Shape = base
+doc.recompute()
+_result_ = True
+"""
+    )
+    assert setup.success, setup.failure_details("setup failed")
+    try:
+        extracted = await brep_tools["extract_feature_material"](
+            source_name="ImportedRepeatedFeatures",
+            healed_name="RecoveredSupport",
+            component_sort_by="volume",
+            component_limit=1,
+            result_prefix="Candidate",
+            doc_name=doc_name,
+        )
+
+        analysis = extracted["representative_analysis"]
+        assert extracted["created_component_count"] == 1
+        assert analysis["scope"] == "all_valid_components_before_selection"
+        assert analysis["analyzed_component_count"] == 3
+        assert analysis["candidate_count"] == 3
+        assert analysis["candidate_indices"] == [1, 2, 3]
+    finally:
+        await _close(live_bridge, doc_name)
+
+
+@pytest.mark.asyncio
 async def test_defeature_extract_pattern_sew_heal_and_make_solid(
     live_bridge: XmlRpcBridge,
     brep_tools: dict[str, Any],
@@ -147,38 +197,38 @@ _result_ = {{"feature_faces": feature_faces}}
             component_sort_by="volume",
             component_sort_order="desc",
             component_limit=1,
-            result_prefix="ExactBoss",
+            result_prefix="RecoveredFeature",
             doc_name=doc_name,
         )
         assert extracted["container_valid"] is True
         assert extracted["available_component_count"] == 1
         assert extracted["valid_component_count"] == 1
         assert extracted["created_component_count"] == 1
-        exact_boss = extracted["components"][0]["name"]
+        pattern_seed = extracted["components"][0]["name"]
 
         patterned = await brep_tools["polar_pattern_shape"](
-            object_name=exact_boss,
-            occurrences=5,
+            object_name=pattern_seed,
+            occurrences=4,
             axis_origin=[10, 10, 0],
-            result_name="FiveBosses",
-            expected_solid_count=5,
+            result_name="RepeatedFeatures",
+            expected_solid_count=4,
             doc_name=doc_name,
         )
-        assert patterned["occurrences"] == 5
-        assert patterned["solid_count"] == 5
+        assert patterned["occurrences"] == 4
+        assert patterned["solid_count"] == 4
         assert patterned["fuse_strategy"] == "compound"
 
         fused_pattern = await brep_tools["polar_pattern_shape"](
-            object_name=exact_boss,
-            occurrences=5,
+            object_name=pattern_seed,
+            occurrences=4,
             axis_origin=[10, 10, 0],
-            result_name="FiveBossesMultiFuse",
+            result_name="RepeatedFeaturesMultiFuse",
             fuse=True,
             refine=False,
-            expected_solid_count=5,
+            expected_solid_count=4,
             doc_name=doc_name,
         )
-        assert fused_pattern["solid_count"] == 5
+        assert fused_pattern["solid_count"] == 4
         assert fused_pattern["fuse_strategy"] == "multi_fuse"
 
         sewn = await brep_tools["sew_shell"](

@@ -749,8 +749,11 @@ For potentially long imported-BREP or OCCT operations, use
 `start_tool_job(tool_name, arguments)` and poll `get_tool_job` instead of holding
 one MCP request open. Set the wrapped tool's own `timeout_ms` for the expected
 complexity. `cancel_tool_job` can discard queued work, but an OCCT call already
-running in FreeCAD's main thread is not safely interruptible; report and poll
-that state rather than claiming it was cancelled.
+running in FreeCAD's main thread is not safely interruptible and keeps FreeCAD
+busy. Jobs are in-process waiting/tracking handles, not process isolation. After
+an execution timeout, keep polling the retained bridge request to its real final
+state; if status is unavailable, report `unknown_after_timeout` rather than
+claiming failure, rollback, or cancellation.
 
 Do not continue blindly after an invalid shape, implausible before/after volume ratio, ineffective cut, wrong Body Tip, unexpected solid count, disconnected additive feature, or clearly wrong view.
 Undo or repair the most recent causal feature rather than rebuilding in a new

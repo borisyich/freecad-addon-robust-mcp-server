@@ -1622,7 +1622,7 @@ class TestPartDesignTools:
 
         pattern = register_tools["linear_pattern"]
         result = await pattern(
-            feature_name="Pad", direction="X", length=50, occurrences=5
+            feature_name="Pad", direction="X", length=50, occurrences=3
         )
 
         assert result["name"] == "LinearPattern"

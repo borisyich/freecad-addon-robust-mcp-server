@@ -330,6 +330,7 @@ class SocketBridge(FreecadBridge):
                 operation_state="unknown",
                 continues_running=None,
             )
+
         except JsonRpcError as e:
             elapsed = (time.perf_counter() - start) * 1000
             return ExecutionResult(
@@ -353,6 +354,32 @@ class SocketBridge(FreecadBridge):
                 operation_state="unknown",
                 continues_running=None,
             )
+
+    async def get_execution_status(self, request_id: str) -> dict[str, Any]:
+        """Poll a retained FreeCAD-side execution after a client timeout."""
+        try:
+            result = await self._send_request(
+                "get_execution_status",
+                {"request_id": request_id},
+                response_timeout=2.0,
+            )
+        except Exception:
+            return {
+                "found": False,
+                "request_id": request_id,
+                "operation_state": "unknown",
+                "continues_running": None,
+            }
+        return (
+            dict(result)
+            if isinstance(result, dict)
+            else {
+                "found": False,
+                "request_id": request_id,
+                "operation_state": "unknown",
+                "continues_running": None,
+            }
+        )
 
     # =========================================================================
     # Document Management

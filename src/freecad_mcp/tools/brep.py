@@ -5,6 +5,8 @@ from typing import Annotated, Any, Literal
 
 from pydantic import Field
 
+from freecad_mcp.bridge._geometry_runtime import GEOMETRY_PRESERVATION_RUNTIME
+
 FiniteFloat = Annotated[float, Field(allow_inf_nan=False)]
 NonNegativeFloat = Annotated[float, Field(ge=0, allow_inf_nan=False)]
 PositiveTimeout = Annotated[int, Field(ge=1, le=600000)]
@@ -13,63 +15,6 @@ PositiveTimeout = Annotated[int, Field(ge=1, le=600000)]
 def _vector3(value: list[float], name: str) -> None:
     if len(value) != 3:
         raise ValueError(f"{name} must contain exactly three values")
-
-
-_GEOMETRY_PRESERVATION_RUNTIME = r"""
-def _brep_geometry_preservation(before, after, volume_abs, volume_rel, linear):
-    before_volume = float(before.Volume)
-    after_volume = float(after.Volume)
-    volume_delta = after_volume - before_volume
-    volume_limit = max(float(volume_abs), float(volume_rel) * max(abs(before_volume), abs(after_volume)))
-    before_box = before.BoundBox
-    after_box = after.BoundBox
-    bbox_error = max(
-        abs(first - second)
-        for first, second in zip(
-            (
-                before_box.XMin, before_box.YMin, before_box.ZMin,
-                before_box.XMax, before_box.YMax, before_box.ZMax,
-                before_box.XLength, before_box.YLength, before_box.ZLength,
-            ),
-            (
-                after_box.XMin, after_box.YMin, after_box.ZMin,
-                after_box.XMax, after_box.YMax, after_box.ZMax,
-                after_box.XLength, after_box.YLength, after_box.ZLength,
-            ),
-        )
-    )
-    before_center = before.CenterOfMass
-    after_center = after.CenterOfMass
-    center_error = (after_center - before_center).Length
-    issues = []
-    if abs(volume_delta) > volume_limit:
-        issues.append(
-            "volume drift %r exceeds limit %r" % (volume_delta, volume_limit)
-        )
-    if bbox_error > linear:
-        issues.append(
-            "bounding-box drift %r exceeds limit %r" % (bbox_error, linear)
-        )
-    if center_error > linear:
-        issues.append(
-            "center-of-mass drift %r exceeds limit %r" % (center_error, linear)
-        )
-    if len(before.Solids) != len(after.Solids):
-        issues.append(
-            "solid count changed from %d to %d" % (len(before.Solids), len(after.Solids))
-        )
-    return {
-        "within_tolerance": not issues,
-        "issues": issues,
-        "before_volume": before_volume,
-        "after_volume": after_volume,
-        "volume_delta": volume_delta,
-        "volume_limit": volume_limit,
-        "max_bbox_error": float(bbox_error),
-        "center_of_mass_error": float(center_error),
-        "linear_limit": float(linear),
-    }
-"""
 
 
 def register_brep_tools(
@@ -290,7 +235,7 @@ _result_ = {{
         if not face_names:
             raise ValueError("face_names must not be empty")
         code = f"""
-{_GEOMETRY_PRESERVATION_RUNTIME}
+{GEOMETRY_PRESERVATION_RUNTIME}
 requested_doc_name = {doc_name!r}
 doc = FreeCAD.ActiveDocument if requested_doc_name is None else FreeCAD.getDocument(requested_doc_name)
 if doc is None:
@@ -344,7 +289,7 @@ try:
             refined = raw_healed.removeSplitter()
             if refined.isNull() or not refined.isValid():
                 raise ValueError("removeSplitter produced a null or invalid Shape")
-            refine_geometry_guard = _brep_geometry_preservation(
+            refine_geometry_guard = _geometry_preservation_check(
                 raw_healed,
                 refined,
                 {max_volume_drift_absolute!r},
@@ -442,7 +387,7 @@ except Exception:
             )
         code = f"""
 import Part
-{_GEOMETRY_PRESERVATION_RUNTIME}
+{GEOMETRY_PRESERVATION_RUNTIME}
 
 requested_doc_name = {doc_name!r}
 doc = FreeCAD.ActiveDocument if requested_doc_name is None else FreeCAD.getDocument(requested_doc_name)
@@ -511,6 +456,55 @@ try:
         raise ValueError(
             f"Explicitly requested components are invalid: {{invalid_requested}}"
         )
+    valid_records = [record for record in records if record["valid"]]
+    if not valid_records:
+        raise ValueError("Shape difference contains no valid solid components")
+    signature_groups = {{}}
+    for record in valid_records:
+        signature = tuple(record["topology_signature"])
+        signature_groups.setdefault(signature, []).append(record)
+    majority_signature, majority_records = max(
+        signature_groups.items(),
+        key=lambda item: (len(item[1]), item[0]),
+    )
+    candidate_volumes = [record["volume"] for record in majority_records]
+    candidate_areas = [record["area"] for record in majority_records]
+    volume_mean = sum(candidate_volumes) / len(candidate_volumes)
+    area_mean = sum(candidate_areas) / len(candidate_areas)
+    volume_spread = max(candidate_volumes) - min(candidate_volumes)
+    area_spread = max(candidate_areas) - min(candidate_areas)
+    representative_analysis = {{
+        "scope": "all_valid_components_before_selection",
+        "analyzed_component_count": len(valid_records),
+        "method": "largest_equal_topology_group",
+        "majority_topology_signature": list(majority_signature),
+        "candidate_indices": [
+            record["component_index"] for record in majority_records
+        ],
+        "candidate_count": len(majority_records),
+        "candidate_metrics": [
+            {{
+                "component_index": record["component_index"],
+                "volume": record["volume"],
+                "area": record["area"],
+                "center": record["center"],
+            }}
+            for record in majority_records
+        ],
+        "volume_spread": volume_spread,
+        "volume_spread_relative": (
+            volume_spread / abs(volume_mean) if volume_mean else None
+        ),
+        "area_spread": area_spread,
+        "area_spread_relative": area_spread / abs(area_mean) if area_mean else None,
+        "auto_selected": None,
+        "selection_required": True,
+        "guidance": (
+            "Equal topology only narrows the candidates. Compare volume, area, "
+            "placement, neighborhood, attachment, and source-view evidence before "
+            "selecting; do not choose by generated name or component order."
+        ),
+    }}
     selected = [record for record in records if record["component_index"] in requested]
     selected = [record for record in selected if record["valid"]]
     if {component_volume_min!r} is not None:
@@ -547,7 +541,7 @@ try:
                 refined = component_shape.removeSplitter()
                 if refined.isNull() or not refined.isValid():
                     raise ValueError("removeSplitter produced a null or invalid Shape")
-                component_refine_geometry_guard = _brep_geometry_preservation(
+                component_refine_geometry_guard = _geometry_preservation_check(
                     component_shape,
                     refined,
                     {max_volume_drift_absolute!r},
@@ -588,25 +582,6 @@ try:
             "refine_fallback_reason": component_refine_fallback_reason,
             "refine_geometry_guard": component_refine_geometry_guard,
         }})
-    signature_groups = {{}}
-    for component in components:
-        signature = tuple(component["source_topology_signature"])
-        signature_groups.setdefault(signature, []).append(component["name"])
-    majority_signature, majority_names = max(
-        signature_groups.items(),
-        key=lambda item: (len(item[1]), item[0]),
-    )
-    majority_components = [
-        component
-        for component in components
-        if tuple(component["source_topology_signature"]) == majority_signature
-    ]
-    candidate_volumes = [component["volume"] for component in majority_components]
-    candidate_areas = [component["area"] for component in majority_components]
-    volume_mean = sum(candidate_volumes) / len(candidate_volumes)
-    area_mean = sum(candidate_areas) / len(candidate_areas)
-    volume_spread = max(candidate_volumes) - min(candidate_volumes)
-    area_spread = max(candidate_areas) - min(candidate_areas)
     doc.recompute()
     doc.commitTransaction()
     _result_ = {{
@@ -622,34 +597,7 @@ try:
             record["volume"] for record in records if record["valid"]
         ),
         "selected_volume": sum(component["volume"] for component in components),
-        "representative_analysis": {{
-            "method": "largest_equal_topology_group",
-            "majority_topology_signature": list(majority_signature),
-            "candidate_names": majority_names,
-            "candidate_count": len(majority_names),
-            "candidate_metrics": [
-                {{
-                    "name": component["name"],
-                    "volume": component["volume"],
-                    "area": component["area"],
-                    "center": component["center"],
-                }}
-                for component in majority_components
-            ],
-            "volume_spread": volume_spread,
-            "volume_spread_relative": (
-                volume_spread / abs(volume_mean) if volume_mean else None
-            ),
-            "area_spread": area_spread,
-            "area_spread_relative": area_spread / abs(area_mean) if area_mean else None,
-            "auto_selected": None,
-            "selection_required": True,
-            "guidance": (
-                "Equal topology only narrows the candidates. Compare volume, area, "
-                "placement, neighborhood, attachment, and source-view evidence before "
-                "selecting; do not choose by generated name or component order."
-            ),
-        }},
+        "representative_analysis": representative_analysis,
         "component_selection": {{
             "indices": requested_indices,
             "volume_min": {component_volume_min!r},
@@ -745,7 +693,7 @@ except Exception:
     ) -> dict[str, Any]:
         """Run OCCT shape fixing, optional tolerance limiting, and refinement."""
         code = f"""
-{_GEOMETRY_PRESERVATION_RUNTIME}
+{GEOMETRY_PRESERVATION_RUNTIME}
 requested_doc_name = {doc_name!r}
 doc = FreeCAD.ActiveDocument if requested_doc_name is None else FreeCAD.getDocument(requested_doc_name)
 if doc is None:
@@ -765,7 +713,7 @@ try:
         healed.limitTolerance({tolerance!r})
     if healed.isNull() or not healed.isValid():
         raise ValueError("Shape fixing did not produce a valid Shape")
-    healing_geometry_guard = _brep_geometry_preservation(
+    healing_geometry_guard = _geometry_preservation_check(
         source_shape,
         healed,
         {max_volume_drift_absolute!r},
@@ -785,7 +733,7 @@ try:
             refined = healed.removeSplitter()
             if refined.isNull() or not refined.isValid():
                 raise ValueError("removeSplitter produced a null or invalid Shape")
-            refine_geometry_guard = _brep_geometry_preservation(
+            refine_geometry_guard = _geometry_preservation_check(
                 healed,
                 refined,
                 {max_volume_drift_absolute!r},
@@ -851,7 +799,7 @@ except Exception:
         """Build solid(s) from closed shell(s) and validate positive volume."""
         code = f"""
 import Part
-{_GEOMETRY_PRESERVATION_RUNTIME}
+{GEOMETRY_PRESERVATION_RUNTIME}
 
 requested_doc_name = {doc_name!r}
 doc = FreeCAD.ActiveDocument if requested_doc_name is None else FreeCAD.getDocument(requested_doc_name)
@@ -881,7 +829,7 @@ try:
             refined = result_shape.removeSplitter()
             if refined.isNull() or not refined.isValid():
                 raise ValueError("removeSplitter produced a null or invalid Shape")
-            refine_geometry_guard = _brep_geometry_preservation(
+            refine_geometry_guard = _geometry_preservation_check(
                 result_shape,
                 refined,
                 {max_volume_drift_absolute!r},
@@ -960,7 +908,7 @@ except Exception:
         _vector3(axis_direction, "axis_direction")
         code = f"""
 import Part
-{_GEOMETRY_PRESERVATION_RUNTIME}
+{GEOMETRY_PRESERVATION_RUNTIME}
 
 requested_doc_name = {doc_name!r}
 doc = FreeCAD.ActiveDocument if requested_doc_name is None else FreeCAD.getDocument(requested_doc_name)
@@ -1028,7 +976,7 @@ try:
             refined = pre_refine_shape.removeSplitter()
             if refined.isNull() or not refined.isValid():
                 raise ValueError("removeSplitter produced a null or invalid Shape")
-            refine_geometry_guard = _brep_geometry_preservation(
+            refine_geometry_guard = _geometry_preservation_check(
                 pre_refine_shape,
                 refined,
                 {max_volume_drift_absolute!r},
