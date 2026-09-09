@@ -472,7 +472,10 @@ metric; use formal checkpoints only when the task benefits from them.
   already running on the main thread keeps FreeCAD busy and cannot be interrupted
   safely. If its execution deadline expires, the job follows the retained bridge
   request to its actual completion; an older bridge without status support yields
-  `unknown_after_timeout`, not a false failure.
+  `unknown_after_timeout`, not a false failure, including tri-state
+  `continues_running=unknown` responses. A request that times out while still
+  queued and is guaranteed not to execute is reported as `cancelled` with
+  `termination_reason="timeout_before_start"`.
 - Export writes a same-directory candidate first. The destination is replaced
   only after the candidate is nonempty and any requested STEP/IGES round-trip
   checks pass, so a rejected export cannot overwrite a previously good file.

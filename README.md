@@ -558,7 +558,7 @@ endpoints, radius, arc side, datum, and the dimension chain are rechecked.
 | Tool | Description | Mode |
 | --- | --- | --- |
 | `start_tool_job` | Track an ordinary in-process MCP tool without holding the client request open | Both |
-| `get_tool_job` | Poll retained bridge state and retrieve the actual final result | Both |
+| `get_tool_job` | Poll retained state; distinguish completion, failure, queue cancellation, and unknown timeout | Both |
 | `cancel_tool_job` | Cancel queued work or report running OCCT work as busy/non-interruptible | Both |
 
 #### History (1 tool)

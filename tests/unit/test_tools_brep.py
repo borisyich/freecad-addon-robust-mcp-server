@@ -210,8 +210,14 @@ async def test_extract_feature_material_supports_fuzzy_cut_and_refine_fallback(
     assert '"volume_spread_relative"' in code
     assert '"auto_selected": None' in code
     assert '"selection_required": True' in code
-    assert '"largest_equal_topology_group"' in code
-    assert "do not choose" in code
+    assert '"equal_topology_group_inventory"' in code
+    assert '"ambiguous_topology_group_tie"' in code
+    assert '"largest_group_is_unique"' in code
+    assert '"leading_groups"' in code
+    assert '"largest_topology_signatures"' in code
+    assert '"preferred_topology_signature"' not in code
+    assert '"majority_topology_signature"' not in code
+    assert "do not choose by signature value" in code
     assert "key=sort_keys['volume']" in code
     assert "selected = selected[:1]" in code
     assert "component_shape = refined" in code

@@ -69,6 +69,70 @@ class _RetainedBridge:
         }
 
 
+class _ErrorMCP(_FakeMCP):
+    def __init__(self, outcome, *, raises=True):
+        super().__init__()
+        self.outcome = outcome
+        self.raises = raises
+
+    async def call_tool(self, name, arguments):
+        if name != "error_tool":
+            return await super().call_tool(name, arguments)
+        if self.raises:
+            raise ValueError(self.outcome)
+        return self.outcome
+
+
+class _MissingStatusBridge:
+    async def get_execution_status(self, request_id):
+        return {
+            "found": False,
+            "request_id": request_id,
+            "operation_state": "unknown",
+            "continues_running": None,
+        }
+
+
+class _UnknownStatusBridge:
+    async def get_execution_status(self, request_id):
+        return {
+            "found": True,
+            "request_id": request_id,
+            "operation_state": "UNKNOWN",
+            "continues_running": "unknown",
+            # Some legacy transports use false for "no successful result yet".
+            "success": False,
+        }
+
+
+class _StoppedStatusBridge:
+    def __init__(self, operation_state):
+        self.operation_state = operation_state
+
+    async def get_execution_status(self, request_id):
+        return {
+            "found": True,
+            "request_id": request_id,
+            "operation_state": self.operation_state,
+            "continues_running": False,
+            "success": False,
+        }
+
+
+async def _wait_for_terminal(mcp, job_id):
+    for _ in range(40):
+        await asyncio.sleep(0.01)
+        job = await mcp.tools["get_tool_job"](job_id)
+        if job["state"] not in {
+            "queued",
+            "running",
+            "freecad_running",
+            "tracking_execution",
+        }:
+            return job
+    raise AssertionError("job did not reach a terminal state")
+
+
 @pytest.mark.asyncio
 async def test_background_job_returns_before_slow_tool_and_can_be_polled():
     mcp = _FakeMCP()
@@ -153,3 +217,182 @@ async def test_timed_out_freecad_execution_is_followed_to_real_completion():
     assert polled["result_source"] == "retained_bridge_execution"
     assert polled["result"] == {"value": 11}
     assert bridge.poll_count >= 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("with_request_id", [True, False])
+async def test_unknown_transport_timeout_is_not_classified_as_failure(
+    with_request_id,
+):
+    request_text = "; request_id=legacy-4" if with_request_id else ""
+    mcp = _ErrorMCP(
+        "TimeoutError: operation_state=unknown; continues_running=unknown"
+        + request_text
+    )
+    mcp.tools["error_tool"] = object()
+    bridge = _MissingStatusBridge()
+
+    async def get_bridge():
+        return bridge
+
+    register_job_tools(mcp, get_bridge)
+    started = await mcp.tools["start_tool_job"]("error_tool")
+    job = await _wait_for_terminal(mcp, started["job_id"])
+
+    assert job["state"] == "unknown_after_timeout"
+    assert job["operation_state"] == "unknown"
+    assert job["continues_running"] is None
+    assert job["timed_out"] is True
+    assert job["termination_reason"] == "unknown_after_timeout"
+    assert job["bridge_request_id"] == ("legacy-4" if with_request_id else None)
+
+
+@pytest.mark.asyncio
+async def test_queue_timeout_cancelled_before_start_is_not_failure():
+    mcp = _ErrorMCP(
+        {
+            "isError": True,
+            "structuredContent": {
+                "error_type": "TimeoutError",
+                "operation_state": "cancelled",
+                "continues_running": False,
+                "request_id": "queued-8",
+            },
+        },
+        raises=False,
+    )
+    mcp.tools["error_tool"] = object()
+    register_job_tools(mcp)
+
+    started = await mcp.tools["start_tool_job"]("error_tool")
+    job = await _wait_for_terminal(mcp, started["job_id"])
+
+    assert job["state"] == "cancelled"
+    assert job["operation_state"] == "cancelled"
+    assert job["continues_running"] is False
+    assert job["timed_out"] is True
+    assert job["termination_reason"] == "timeout_before_start"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation_state", ["cancelled", "not_started"])
+async def test_equivalent_pre_start_timeout_states_are_cancelled(operation_state):
+    mcp = _ErrorMCP(
+        {
+            "isError": True,
+            "structuredContent": {
+                "error_type": "TimeoutError",
+                "operation_state": operation_state,
+                "continues_running": False,
+                "request_id": "queued-legacy",
+            },
+        },
+        raises=False,
+    )
+    mcp.tools["error_tool"] = object()
+    register_job_tools(mcp)
+
+    started = await mcp.tools["start_tool_job"]("error_tool")
+    job = await _wait_for_terminal(mcp, started["job_id"])
+
+    assert job["state"] == "cancelled"
+    assert job["operation_state"] == operation_state
+    assert job["freecad_busy"] is False
+    assert job["termination_reason"] == "timeout_before_start"
+
+
+@pytest.mark.asyncio
+async def test_non_timeout_not_started_rejection_remains_failure():
+    mcp = _ErrorMCP(
+        {
+            "isError": True,
+            "structuredContent": {
+                "error_type": "ResourceLimitError",
+                "operation_state": "not_started",
+                "continues_running": False,
+                "request_id": "rejected-1",
+            },
+        },
+        raises=False,
+    )
+    mcp.tools["error_tool"] = object()
+    register_job_tools(mcp)
+
+    started = await mcp.tools["start_tool_job"]("error_tool")
+    job = await _wait_for_terminal(mcp, started["job_id"])
+
+    assert job["state"] == "failed"
+    assert job["operation_state"] == "not_started"
+    assert job["timed_out"] is False
+    assert job["termination_reason"] == "tool_failure"
+
+
+@pytest.mark.asyncio
+async def test_unknown_retained_status_is_not_failure_even_with_success_false():
+    mcp = _ErrorMCP(
+        "TimeoutError: operation_state=unknown; continues_running=unknown; "
+        "request_id=legacy-unknown"
+    )
+    mcp.tools["error_tool"] = object()
+    bridge = _UnknownStatusBridge()
+
+    async def get_bridge():
+        return bridge
+
+    register_job_tools(mcp, get_bridge)
+    started = await mcp.tools["start_tool_job"]("error_tool")
+    job = await _wait_for_terminal(mcp, started["job_id"])
+
+    assert job["state"] == "unknown_after_timeout"
+    assert job["operation_state"] == "unknown"
+    assert job["continues_running"] is None
+    assert job["freecad_busy"] is None
+    assert job["termination_reason"] == "unknown_after_timeout"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status_state", "expected_job_state", "expected_reason"),
+    [
+        ("queued", "cancelled", "timeout_before_start"),
+        ("running", "unknown_after_timeout", "unknown_after_timeout"),
+    ],
+)
+async def test_retained_status_uses_execution_evidence_not_success_flag(
+    status_state,
+    expected_job_state,
+    expected_reason,
+):
+    mcp = _ErrorMCP(
+        "TimeoutError: operation_state=unknown; continues_running=unknown; "
+        "request_id=legacy-state"
+    )
+    mcp.tools["error_tool"] = object()
+    bridge = _StoppedStatusBridge(status_state)
+
+    async def get_bridge():
+        return bridge
+
+    register_job_tools(mcp, get_bridge)
+    started = await mcp.tools["start_tool_job"]("error_tool")
+    job = await _wait_for_terminal(mcp, started["job_id"])
+
+    assert job["state"] == expected_job_state
+    assert job["operation_state"] == status_state
+    assert job["continues_running"] is False
+    assert job["freecad_busy"] is False
+    assert job["termination_reason"] == expected_reason
+
+
+@pytest.mark.asyncio
+async def test_ordinary_tool_error_remains_failure():
+    mcp = _ErrorMCP("invalid modeling parameter")
+    mcp.tools["error_tool"] = object()
+    register_job_tools(mcp)
+
+    started = await mcp.tools["start_tool_job"]("error_tool")
+    job = await _wait_for_terminal(mcp, started["job_id"])
+
+    assert job["state"] == "failed"
+    assert job["timed_out"] is False
+    assert job["termination_reason"] == "tool_failure"

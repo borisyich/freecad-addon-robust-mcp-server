@@ -146,6 +146,69 @@ _result_ = True
         assert analysis["analyzed_component_count"] == 3
         assert analysis["candidate_count"] == 3
         assert analysis["candidate_indices"] == [1, 2, 3]
+        assert analysis["largest_group_is_unique"] is True
+        assert analysis["leading_group_count"] == 1
+        assert analysis["selection_status"] == "unique_largest_topology_group"
+        assert len(analysis["largest_topology_signatures"]) == 1
+        assert "preferred_topology_signature" not in analysis
+    finally:
+        await _close(live_bridge, doc_name)
+
+
+@pytest.mark.asyncio
+async def test_equal_largest_topology_groups_are_explicitly_ambiguous(
+    live_bridge: XmlRpcBridge,
+    brep_tools: dict[str, Any],
+) -> None:
+    doc_name = "MCPBrepTopologyTie"
+    setup = await live_bridge.execute_python(
+        f"""
+import Part
+if {doc_name!r} in FreeCAD.listDocuments():
+    FreeCAD.closeDocument({doc_name!r})
+doc = FreeCAD.newDocument({doc_name!r})
+source = doc.addObject("Part::Feature", "ImportedMixedFeatures")
+support = doc.addObject("Part::Feature", "RecoveredSupport")
+base = Part.makeBox(32, 16, 4)
+features = [
+    Part.makeCylinder(1.5, 3, FreeCAD.Vector(5, 4, 4)),
+    Part.makeCylinder(1.5, 3, FreeCAD.Vector(13, 4, 4)),
+    Part.makeBox(3, 3, 3, FreeCAD.Vector(20, 3, 4)),
+    Part.makeBox(3, 3, 3, FreeCAD.Vector(26, 3, 4)),
+]
+source_shape = base
+for feature in features:
+    source_shape = source_shape.fuse(feature)
+source.Shape = source_shape
+support.Shape = base
+doc.recompute()
+_result_ = True
+"""
+    )
+    assert setup.success, setup.failure_details("setup failed")
+    try:
+        extracted = await brep_tools["extract_feature_material"](
+            source_name="ImportedMixedFeatures",
+            healed_name="RecoveredSupport",
+            component_limit=1,
+            result_prefix="SelectedCandidate",
+            doc_name=doc_name,
+        )
+
+        analysis = extracted["representative_analysis"]
+        assert extracted["created_component_count"] == 1
+        assert analysis["analyzed_component_count"] == 4
+        assert analysis["topology_group_count"] == 2
+        assert analysis["largest_group_size"] == 2
+        assert analysis["largest_group_is_unique"] is False
+        assert analysis["leading_group_count"] == 2
+        assert analysis["selection_status"] == "ambiguous_topology_group_tie"
+        assert len(analysis["largest_topology_signatures"]) == 2
+        assert "preferred_topology_signature" not in analysis
+        assert analysis["candidate_count"] == 4
+        assert sorted(analysis["candidate_indices"]) == [1, 2, 3, 4]
+        assert {group["component_count"] for group in analysis["leading_groups"]} == {2}
+        assert "majority_topology_signature" not in analysis
     finally:
         await _close(live_bridge, doc_name)
 

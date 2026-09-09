@@ -383,6 +383,14 @@
   `unknown_after_timeout` instead of a false failure.
 - Generalized engineering guidance, examples, and regression fixtures from one
   named rotating-part scenario to arbitrary local and repeated BREP features.
+- Corrected background-job timeout classification across structured and textual
+  transport errors. Unknown execution state now remains
+  `unknown_after_timeout`, while a request proven cancelled before leaving the
+  queue is reported as cancellation rather than tool failure.
+- Replaced arbitrary largest-topology tie-breaking with a complete group
+  inventory. Equal largest groups are explicitly ambiguous, all tied candidates
+  are returned, and no topology signature is preferred by value or iteration
+  order.
 
 This project uses **component-specific versioning**. Each component has its own
 release notes and version history.

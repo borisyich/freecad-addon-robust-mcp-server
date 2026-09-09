@@ -463,25 +463,79 @@ try:
     for record in valid_records:
         signature = tuple(record["topology_signature"])
         signature_groups.setdefault(signature, []).append(record)
-    majority_signature, majority_records = max(
-        signature_groups.items(),
-        key=lambda item: (len(item[1]), item[0]),
+
+    topology_groups = []
+    for signature, group_records in sorted(signature_groups.items()):
+        group_volumes = [record["volume"] for record in group_records]
+        group_areas = [record["area"] for record in group_records]
+        group_volume_mean = sum(group_volumes) / len(group_volumes)
+        group_area_mean = sum(group_areas) / len(group_areas)
+        group_volume_spread = max(group_volumes) - min(group_volumes)
+        group_area_spread = max(group_areas) - min(group_areas)
+        topology_groups.append({{
+            "topology_signature": list(signature),
+            "component_indices": [
+                record["component_index"] for record in group_records
+            ],
+            "component_count": len(group_records),
+            "component_metrics": [
+                {{
+                    "component_index": record["component_index"],
+                    "volume": record["volume"],
+                    "area": record["area"],
+                    "center": record["center"],
+                }}
+                for record in group_records
+            ],
+            "volume_spread": group_volume_spread,
+            "volume_spread_relative": (
+                group_volume_spread / abs(group_volume_mean)
+                if group_volume_mean else None
+            ),
+            "area_spread": group_area_spread,
+            "area_spread_relative": (
+                group_area_spread / abs(group_area_mean)
+                if group_area_mean else None
+            ),
+        }})
+    largest_group_size = max(
+        group["component_count"] for group in topology_groups
     )
-    candidate_volumes = [record["volume"] for record in majority_records]
-    candidate_areas = [record["area"] for record in majority_records]
-    volume_mean = sum(candidate_volumes) / len(candidate_volumes)
-    area_mean = sum(candidate_areas) / len(candidate_areas)
-    volume_spread = max(candidate_volumes) - min(candidate_volumes)
-    area_spread = max(candidate_areas) - min(candidate_areas)
+    leading_groups = [
+        group for group in topology_groups
+        if group["component_count"] == largest_group_size
+    ]
+    largest_group_is_unique = len(leading_groups) == 1
+    leading_indices = sorted(
+        component_index
+        for group in leading_groups
+        for component_index in group["component_indices"]
+    )
+    leading_index_set = set(leading_indices)
+    leading_records = [
+        record for record in valid_records
+        if record["component_index"] in leading_index_set
+    ]
     representative_analysis = {{
         "scope": "all_valid_components_before_selection",
         "analyzed_component_count": len(valid_records),
-        "method": "largest_equal_topology_group",
-        "majority_topology_signature": list(majority_signature),
-        "candidate_indices": [
-            record["component_index"] for record in majority_records
+        "method": "equal_topology_group_inventory",
+        "topology_group_count": len(topology_groups),
+        "topology_groups": topology_groups,
+        "largest_group_size": largest_group_size,
+        "largest_group_is_unique": largest_group_is_unique,
+        "leading_group_count": len(leading_groups),
+        "leading_groups": leading_groups,
+        "largest_topology_signatures": [
+            group["topology_signature"] for group in leading_groups
         ],
-        "candidate_count": len(majority_records),
+        "selection_status": (
+            "unique_largest_topology_group"
+            if largest_group_is_unique
+            else "ambiguous_topology_group_tie"
+        ),
+        "candidate_indices": leading_indices,
+        "candidate_count": len(leading_records),
         "candidate_metrics": [
             {{
                 "component_index": record["component_index"],
@@ -489,20 +543,16 @@ try:
                 "area": record["area"],
                 "center": record["center"],
             }}
-            for record in majority_records
+            for record in leading_records
         ],
-        "volume_spread": volume_spread,
-        "volume_spread_relative": (
-            volume_spread / abs(volume_mean) if volume_mean else None
-        ),
-        "area_spread": area_spread,
-        "area_spread_relative": area_spread / abs(area_mean) if area_mean else None,
         "auto_selected": None,
         "selection_required": True,
         "guidance": (
-            "Equal topology only narrows the candidates. Compare volume, area, "
-            "placement, neighborhood, attachment, and source-view evidence before "
-            "selecting; do not choose by generated name or component order."
+            "A unique largest topology group is only a candidate pool; tied largest "
+            "groups are explicitly ambiguous. Compare every leading group's volume, "
+            "area, placement, neighborhood, attachment, and source-view evidence "
+            "before selecting; do not choose by signature value, generated name, or "
+            "component order."
         ),
     }}
     selected = [record for record in records if record["component_index"] in requested]

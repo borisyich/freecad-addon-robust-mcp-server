@@ -649,12 +649,16 @@ and falls back independently, with diagnostics in each component record.
 Before applying `component_indices`, volume filters, sorting, or
 `component_limit`, the response analyzes every valid difference component.
 `representative_analysis.scope="all_valid_components_before_selection"` reports
-the analyzed count, equal-topology candidates, per-candidate volume, area and
-centre, plus absolute/relative spreads. It never auto-selects a seed. This is
-candidate evidence only: compare local neighborhood, attachment, geometry, and
-source views before choosing a repeated feature; generated names, component
-order, and a zero spread after filtering are not proof that an instance is
-intact.
+every topology group, its component indices, per-component metrics and spreads.
+`largest_group_is_unique` distinguishes a unique largest group from an equal-size
+tie. When tied, `selection_status="ambiguous_topology_group_tie"`, every tied
+group is returned in `leading_groups`; `largest_topology_signatures` always
+lists every equally largest signature. The response deliberately has no
+`majority_topology_signature` or preferred signature: signature value and
+iteration order never break a tie. Even a unique largest group is only a
+candidate pool, not proof of an intact representative.
+Compare local neighborhood, attachment, geometry, and source views before
+choosing a repeated feature; generated names and component order are not proof.
 `polar_pattern_shape(fuse=True)` uses a single OCCT multi-fuse when no fuzzy
 tolerance is requested and reports the chosen `fuse_strategy`. An unfused
 pattern must preserve `source volume × occurrences` before refinement; its
@@ -2481,8 +2485,16 @@ the original execution deadline expires. The job then enters
 `freecad_running`, reports `freecad_busy=true`, polls the non-executing status
 endpoint, and adopts the operation's real final result instead of falsely
 becoming failed at the client timeout. If an older bridge cannot report retained
-status, the terminal state is `unknown_after_timeout`, never a fabricated
-failure or cancellation. Process isolation would require a separate FreeCAD
+status, any timeout with `operation_state=unknown` or
+`continues_running=unknown` becomes `unknown_after_timeout`, whether or not a
+request ID is available; it is never fabricated as a tool failure. A timeout
+while still queued is different: when the bridge guarantees the request was
+cancelled before execution, the job becomes `cancelled` with
+`termination_reason="timeout_before_start"`; both `cancelled` and legacy
+`not_started` evidence are accepted. A non-timeout transport failure with
+unknown execution state is similarly reported as
+`unknown_after_transport_error`. Ordinary modeling/tool exceptions remain
+`failed`. Process isolation would require a separate FreeCAD
 document/process lifecycle and is not implied by this job API.
 
 ### Prompt access fallback
