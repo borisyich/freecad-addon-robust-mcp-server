@@ -76,6 +76,25 @@ Read [model-editing.md](references/model-editing.md) for existing models,
 repeat populations, checkpoint limits, and recovery. Apply the same loop during
 creation, with proportional checks after each meaningful change.
 
+### Rejection takes precedence over the proposed explanation
+
+A failed geometry, material-change, checkpoint, or export guard blocks accepting
+that candidate and operations depending on it. "Kernel noise", "bad seam", and
+"normalization bug" are hypotheses until independently tested. Do not widen
+tolerances, enable drift, change the baseline, or repeat the operation through
+Python to turn rejection into acceptance. Diagnose on an isolated copy with a
+bounded discriminating test. If a verifier defect is demonstrated, record the
+defect and independent checks of the same invariant; repair the verification
+path within authorized scope or use a justified scoped replacement preserving
+the other guards and atomic file acceptance. Do not change server code without
+authorization. If no reliable verification path exists, report blocked delivery.
+A requested relaxation of actual fidelity
+requires the user's decision, not the agent's explanation.
+
+Apply the bounded-attempt protocol in
+[model-editing.md](references/model-editing.md) to failed CAD operations during
+creation as well as edits. Renaming objects or switching APIs does not reset it.
+
 ## Choose representation and dependencies
 
 Default for a new editable manufactured part: native Body, constrained sketches,
@@ -129,10 +148,18 @@ only the schema needed. If loaded over MCP, resolve relative links beneath
 Do not reload the same policy through several prompts or dump the global registry.
 
 Use compact inspections first and page relevant topology or constraints.
-An incomplete page is not a complete population. Prefer typed tools when their
-contract covers the operation. `execute_python`, `safe_execute`, and
-`run_macro` remain available for scoped missing capabilities, experiments, or
-efficient native-object construction; the same engineering checks apply.
+An incomplete page is not a complete population. Use standard typed tools first
+when their contract covers the operation. Before scripting, identify the exact
+missing capability or reproducible implementation defect and the smallest scoped
+fallback. A rejected candidate is not evidence that the standard tool is broken.
+There is no requirement to try every equivalent formulation before stopping.
+Do not reimplement available selection, grouping, extraction, transforms, or
+export merely for convenience. `execute_python`, `safe_execute`, and `run_macro`
+remain available for genuinely missing capabilities and bounded diagnosis;
+read-only diagnosis is not permission to write its candidate into the model.
+Fallback permission is operation-specific, not inherited by later operations.
+Return to typed tools afterward and preserve their acceptance checks. A user's
+stricter standard-tools-only constraint takes precedence over these exceptions.
 
 For long operations use `start_tool_job` and `get_tool_job`. A timeout describes
 waiting, not necessarily execution failure. Running OCCT work is not safely
@@ -149,12 +176,22 @@ artifact when requested. Report significant unresolved assumptions and which
 requirements were measured, visually reviewed, analytically checked, or untested.
 
 After geometry-changing work, call `validate_parametric_model` immediately
-before the final response. For drawing/sketch reconstruction pass the complete
+before the final response. For intentional imported/static-B-rep editing pass
+`workflow="imported_brep_edit"`; this does not require reconstructing history.
+For drawing/sketch reconstruction pass the complete
 `acceptance_manifest`; for sketch output also pass
 `target={"kind":"sketch","name":...}`. `required_dimension_names` alone is
 legacy input, not complete source acceptance. Interpret warnings against the
 requested representation. Caller attestations do not prove image semantics,
 source-inventory completeness, or tool provenance.
+
+Keep modeling health, requirement evidence, and artifact/export verification as
+separate conclusions. `review_recommended` is not machine-verified acceptance;
+a complete manifest cannot clear a previous guard rejection. Record evidence
+when observed. Repair omitted metadata only from existing traceable observations;
+otherwise perform the missing check. Do not replace a failed measurement with a
+more convenient estimator, remove a failed requirement, or relabel it to obtain
+a better report. Preserve method, frame, units, tolerance, and actual values.
 
 Never modify accepted geometry merely to improve a validation score. Diagnose
 the actual dependency; preserve legitimate reference parameters and construction

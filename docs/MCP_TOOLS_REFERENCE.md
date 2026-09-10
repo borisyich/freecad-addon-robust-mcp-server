@@ -2538,8 +2538,9 @@ source view, semantic source references, corresponding model elements, and valid
 measurement recipe. Classify it as `driving` or `verification`; exceptional
 `source_issue` requires concrete source evidence plus attempted interpretations,
 and `unresolved` is not a permitted terminal manifest role. Implement driving
-dimensions as named sketch constraints or connected Spreadsheet aliases and pass
-the complete driving list through `required_dimension_names`. Separately check
+dimensions as named sketch constraints or connected Spreadsheet aliases when
+native reconstruction is the requested workflow, and pass the complete
+`acceptance_manifest` so every driving ID is derived from it. Separately check
 every driving and verification dimension by reproducing its source-view context
 and measuring between the same semantic elements with matching dimension
 semantics. Retain expected, observed, tolerance, pass/fail, and tool evidence.
@@ -2550,7 +2551,15 @@ supplied by the caller. Evidence strings, `review_attestation`, and the legacy
 `image_content_reviewed` boolean are not proof of tool execution or image
 semantics. Consequently a structurally complete manifest is reported with
 `verification_scope="caller_attested"`, `machine_verified=false`, and a review
-finding rather than upgrading the model assessment to `healthy`.
+finding rather than upgrading aggregate acceptance to `healthy`.
+
+`model_assessment` reports the FreeCAD-side model diagnostic before source
+acceptance is merged; `assessment` is the aggregate diagnostic. Summary text
+labels both, including `verification_scope` and `machine_verified`. Completing
+metadata can correct a missing-record error but cannot verify pixels or evidence
+provenance, resolve an export guard, or clear existing geometry findings. Record
+actual measurements with their methods/frames and preserve unresolved failures;
+do not substitute a convenient estimator or widen limits to obtain acceptance.
 
 Omit `target` for the existing whole-model/final-solid diagnostic. When the
 deliverable is a sketch, pass for example

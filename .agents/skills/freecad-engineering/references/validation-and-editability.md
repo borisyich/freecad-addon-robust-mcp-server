@@ -21,6 +21,12 @@ final user-facing response. Start compact; request `structure` or paged/full
 evidence only for a specific diagnostic. Check the intended document, active
 target, Tip, dependency graph, sketch solver, and significant outside objects.
 
+For an intentional imported/static-B-rep edit use `workflow="imported_brep_edit"`.
+Validate geometry, preserved interfaces and deliverable fidelity; missing native
+history is not a request to manufacture a parametric tree. Native features that
+do exist still need dependency checks. A STEP deliverable cannot preserve native
+feature history; do not imply otherwise in the report.
+
 For sketch output pass `target={"kind":"sketch","name":...}`; Body/solid/Tip
 requirements do not apply to the sketch target. An under-constrained result may
 be deliberate motion or an unfinished driving sketch: inspect which DoF remain.
@@ -40,6 +46,26 @@ artifacts; report correspondence as caller-attested unless an independent verifi
 really checked it. No-image work needs no fabricated visual records.
 Non-dimensional requirements belong in `requirements`; empty `dimensions`
 are legitimate when the source has none.
+
+Maintain three independent outcomes: model health, source/requirement evidence,
+and final artifact verification. The model validator does not replay export or
+healing guards. An incomplete manifest does not itself mean broken geometry;
+`review_recommended` with `machine_verified=false` does not mean all requirements
+were independently verified. Report both the aggregate and scoped assessments.
+
+Record view recipes, candidate identity/revision, actual comparison observation,
+and measurement method when the check is performed. Correcting a missing recipe
+or attestation afterward is legitimate only if it describes an already performed,
+traceable check of the same final candidate. Otherwise do the missing observation;
+do not write a success statement merely because validation asks for a field.
+Invalidate affected evidence after geometry/export changes. Keep failed checks
+in the task record even when a later check succeeds, explaining what changed.
+
+For conflicting measurements record both actual outputs, their methods, frames,
+units and uncertainties. Do not cite an optimal-bounds measurement while copying
+fast-bound values, or claim exact equality from rounded numbers. If independent
+evidence cannot resolve a discrepancy, acceptance of that invariant stays open.
+Changing schema completeness never establishes numeric or visual truth.
 
 ## Dependency integrity
 

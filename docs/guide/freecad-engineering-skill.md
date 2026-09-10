@@ -22,6 +22,12 @@ The core loop is observe, predict, edit, verify, and restore or accept. It links
 requirements, functional interfaces, datums, dependencies, manufacturing
 assumptions, tolerances, and measurable evidence.
 
+The model-editing reference supplies an edit-route table and bounded failure-family
+protocol. Standard tools come first; diagnostic scripting does not authorize
+mutation or guard bypass. A rejection blocks acceptance until its invariant is
+resolved. Imported edits use `workflow="imported_brep_edit"` without requiring
+reconstruction of native history.
+
 | Reference | Use |
 |---|---|
 | `design-and-verification.md` | New-design requirements, function, load/fit assumptions, alternatives, evidence and tolerances |
@@ -56,3 +62,8 @@ When changing a rule, state the failing behavior, its applicability, the propose
 decision criterion, and a counterexample or relevant test. Keep evaluation
 fixtures out of the runtime instructions so a known case does not become the
 definition of engineering practice.
+
+The [before/after session audit](../engineering-skill-session-comparison.md)
+records subsequent operational regressions, counterevidence and corrections.
+Metadata completeness, model health and artifact verification are distinct;
+validation reports both `model_assessment` and aggregate `assessment`.

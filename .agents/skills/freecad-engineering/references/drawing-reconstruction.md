@@ -96,6 +96,11 @@ height with fit-all. For `compare_images`, surface and inspect returned MCP
 ImageContent. A saved path or metadata is not an observation. Record concrete
 agreement/discrepancy and a decision with `review_attestation`.
 
+If the candidate occupies only a small fraction of its panel, reframe or crop
+before claiming detailed profile correspondence. Match orientation and useful
+apparent scale; independently verify physical dimensions so image resizing does
+not conceal size drift. Record the actual recipe rather than a guessed camera.
+
 Compare visible geometry and annotation semantics, accounting for occlusion,
 line conventions, and perspective. A matching projection cannot prove hidden
 depth. Use geometric measurements for numeric claims. The validator cannot

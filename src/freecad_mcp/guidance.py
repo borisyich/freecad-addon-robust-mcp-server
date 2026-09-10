@@ -107,8 +107,11 @@ When the deliverable is a sketch rather than a final solid, pass
 `target={{"kind":"sketch","name":"..."}}` so required dimensions are traced to
 that sketch's non-construction geometry and Body/solid/Tip state is out of scope.
 
-`execute_python`, `safe_execute`, and `run_macro` remain available. Their use
-does not waive editable/parametric model expectations.
+Use standard typed tools first. `execute_python`, `safe_execute`, and `run_macro`
+remain scoped fallbacks, not a way to bypass a guard rejection. Follow the
+Skill's edit-route and bounded-attempt protocol; script permission is specific
+to the missing operation. For intentional imported BRep edits, pass
+`workflow="imported_brep_edit"` and do not require reconstruction of native history.
 """
 
 DRAWING_RECONSTRUCTION_WORKFLOW: Final[str] = (
@@ -127,6 +130,8 @@ MODEL_MODIFICATION_WORKFLOW: Final[str] = (
     _SKILL_ROUTER + "\nFor an existing model, also read the skill section "
     "'Modify existing models' in references/model-editing.md and inspect the "
     "current history, local neighborhood, and invariants before editing. "
+    "Choose its evidence-based edit route before constructing tools; stop an "
+    "exhausted failure family rather than changing masks, APIs or tolerances. "
     "When a drawing/image supplies geometry evidence for the edit, also apply the "
     "complete source-view/dimension manifest and final one-to-one view validation "
     "rules from 'Reconstruct from drawings or images' to the edited model.\n"

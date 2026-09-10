@@ -910,6 +910,13 @@ def test_native_part_boolean_chain_is_healthy_and_static_import_is_warned(
     direct_edit_report = direct_edit_namespace["_result_"]
     assert direct_edit_report["workflow"] == "imported_brep_edit"
     assert direct_edit_report["assessment"] == "healthy"
+    completion = direct_edit_report["completion_guidance"]["report"]
+    assert "Body and Tip validity" not in completion
+    assert "artifact/export verification and unresolved guard failures" in completion
+    assert (
+        "existing dependencies where present; native history is not required"
+        in completion
+    )
     assert {
         (item["severity"], item["category"]) for item in direct_edit_report["findings"]
     } == {

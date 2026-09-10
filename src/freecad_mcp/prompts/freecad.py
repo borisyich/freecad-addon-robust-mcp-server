@@ -76,9 +76,11 @@ mechanical model, activate `$freecad-engineering`. The canonical policy is
 
 ## Critical Rules
 
-- Prefer standard MCP tools. `safe_execute` and `execute_python` are fallback
-  mechanisms only when a required standard tool is missing or demonstrably
-  invalid.
+- Use standard MCP tools first. `safe_execute` and `execute_python` are scoped
+  fallbacks for a missing capability or demonstrated implementation defect.
+  A guard rejecting a candidate is not a tool defect and cannot be bypassed by
+  scripting, widened tolerances, or a changed baseline. Follow the Skill's
+  evidence-led edit-route and bounded-attempt protocol.
 - Use the intended explicit document and representation: native editable parts,
   imported B-reps, sketches, surfaces, and assemblies have different contracts.
 - Validate FreeCAD geometry and requirement correspondence separately. A valid

@@ -76,3 +76,11 @@ tested FreeCAD build. They do not establish production manufacturability,
 load-bearing capacity, universal rollback reliability, or superiority across
 VLMs. CAD guidance remains conditional on requested fidelity, source evidence,
 and actual tool capabilities. Preserve this distinction when extending the skill.
+
+A subsequent before/after audit is recorded in the repository at
+`docs/engineering-skill-session-comparison.md`. It exposed excessive fallback
+freedom, weak edit routing, guard bypass, equivalent retries, and inconsistent
+acceptance reporting. It motivates the bounded control rules; the attempt budget
+is a work/risk default, not an experimentally optimal value. Neither that pair
+nor the mechanism tests isolates policy effects from tool-version changes or
+proves improved agent performance.

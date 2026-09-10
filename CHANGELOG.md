@@ -408,6 +408,18 @@
 - Published `docs/engineering-skill-audit.md` with measured results, virtual
   walkthroughs and an explicit boundary between mechanism tests and unperformed
   blinded VLM evaluation.
+- Audited supplied before/after traces, separating operational regressions from
+  stronger guards and legitimate manifest metadata correction.
+- Restored standard-tools-first with operation-specific script exceptions,
+  guard rejection precedence, evidence-based edit routes and bounded equivalent
+  attempts, including kernel candidates inside loops. Added source-state
+  decomposition controls and explicit imported-BRep validation guidance.
+- Clarified traceable observations, measurement-method consistency and separate
+  model, requirement and export outcomes. Metadata completion cannot resolve
+  guard failures or prove machine-verified correspondence.
+- Validator now exposes `model_assessment` separately from aggregate `assessment`,
+  labels both in summaries and uses an imported-edit completion checklist. Added
+  evidence-transition/detail-level regressions and a detailed session audit.
 
 This project uses **component-specific versioning**. Each component has its own
 release notes and version history.

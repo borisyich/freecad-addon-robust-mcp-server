@@ -7,6 +7,7 @@ These tools are essential for robust CAD workflows where operations
 may fail or create invalid geometry.
 """
 
+import re
 from collections.abc import Awaitable, Callable
 from typing import Annotated, Any, Literal
 
@@ -319,6 +320,7 @@ def _merge_source_acceptance(
 ) -> dict[str, Any]:
     """Merge requirement-correspondence findings into the FreeCAD-side report."""
     merged = dict(report)
+    merged["model_assessment"] = report.get("assessment", "unknown")
     findings = list(merged.get("findings") or [])
     if source_acceptance["required"] and not source_acceptance["provided"]:
         findings.append(
@@ -380,11 +382,19 @@ def _merge_source_acceptance(
         merged["assessment"] = "invalid_or_broken"
     elif "warning" in severities and merged.get("assessment") == "healthy":
         merged["assessment"] = "review_recommended"
-    summary = str(merged.get("summary") or "").rstrip()
+    summary = re.sub(
+        r"(?<!\w)assessment=",
+        "model_assessment=",
+        str(merged.get("summary") or "").rstrip(),
+    )
     merged["summary"] = (
-        f"{summary} Source acceptance: "
+        f"{summary} Overall assessment={merged.get('assessment', 'unknown')}. "
+        "Source acceptance: "
         f"provided={source_acceptance['provided']}, "
-        f"complete={source_acceptance['complete']}."
+        f"complete={source_acceptance['complete']}, "
+        f"verification_scope={source_acceptance['verification_scope']}, "
+        f"machine_verified={source_acceptance['machine_verified']}. "
+        "Export/geometry guard outcomes are not rechecked by this report."
     ).strip()
     completion_guidance = dict(merged.get("completion_guidance") or {})
     report_items = list(completion_guidance.get("report") or [])
@@ -462,6 +472,9 @@ def _parametric_response(
     result = {
         "informational": report.get("informational", True),
         "workflow": report.get("workflow", "native_parametric"),
+        "model_assessment": report.get(
+            "model_assessment", report.get("assessment", "unknown")
+        ),
         "assessment": report.get("assessment"),
         "summary": report.get("summary"),
         "detail_level": detail_level,
@@ -686,9 +699,7 @@ _result_ = {{
             "metrics": payload.get("metrics"),
             "canonical_metrics": payload.get("canonical_metrics"),
             "shape_placement": payload.get("shape_placement"),
-            "round_trip_linear_tolerance": payload.get(
-                "round_trip_linear_tolerance"
-            ),
+            "round_trip_linear_tolerance": payload.get("round_trip_linear_tolerance"),
         }
         payload["checkpoint_name"] = normalized_name
         payload["storage"] = "server_session_memory"

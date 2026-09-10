@@ -1858,6 +1858,15 @@ else:
                 ]
                 if validation_target_kind == "sketch"
                 else [
+                    "document and intended imported/direct-edit BRep objects",
+                    "shape validity, expected solids and preserved interfaces",
+                    "changed-region and original-baseline evidence",
+                    "artifact/export verification and unresolved guard failures",
+                    "existing dependencies where present; native history is not required",
+                    "significant findings and unresolved warnings",
+                ]
+                if validation_workflow == "imported_brep_edit"
+                else [
                     "document and Body names",
                     "Body and Tip validity",
                     "ordered feature history",
