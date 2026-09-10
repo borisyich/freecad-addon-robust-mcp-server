@@ -1213,9 +1213,13 @@ edit_sketch_constraints(
 ) -> dict
 ```
 
-The total number of `fix`/generic `Block` constraints may not exceed 50% of
-`sketch.GeometryCount`. If the next Fix would exceed the limit, use geometric or
-dimensional constraints, or delete existing Fix/Block constraints first.
+`fix`/generic `Block` is allowed for intentionally immutable reference geometry.
+There is no fixed-geometry percentage ceiling. Both sketch geometry and constraint
+batches abort if the final solver is conflicting, redundant, over-constrained,
+failed, or cannot be verified. Healthy under-constrained stages are allowed.
+Submit coupled repairs in one batch; only its final solver state is accepted.
+Use geometric/dimensional relations for editable design drivers and verify their
+response with a reversible parameter change.
 
 Example:
 

@@ -1,156 +1,78 @@
 # Validation and editability
 
-## Three separate questions
+## Match the claim to the evidence
 
-Do not conflate these checks:
+| Claim | Evidence required | What it does not establish |
+|---|---|---|
+| Shape healthy | Recompute, validity, expected topology/solid count | Requirement correspondence |
+| Editable as intended | Semantic dependencies, solver diagnostics, reversible perturbation | Correct loads/material or fit |
+| Dimension satisfied | Independent measurement of the specified semantic elements and tolerance | Hidden features or other requirements |
+| Source view matches | Equivalent projection/section and inspected image content | Numeric accuracy beyond source resolution |
+| Function/manufacture acceptable | Applicable calculations, interface limits, process/access evidence | Anything outside the analyzed conditions |
 
-1. **Geometric health:** Is the OpenCASCADE shape valid, recomputed, and the
-   expected number of solids?
-2. **Parametric/editable structure:** Are Bodies, Tips, sketches, constraints,
-   expressions, and semantic features present and coherent?
-3. **Requirement correspondence:** Does the model match the drawing/request?
+Datum shapes can have synthetic/infinite bounds; exclude them from part metrics.
+Surface, sketch, mesh, assembly, imported-B-rep, and Body targets have different
+validity expectations. Separate intentional components from accidental helpers.
 
-`validate_parametric_model` addresses mainly the first two. It does not prove the
-third.
+## Use the validator accurately
 
-## Interpreting sketch status
+After geometry changes, run `validate_parametric_model` immediately before the
+final user-facing response. Start compact; request `structure` or paged/full
+evidence only for a specific diagnostic. Check the intended document, active
+target, Tip, dependency graph, sketch solver, and significant outside objects.
 
-- `fully_constrained`: preferred final state for driving sketches;
-- `under_constrained`: structurally valid but still movable; inspect remaining
-  DoF and unconstrained geometry;
-- `redundant`: remove unnecessary constraint before adding more;
-- `conflicting` or `over_constrained`: repair before relying on downstream
-  features;
-- `solver_error`: undo/rework the latest sketch change;
-- `profile=open`: acceptable for paths, but not for Pad/Pocket profile operations;
-- `profile=closed`: suitable only when `topology_valid=true`; inspect reported
-  `outer_wire_count`, `hole_wire_count`, nesting roles, and intersecting pairs
-  against the intended drawing topology;
-- `profile=intersecting`: closed contours touch, cross, or overlap and are not a
-  valid outer/hole arrangement;
-- `profile=invalid` or `topology_unchecked`: inspect self-intersections,
-  duplicate/zero-length geometry, overlapping edges, and topology diagnostics.
+For sketch output pass `target={"kind":"sketch","name":...}`; Body/solid/Tip
+requirements do not apply to the sketch target. An under-constrained result may
+be deliberate motion or an unfinished driving sketch: inspect which DoF remain.
+A redundant relation calls for diagnosis, not wholesale reconstruction.
 
-`closed_wire_count` alone does not establish one outer loop plus N holes. A
-fully constrained sketch likewise proves only that the solver reports 0 DoF; it
-does not prove drawing correspondence, correct datums, valid nesting, or good
-design intent. Treat `sketch_coordinate_heavy_constraints` as a prompt to replace
-point-to-origin coordinate locking with semantic geometric relationships and a
-minimal datum-based dimension set.
+For drawings use the complete `acceptance_manifest`. It supplies every driving
+identifier; `required_dimension_names` alone is legacy incomplete acceptance.
+Retain every explicit dimension with source location, semantic targets, units,
+role, and measurement evidence. `source_issue` documents an actual source defect,
+not merely a hard-to-interpret requirement. Keep other dimensions pending if
+unverified; do not declare accepted completion while a requirement is open.
 
-Fix/Block constraints are not a substitute for design intent. Their count may
-not exceed 50% of sketch geometry; use geometric or dimensional constraints, or
-remove existing fixes.
+The validator checks the records supplied. It cannot discover annotations omitted
+from that manifest or independently validate caller-authored tool evidence,
+`review_attestation`, or image-content review. Preserve actual observations and
+artifacts; report correspondence as caller-attested unless an independent verifier
+really checked it. No-image work needs no fabricated visual records.
+Non-dimensional requirements belong in `requirements`; empty `dimensions`
+are legitimate when the source has none.
 
-## Interpreting Body and Tip findings
+## Dependency integrity
 
-Review when:
+Trace required drivers to the requested geometry and verify their actual effect.
+A useful construction datum can drive production geometry indirectly even when
+a structural tracer cannot prove it. Conversely, a named parameter can exist
+without meaningful influence. Use perturbation and observation to resolve
+uncertainty rather than adding dummy geometry or zero-effect expressions.
 
-- a Body has no Tip;
-- Tip is outside Body history;
-- Tip is not the latest intended shape-bearing feature;
-- Body shape is invalid or contains an unexpected number of solids;
-- a valid solid exists outside all Bodies and may be replacing editable history;
-- a Body contains no sketches even though the requested result was parametric.
+Review unused Spreadsheet aliases by purpose. Preserve legitimate inspection
+values, manufacturing data, archived user inputs, and reference calculations.
+Connect missing design drivers; remove only confirmed redundant task-created
+items. Unused count alone is not permission to delete user information.
 
-Not every warning is an error. Imported references, master geometry, or deliberate
-construction solids may exist outside the main Body. They should be named,
-hidden when appropriate, and explained.
+Never rebuild an accepted sketch or modify geometry just to turn a report green.
+Record unsupported tracing or a validator limitation with independent evidence.
 
-## Valid Shape is not sufficient evidence
+## Numerical, visual, and artifact checks
 
-A feature can expose one valid OpenCASCADE solid and still remove or add the wrong amount of material. For Pocket and helix operations, compare the reported `base_volume`, `result_volume`, absolute change, and retained/change ratios with the expected feature. Pattern tools additionally return `material_change_diagnostics`. It compares the transformed `AddSubShape` with the actual Body delta when available, and otherwise uses the B-rep set difference between base and result (`method=result_shape_difference`). This fallback is required for valid FreeCAD patterns that do not publish `AddSubShape`. An inconsistent result is rolled back. The remaining ratios are diagnostic evidence, not a universal numeric threshold.
+Use declared dimension-specific tolerances with units. Distinguish physical
+acceptance limits, raster/source uncertainty, and numerical kernel noise.
+For cleanup/export compare to the original baseline, including location. For
+intended edits compare allowed changed regions and preserved interfaces.
+Volume/bounds agreement is insufficient; exact Boolean differences can themselves
+fail and must be reported as unavailable rather than zero.
 
-Datum planes, lines, points, and coordinate systems are reference geometry. Their synthetic or infinite Shape bounds/volume are not meaningful solid metrics and must not be interpreted as model dimensions.
+A saved comparison image is not reviewed until its ImageContent is inspected.
+Compare corresponding physical sides and section recipes. For exports validate
+the candidate before accepting the destination. For an FCStd deliverable,
+reopen a saved copy when persistence of history, expressions, or proxies matters;
+recompute and check the intended target. Record unavailable verification.
 
-## Repeated and combined transformations
-
-Use `linear_pattern` or `polar_pattern` only for one transformation of a non-pattern seed. Do not apply one pattern directly to another. Use `multi_transform_pattern` with the original seed and ordered linear/polar stages, then verify Shape, Body Tip, solid count, volume change, and the expected instance layout.
-
-For drawing reconstruction, accept the single seed with `compare_images` before
-creating the pattern.
-
-## Source dimensions and Spreadsheet cleanliness
-
-For drawing/sketch input, call the final validator with the complete saved
-`acceptance_manifest`, not a hand-selected identifier subset. The validator
-derives every `driving` ID and traces it to a named driving sketch constraint or
-Spreadsheet alias connected directly or transitively to the active final solid.
-A link to construction-only geometry, an inactive sketch, a datum/helper object,
-or metadata is not sufficient. Legacy `required_dimension_names` without the
-manifest produces an incomplete-acceptance finding.
-
-The manifest connects that structural trace to dimension/view acceptance. Every
-`driving` and `verification` item must have status `verified` and retain its
-recorded source-view/section/detail context, the same semantic elements, and the
-same measurement semantics. Retain expected, observed, tolerance, pass/fail, and
-tool evidence. Every view must retain its candidate recipe, comparison artifact,
-`review_attestation`, concrete visual observation, and decision. These are
-caller attestations, not server-verified tool history or image semantics. Measure
-the finished model between the same semantic elements using the same
-dimension semantics. Retain expected, observed, tolerance, pass/fail, and tool
-evidence. A parameter path that drives the model does not prove that the final
-geometry matches the source relationship.
-
-Keep non-dimensional criteria—counts, topology, feature presence, material, and
-process—in `acceptance_manifest.requirements`. An empty `dimensions` list is
-valid when the source contains no physical dimensions; never relabel a count as
-a dimension to satisfy the schema.
-
-`source_issue` is an exceptional source-data classification, not a convenience
-bucket. It is allowed only with concrete source evidence, attempted
-interpretations, and a specific reason such as irreconcilable source conflict,
-malformed/orphaned annotation, missing geometric referents, or persistent
-illegibility at the best useful source resolution. Do not use `unresolved` as a
-terminal dimension role.
-
-Do not add construction points or other non-profile geometry solely to bind
-otherwise unused aliases. Such a model may look structurally connected while
-the final B-rep is invariant under those parameters. The validator reports this
-case as `defined_but_not_solid_driving`; treat it as an error in requirement
-correspondence.
-
-Named Sketcher expression paths are traced through the actual constraint name
-stored on each constraint, including FreeCAD 1.0.x builds that do not expose a
-`SketchObject.getConstraintName()` convenience method. This name resolution
-does not weaken the geometry check: a constraint that references construction
-geometry only is still not accepted as driving the final solid.
-
-When the deliverable is a sketch, pass
-`target={"kind":"sketch","name":"..."}`. Required dimensions are then traced to
-non-construction geometry of that exact sketch and report `sketch_driving` or
-`defined_but_not_sketch_driving`; Body, Tip, standalone-solid, and unused global
-Spreadsheet findings do not determine the sketch-scope assessment.
-
-Use the validator's compact default first. Request `structure` only for a
-reported structural problem and `full` only for a focused history/expression or
-constraint diagnosis. Full reports can be extremely large.
-
-Review every unused Spreadsheet alias before completion. Determine why it was
-created; connect it to the tree when it represents required design intent, or
-delete it when it is redundant. A final model is not clean while required
-dimensions are missing/unlinked or Spreadsheet parameters remain orphaned.
-
-For a sketch dimension, the dependency is attached to the constraint expression
-path accepted by the tool as `Constraints[index]`; FreeCAD may later report a
-canonical named path. Create the dimensional constraint with an
-initial numeric value, then set its expression to `SpreadsheetName.Alias`; use
-`get_sketch_info` to verify that the same path appears in `expressions` and on
-the corresponding constraint record. Constraint names improve readability but
-are not the linkage mechanism.
-
-## Final report pattern
-
-Report the validator output in engineering terms:
-
-```text
-Document: Bracket.FCStd
-Body: BracketBody — valid; Tip=Fillet002 — valid
-History: BaseSketch → Pad → Pocket → HolePattern → Fillet002
-Sketches: 4 total; 3 fully constrained; 1 under-constrained (2 DoF)
-Source dimensions: 18/18 used
-Spreadsheet: 7 aliases; all connected to feature history
-Outside solids: none
-Action: model is geometrically healthy; constrain SK_HolePattern before treating
-it as fully production-ready.
-```
+Final reporting should state the deliverable, measured changes, preserved
+interfaces, significant validator findings, and remaining assumptions. Do not
+equate a geometry-health report or a fully constrained sketch with production
+readiness.

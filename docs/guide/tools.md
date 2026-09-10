@@ -137,7 +137,7 @@ remains as a strict discriminated compatibility dispatcher for older clients.
 | `set_body_tip` | Set and validate the active Tip of a PartDesign Body. |
 | `create_sketch` | Create a Sketch using a typed `support` selector for an origin plane, Body Tip face, explicit feature face, or datum plane. |
 | `edit_sketch_geometry` | Apply geometry edits to one sketch in a single transaction, including endpoint/radius arcs and tangent line fillets. |
-| `edit_sketch_constraints` | Apply constraint edits and Spreadsheet expressions in one transaction; Fix/Block may cover at most 50% of sketch geometry. |
+| `edit_sketch_constraints` | Apply constraint edits and Spreadsheet expressions in one transaction; supports intentionally fixed reference geometry and solver checks. |
 | `pad_sketch` | Create a Pad with Length, ThroughAll/UpToLast, UpToFirst, or UpToFace termination. |
 | `pocket_sketch` | Create a validated Pocket with shared linear end conditions; automatic direction is the default. |
 | `fillet_edges` | Add fillet (rounded edges) to an object. |

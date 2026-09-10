@@ -267,8 +267,11 @@ edit_sketch_geometry(
 )
 ```
 
-Fix/Block constraints are deliberately limited: they may constrain at most 50%
-of sketch geometry. Use geometric and dimensional constraints for design intent.
+Sketch edit batches abort on unhealthy or unverified final solver state; submit
+coupled repairs in one batch. Healthy under-constrained stages are supported.
+Fix/Block can preserve intentionally immutable reference geometry. Use geometric
+and dimensional relations for editable drivers, then test the intended response
+to parameter changes. There is no geometry-percentage acceptance rule.
 
 ### Pattern Operations
 

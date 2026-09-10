@@ -96,8 +96,8 @@ class TestFreecadPrompts:
         prompt_startup = register_prompts["freecad_startup"]
         result = await prompt_startup()
 
-        # Should mention PartDesign workflow
-        assert "Body" in result
+        # Route to canonical policy without imposing one representation.
+        assert "freecad://skills/freecad-engineering" in result
         assert "create_sketch" in result or "sketch" in result.lower()
         assert "PartDesign" in result
 
@@ -157,7 +157,7 @@ class TestFreecadPrompts:
         assert "rectangle" in result.lower() or "circle" in result.lower()
         assert "endpoints_radius" in result
         assert "tangent_fillet" in result
-        assert "50%" in result
+        assert "Fix/Block" in result
 
     @pytest.mark.asyncio
     async def test_freecad_guidance_boolean(

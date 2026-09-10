@@ -79,11 +79,12 @@ mechanical model, activate `$freecad-engineering`. The canonical policy is
 - Prefer standard MCP tools. `safe_execute` and `execute_python` are fallback
   mechanisms only when a required standard tool is missing or demonstrably
   invalid.
-- Use one explicit document and one PartDesign Body per part; do not hide errors
-  in duplicate documents or Bodies.
+- Use the intended explicit document and representation: native editable parts,
+  imported B-reps, sketches, surfaces, and assemblies have different contracts.
 - Validate FreeCAD geometry and requirement correspondence separately. A valid
   solid can still be the wrong part.
-- Follow the Skill's ACT → OBSERVE → REACT loop after each major feature.
+- Follow the Skill's observe/predict/edit/verify/recover loop after each major
+  feature; ACT → OBSERVE → REACT is only the abbreviated feedback pattern.
   Before drawing reconstruction, inventory every source view/detail/section that
   depicts part geometry, including apparently redundant/corroborative views, and
   store the equivalent FreeCAD camera/section recipe. Compare each major feature
@@ -95,12 +96,14 @@ mechanical model, activate `$freecad-engineering`. The canonical policy is
   A `compare_images` checkpoint is incomplete until its returned ImageContent is
   surfaced and visually inspected; text metadata or a saved output file alone
   does not count.
-- Preserve native editable design intent: Body, sketches, constraints, and
-  semantic PartDesign history unless the user explicitly asks for direct B-rep.
+- Preserve native editable design intent for new parametric parts and existing
+  history edits. Imported direct-edit tasks preserve source geometry and local
+  invariants without implicitly reconstructing the entire feature history.
 - `execute_python`, `safe_execute`, and `run_macro` are always available. Using
   them does not waive the parametric/editability expectations in the Skill.
-- Resolve drawing ambiguity autonomously using the most consistent evidence and
-  disclose assumptions.
+- Resolve noncritical ambiguity from evidence and disclose assumptions. Leave a
+  critical unsupported interface or function requirement open rather than claim
+  acceptance from a guess.
 - Before modeling from a drawing/sketch, save every explicit source dimension
   with a stable identifier, source `view_id`, and the semantic elements it spans
   or controls. Preserve and interpret drafting markers such as an asterisk,
@@ -217,7 +220,7 @@ GUI screenshot tools require `gui_available=true`.
 3. **Check document**: Use `get_active_document()` or create one with `create_document()`
 
 ## Key Principles
-- **All Operations are Undoable**: Every tool operation is wrapped in a transaction
+- **Verify recovery**: Check transaction support; document undo does not restore files or arbitrary external effects
 - **Validate Early**: After any geometry creation, use `validate_object()` to check validity
 - **Prefer standard tools**: Use `safe_execute()` only when a standard tool is missing or demonstrably invalid
 - **Check Version Compatibility**: FreeCAD 1.x changed some APIs (see best-practices resource)
@@ -240,7 +243,7 @@ local drawings or screenshots without changing the FreeCAD camera.""",
 2. Create or reuse one PartDesign Body.
 3. For drawing input, inventory every source view and establish each view's
    FreeCAD camera/section and plane/axis correspondence before sketching.
-4. Use one profile sketch per feature.
+4. Choose sketches and features from their actual geometric dependencies.
 
 ## Correct Workflow
 ```
@@ -281,8 +284,8 @@ transaction and one recompute. Dimensional operations may include an
 `expression` such as `Dimensions.PlateWidth`; use `set_expression` or
 `clear_expression` for an existing constraint index. Use `get_sketch_info` after
 editing to inspect geometry endpoints, constraint references/datums, and exact
-expression bindings. Fix/Block constraints may cover at most 50% of sketch
-geometry; prefer geometric and dimensional constraints.
+expression bindings. Fix/Block can preserve immutable reference geometry;
+use geometric and dimensional relations for intended editable drivers.
 
 ## Common Mistakes
 - Creating sketch without a body (will fail on pad).
@@ -302,15 +305,12 @@ significant findings.""",
 3. Add ordered constraints with `edit_sketch_constraints`.
 4. Inspect solver plus outer/hole/intersection profile topology with
    `get_sketch_info`; 0 DoF alone is not acceptance.
-5. For flat patterns, checkpoint coarse external contour, radius transitions,
-   holes, bend lines, then final parameterization separately. At each checkpoint
-   recompute, check topology, run deterministic dimension checks, compare the
-   applicable source view(s), update the discrepancy ledger, and only then
-   continue.
+5. Order feature groups by dependency and verify each meaningful change with
+   topology and dimension checks plus applicable source views when supplied.
 
-If source-backed tangency conflicts, do not delete Tangent merely to satisfy the
-solver. Reinspect the drawing crop and revise endpoints, radius, arc side, datum,
-or dimension-chain interpretation before rebuilding the transition.
+If a tangency addition conflicts, inspect duplicates, redundancy, current indices,
+units, and solver branch before revising source interpretation. Preserve intended
+tangency while removing a demonstrated redundant relation.
 
 ## Geometry Operations
 `edit_sketch_geometry(sketch_name, operations)` supports:
@@ -331,8 +331,9 @@ edit_sketch_geometry(
 
 `center_angles.start_angle` and `end_angle` are degrees. Prefer the
 radius-defined modes below when the source gives endpoints or adjoining lines.
-Use `add_bspline` only for a source curve explicitly defined by points or knots;
-never use it to approximate lines or stated circular arcs/fillets.
+Use `add_bspline` for justified free-form design or reconstruction with a declared
+fitting tolerance and independent residual checks. Preserve stated analytic
+lines, conics, and circular radii rather than hiding uncertainty in a spline.
 
 Radius-defined arc examples:
 ```
@@ -366,9 +367,9 @@ operations may include `constraint_name` and a Spreadsheet expression. Numeric
 Sketcher radians are handled by the tool. Use `set_expression`/`clear_expression`
 with `constraint_index` to change existing
 bindings. `constraint_index` is zero-based; GUI/solver constraint numbers are
-one-based, and sketch results expose both forms. The resulting number of
-Fix/Block constraints must never exceed 50% of
-`GeometryCount`; use other constraints or delete existing fixes.
+one-based, and sketch results expose both forms. Fix/Block is appropriate for
+immutable reference geometry; validate intended edit response rather than using
+a percentage of fixed geometry as an engineering acceptance criterion.
 
 For `create_hole`, use non-construction circles in a dedicated sketch attached
 to an actual planar solid face. Use `create_cylindrical_cut` for radial or
@@ -965,9 +966,9 @@ cached bounds. `measure_geometry` exists only for compatibility.
 6. Use `get_screenshot` only after the geometric checks and compare an equivalent
    reference view.
 
-Do not replace these typed inspections with direct Python. If a required physical
-property is not exposed, report the missing field so a dedicated MCP tool can be
-added.
+Prefer these typed inspections when they expose the required evidence. A scoped
+read-only Python inspection can obtain a missing physical property; record its
+method and limits.
 """
 
     @mcp.prompt()
@@ -1258,7 +1259,8 @@ get_connection_status()
 ### No Result Returned
 - check `get_connection_status` and `get_console_output`;
 - verify that the expected FreeCAD document is active;
-- retry only the same typed operation after identifying the cause.
+- reconcile retained execution status and document state before any retry;
+  an unknown or running request may still mutate the document.
 
 ## GUI Issues
 

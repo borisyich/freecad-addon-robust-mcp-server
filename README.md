@@ -486,9 +486,10 @@ uses `.clinerules/freecad-modeling.md`. When the server runs from the repository
 same Skill from `freecad://skills/freecad-engineering`. Prompts and
 `freecad://best-practices` provide routing/context rather than copied policies.
 
-The Skill classifies likely stock and manufacturing process, covers milling,
-turning, and sheet-metal strategies, and requires native editable parametric
-structure unless the user explicitly requests direct B-rep output.
+The Skill connects function, interfaces, requirements, datums, manufacturing,
+and measurable acceptance. Its observe/predict/edit/verify/recover loop applies
+to new designs and existing geometry. It selects editability and validation
+scope for native parts, imported B-reps, sketches, surfaces, and assemblies.
 `execute_python`, `safe_execute`, and `run_macro` remain available.
 
 For drawing/sketch input, the Skill requires inventorying every source
@@ -514,8 +515,8 @@ attestations: a structurally complete manifest therefore yields
 After any model creation or geometry change, call `validate_parametric_model`
 immediately before the final response and summarize the actual Bodies, Tips,
 history, sketches, solver state, source-dimension usage, Spreadsheet connectivity,
-direct solids, and warnings. For drawing/sketch tasks, pass the complete driving
-identifier list as `required_dimension_names`. The report is informative and
+direct solids, and warnings. For drawing/sketch tasks, pass the complete
+`acceptance_manifest`. The report is informative and
 does not by itself prove drawing correspondence. Parameter references multiplied
 by zero are treated as non-driving rather than accepted as validation bridges.
 For a sketch-only deliverable, pass
@@ -534,12 +535,11 @@ If an MCP client exposes tools and resources but no native prompt controls, use
 arguments={...})` to render the same server-registered prompt. Agents should not
 read prompt source files as a substitute for protocol invocation.
 
-For flat-pattern sketches, the Skill gates coarse outer contour, radius
-transitions, holes, bend lines, and final parameterization separately. Each gate
-recomputes, checks topology and deterministic dimensions, performs same-view
-comparison, updates a discrepancy ledger, and may revise both the source
-interpretation and CAD. A source-backed tangency conflict blocks progress until
-endpoints, radius, arc side, datum, and the dimension chain are rechecked.
+Sketch groups follow geometric dependencies. Diagnose conflicting constraints
+for redundancy, indices, units, and geometry before changing source interpretation.
+Verification includes reversible parameter changes, local interface measurements,
+and toleranced fit where relevant. See the [engineering skill audit](docs/engineering-skill-audit.md)
+for reproducible counterexamples, check ablations, and evidence limits.
 
 #### Validation & diagnostics (7 tools)
 

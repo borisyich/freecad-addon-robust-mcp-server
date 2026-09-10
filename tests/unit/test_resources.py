@@ -2,6 +2,7 @@
 
 import json
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -424,23 +425,10 @@ class TestFreecadResources:
         resource = register_resources["freecad://skills/freecad-engineering"]
         result = await resource()
 
-        assert "name: freecad-engineering" in result
-        assert "validate_parametric_model" in result
-        assert "Milling" in result
-        assert "Turning" in result
-        assert "Sheet-metal" in result
-        assert "flat pattern/developed blank" in result
-        assert "fixed/moving panels" in result
-        assert "required_dimension_names" in result
-        assert "acceptance_manifest" in result
-        assert "review_attestation" in result
-        assert "caller-attested" in result
-        assert "compare_images" in result
-        assert "every record in the source view manifest" in result
-        assert "source_issue" in result
-        assert "never use `unresolved` as a terminal" in result
-        assert "same-view semantic measurement" in result
-        assert "tangent_fillet" in result
+        canonical = Path(__file__).resolve().parents[2] / (  # noqa: ASYNC240 -- local test fixture
+            ".agents/skills/freecad-engineering/SKILL.md"
+        )
+        assert result == canonical.read_text(encoding="utf-8")
 
     @pytest.mark.asyncio
     async def test_resource_engineering_skill_bundle_exposes_all_files(

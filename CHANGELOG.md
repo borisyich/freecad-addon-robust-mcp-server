@@ -391,6 +391,23 @@
   inventory. Equal largest groups are explicitly ambiguous, all tied candidates
   are returned, and no topology signature is preferred by value or iteration
   order.
+- Replaced case-specific and duplicated modeling recipes with a routed engineering
+  contract: function, interfaces, datums, requirements, tolerances, dependencies,
+  predicted change, independent verification, and verified recovery.
+- Added design/verification and model-editing references; generalized sketch,
+  manufacturing, drawing, sheet-metal, representation, and acceptance guidance.
+  Distinguished observed evidence from caller attestations and production claims.
+- Removed the arbitrary 50% Fix/Block gate. Sketch edit batches now reject and
+  roll back unhealthy or unverified final solver states; healthy incremental
+  stages and atomically completed repairs remain supported. Tangency conflicts
+  require diagnosis before changing source interpretation.
+- Added 13 live FreeCAD experiment cases, including check ablations, tolerance
+  limits, parameter response/restoration, fitting residuals and non-right-angle
+  conventions; added solver-state and bundle-integrity unit coverage. Updated
+  prompts, resources, documentation and obsolete prose-coupled tests.
+- Published `docs/engineering-skill-audit.md` with measured results, virtual
+  walkthroughs and an explicit boundary between mechanism tests and unperformed
+  blinded VLM evaluation.
 
 This project uses **component-specific versioning**. Each component has its own
 release notes and version history.

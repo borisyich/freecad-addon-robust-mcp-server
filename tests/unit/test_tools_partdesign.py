@@ -782,10 +782,10 @@ class TestPartDesignTools:
         mock_bridge.execute_python.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_edit_sketch_constraints_embeds_fix_ratio_guard(
+    async def test_edit_sketch_constraints_accepts_fixed_reference_operation(
         self, register_tools, mock_bridge
     ):
-        """Fix/Block edits must enforce the 50-percent geometry ceiling."""
+        """The constraint batch accepts the public fixed-reference operation."""
         mock_bridge.execute_python = AsyncMock(
             return_value=ExecutionResult(
                 success=True,
@@ -801,15 +801,12 @@ class TestPartDesignTools:
             )
         )
 
-        await register_tools["edit_sketch_constraints"](
+        result = await register_tools["edit_sketch_constraints"](
             "Sketch", [{"op": "fix", "geometry1": 0}]
         )
 
-        generated_code = mock_bridge.execute_python.await_args.args[0]
-        assert 'getattr(existing_constraint, "Type", "") == "Block"' in generated_code
-        assert "projected_fix_count > geometry_count * 0.5" in generated_code
-        assert "Cannot apply Fix/Block constraints" in generated_code
-        assert "sketch geometry" in generated_code
+        assert result["operations_applied"] == 1
+        mock_bridge.execute_python.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_edit_sketch_constraints_rejects_missing_semantic_arguments(
@@ -2341,7 +2338,10 @@ async def test_multi_transform_pattern_uses_internal_empty_original_stages() -> 
     assert "_configure_feature_transform_mode(multi)" in code
     assert "_configure_feature_transform_mode(stage_obj)" in code
     assert 'TransformMode = "Features"' not in code
-    assert "stage_obj.Originals = []" in code
+    # Current FreeCAD keeps stage originals internal; validate the resulting
+    # structure instead of requiring an explicit assignment to its default.
+    assert "_validate_multi_transform_stages(" in code
+    assert 'if not transformation_validation["ok"]:' in code
     assert "multi.Transformations = stage_objects" in code
     assert "_pattern_material_change_diagnostics" in code
     assert '"material_change_diagnostics"' in code

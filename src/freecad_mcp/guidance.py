@@ -23,8 +23,10 @@ ENGINEERING_SKILL_BUNDLE_RESOURCE_URI: Final[str] = (
 )
 ENGINEERING_SKILL_AGENT_METADATA_FILE: Final[str] = "agents/openai.yaml"
 ENGINEERING_SKILL_REFERENCE_FILES: Final[tuple[str, ...]] = (
+    "design-and-verification.md",
     "drawing-reconstruction.md",
     "manufacturing-strategies.md",
+    "model-editing.md",
     "sheet-metal-flat-patterns.md",
     "sketch-construction.md",
     "source-notes.md",
@@ -80,9 +82,9 @@ Use the `${ENGINEERING_SKILL_NAME}` repository skill before operating FreeCAD on
 a mechanical model. Its canonical file is `{ENGINEERING_SKILL_RELATIVE_PATH}`;
 the same text is available through `{ENGINEERING_SKILL_RESOURCE_URI}`.
 
-The skill covers stock/process classification, native editable parametric
-structure, milling/turning/sheet-metal strategies, drawing reconstruction,
-model modification, lightweight verification, and completion criteria.
+The skill connects functional requirements, interfaces, datums, manufacturing
+assumptions, editable dependencies, and measurable acceptance. Select the
+representation and checks for the actual deliverable.
 
 After any model creation or geometry change, call
 `{FINAL_PARAMETRIC_VALIDATION_TOOL}` immediately before the final user-facing
@@ -123,7 +125,8 @@ DRAWING_RECONSTRUCTION_WORKFLOW: Final[str] = (
 
 MODEL_MODIFICATION_WORKFLOW: Final[str] = (
     _SKILL_ROUTER + "\nFor an existing model, also read the skill section "
-    "'Modify existing models' and inspect the current history before editing. "
+    "'Modify existing models' in references/model-editing.md and inspect the "
+    "current history, local neighborhood, and invariants before editing. "
     "When a drawing/image supplies geometry evidence for the edit, also apply the "
     "complete source-view/dimension manifest and final one-to-one view validation "
     "rules from 'Reconstruct from drawings or images' to the edited model.\n"
@@ -131,7 +134,8 @@ MODEL_MODIFICATION_WORKFLOW: Final[str] = (
 
 VISUAL_CHECKPOINT_PROTOCOL: Final[str] = (
     _SKILL_ROUTER
-    + "\nFollow the Skill's ACT → OBSERVE → REACT loop. Before modeling from a "
+    + "\nUse the Skill's observe/predict/edit/verify/recover loop; ACT → OBSERVE → REACT "
+    "is only its abbreviated feedback pattern. Before modeling from a "
     "drawing, establish a complete manifest for every source view, including its "
     "FreeCAD camera/section recipe and plane/normal correspondence when applicable. "
     "After every major feature, compare the equivalent source/candidate views that "

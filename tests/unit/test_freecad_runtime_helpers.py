@@ -2,6 +2,8 @@
 
 from typing import ClassVar
 
+import pytest
+
 from freecad_mcp.tools._freecad_runtime_helpers import (
     BODY_RUNTIME_HELPERS,
     FEATURE_VALIDATION_RUNTIME_HELPERS,
@@ -533,8 +535,10 @@ def test_sketch_analysis_warns_about_coordinate_heavy_constraints() -> None:
     assert any("0 DoF alone" in hint for hint in result["hints"])
 
 
-def test_sketch_analysis_tangent_conflict_blocks_hypothesis_preservation() -> None:
-    """Tangency conflict should send the agent back to source interpretation."""
+def test_sketch_analysis_tangent_conflict_requires_diagnosis_before_reinterpretation() -> (
+    None
+):
+    """A solver conflict does not by itself refute the supplied geometry."""
     from freecad_mcp.tools._freecad_runtime_helpers import (
         SKETCH_ANALYSIS_RUNTIME_HELPERS,
     )
@@ -557,11 +561,52 @@ def test_sketch_analysis_tangent_conflict_blocks_hypothesis_preservation() -> No
     )
 
     assert result["solver"]["status"] == "conflicting"
-    assert any("Tangent constraint conflicts" in issue for issue in result["issues"])
-    assert any("reinspect the drawing crop" in hint for hint in result["hints"])
+    assert any("Tangent constraint" in issue for issue in result["issues"])
+    assert any("duplicate/redundant" in hint for hint in result["hints"])
     assert not any(
         "remove the conflicting one" in hint.lower() for hint in result["hints"]
     )
+
+
+@pytest.mark.parametrize(
+    "status",
+    ["over_constrained", "conflicting", "redundant", "solver_error", "unknown"],
+)
+def test_sketch_batch_guard_rejects_unhealthy_solver(status):
+    from freecad_mcp.tools._freecad_runtime_helpers import (
+        SKETCH_ANALYSIS_RUNTIME_HELPERS,
+    )
+
+    guard = _load_helpers(SKETCH_ANALYSIS_RUNTIME_HELPERS)[
+        "_require_healthy_sketch_solver"
+    ]
+    with pytest.raises(ValueError, match=status):
+        guard({"solver": {"status": status}, "issues": ["test diagnostic"]})
+
+
+@pytest.mark.parametrize("status", ["under_constrained", "fully_constrained"])
+def test_sketch_batch_guard_allows_incremental_healthy_sketches(status):
+    from freecad_mcp.tools._freecad_runtime_helpers import (
+        SKETCH_ANALYSIS_RUNTIME_HELPERS,
+    )
+
+    guard = _load_helpers(SKETCH_ANALYSIS_RUNTIME_HELPERS)[
+        "_require_healthy_sketch_solver"
+    ]
+    guard({"solver": {"status": status, "solve_code": 0}})
+
+
+@pytest.mark.parametrize("code", [None, 1, -1])
+def test_sketch_batch_guard_does_not_trust_cached_fully_constrained_flag(code):
+    from freecad_mcp.tools._freecad_runtime_helpers import (
+        SKETCH_ANALYSIS_RUNTIME_HELPERS,
+    )
+
+    guard = _load_helpers(SKETCH_ANALYSIS_RUNTIME_HELPERS)[
+        "_require_healthy_sketch_solver"
+    ]
+    with pytest.raises(ValueError):
+        guard({"solver": {"status": "fully_constrained", "solve_code": code}})
 
 
 class _SketchVector:

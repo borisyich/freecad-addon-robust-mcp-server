@@ -133,6 +133,7 @@ nav:
       - Tools Overview: guide/tools.md
       - Agent Modeling Patterns: guide/agent-modeling-patterns.md
       - FreeCAD Engineering Skill: guide/freecad-engineering-skill.md
+      - Engineering Skill Audit: engineering-skill-audit.md
       - Agent Guidance Architecture: guide/agent-guidance-architecture.md
       - MCP Prompts: guide/prompts.md
       - MCP Resources: guide/resources.md

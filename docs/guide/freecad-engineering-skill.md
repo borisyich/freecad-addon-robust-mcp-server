@@ -1,80 +1,58 @@
 # FreeCAD engineering Skill
 
-The repository includes a Codex Skill at:
+The canonical bundle is `.agents/skills/freecad-engineering/SKILL.md`.
+It supports new mechanical design, drawing reconstruction, local edits,
+repair, and validation with an explicit engineering contract and feedback loop.
 
-```text
-.agents/skills/freecad-engineering/SKILL.md
-```
+## Loading
 
-It is the single source of detailed engineering guidance for creating,
-reconstructing, modifying, repairing, and validating mechanical models in
-FreeCAD.
+Native clients discover the repository Skill. Clients using MCP can read:
 
-## Activation
+- `freecad://skills/freecad-engineering` — entrypoint;
+- `freecad://skills/freecad-engineering/bundle` — complete URI index;
+- `freecad://skills/freecad-engineering/references/<filename>` — routed detail.
 
-For Codex, open the repository root and start a new session after changing the
-Skill or `AGENTS.md`. The root `AGENTS.md` requires `$freecad-engineering` for
-FreeCAD model tasks. The Skill's front-matter description also supports implicit
-routing.
+The wheel contains the same bundle. Discover the actual server alias from the
+client; no particular alias or tool-name prefix is an engineering requirement.
+Load the entrypoint and relevant references rather than every file on every task.
 
-For clients that do not implement Codex Skills, read the same file directly.
-The MCP server exposes the complete Skill bundle even when installed from a
-wheel, with the entrypoint at:
+## Coverage
 
-```text
-freecad://skills/freecad-engineering
-```
+The core loop is observe, predict, edit, verify, and restore or accept. It links
+requirements, functional interfaces, datums, dependencies, manufacturing
+assumptions, tolerances, and measurable evidence.
 
-The bundle manifest is available at:
+| Reference | Use |
+|---|---|
+| `design-and-verification.md` | New-design requirements, function, load/fit assumptions, alternatives, evidence and tolerances |
+| `model-editing.md` | Local influence regions, native/static geometry, repeat populations, rollback and execution uncertainty |
+| `drawing-reconstruction.md` | Source inventory, frames, semantic dimensions, ambiguity, sections and VLM comparison |
+| `sketch-construction.md` | Geometry choice, dependencies, solver diagnosis, parameter response |
+| `manufacturing-strategies.md` | Stock/process alternatives, access, datums and feature dependencies |
+| `sheet-metal-flat-patterns.md` | Panel graph, angle conventions, finite bend zones, flat/formed domains and process limits |
+| `validation-and-editability.md` | Claim/evidence boundaries, actual targets, manifests and artifact checks |
+| `source-notes.md` | Tested mechanisms, documentation sources and limitations |
 
-```text
-freecad://skills/freecad-engineering/bundle
-```
+New editable parts normally retain native parametric history. Existing imported
+models, sketches, surfaces, and assemblies have their own target contracts.
+Feature order follows dependencies; constraint quality follows intended behavior,
+not a fixed ratio or one mandatory sequence.
 
-All relative Skill files preserve their repository paths beneath that URI, for
-example:
+After geometry-changing work, `validate_parametric_model` remains the final
+diagnostic. Drawing reconstruction also uses the complete acceptance manifest
+and equivalent source-view comparisons. The validator cannot establish source
+inventory completeness, image semantics, functional performance, or production
+readiness by itself.
 
-```text
-freecad://skills/freecad-engineering/references/drawing-reconstruction.md
-freecad://skills/freecad-engineering/references/sketch-construction.md
-freecad://skills/freecad-engineering/agents/openai.yaml
-```
+## Evidence and maintenance
 
-## Contents
+The [audit and experiment report](../engineering-skill-audit.md) records
+counterexamples, ablations of checks, virtual use cases, reproducible commands,
+and what the results do and do not prove. Tests check real FreeCAD behavior and
+bundle/resource integrity; they do not require every procedure's wording to
+remain in the entrypoint.
 
-The Skill covers:
-
-- selective MCP prompt/resource discovery without dumping the global client
-  tool registry;
-- stock and dominant-process classification;
-- milling, turning, and sheet-metal modeling strategies, including flat-pattern/developed-blank reconstruction;
-- editable Body/Sketch/PartDesign structure;
-- feature dependency/order guidance;
-- complete source-view inventory, including opposite-side views, sections,
-  details, auxiliary/non-standard views, and their FreeCAD camera/section recipes;
-- saved inventories of every explicit source dimension, including annotations
-  with drafting markers such as an asterisk, parentheses, `REF`, or `TYP`, mapped
-  to source view and semantic geometry, classified as driving/verification or the
-  exceptional evidence-backed `source_issue` role; `unresolved` is not a terminal
-  manifest classification;
-- ordinate/baseline datum preservation and a mandatory control dimension-chain
-  check before global-coordinate conversion;
-- same-view `compare_images` checkpoints for feature-relevant views during
-  modeling, plus exhaustive one-to-one comparison of every source-view manifest
-  record before final acceptance;
-- sketch arc construction by endpoints/radius and by tangent fillet between lines;
-- straight-lines-first sketch construction, semantic constraint selection,
-  explicit B-spline gating, and outer/hole/intersection topology checks;
-- flat-pattern feature-group gates with numerical checks before visual checks,
-  a mutable interpretation manifest, and a blocking tangency-conflict rule;
-- coordinate provenance audits separating source-backed, derived, and
-  solver-lock point coordinates;
-- the 50% ceiling for Fix/Block constraints;
-- existing-model modification;
-- lightweight intermediate validation;
-- mandatory final `validate_parametric_model` reporting for driving dimensions,
-  plus same-view semantic measured evidence for every driving/verification
-  dimension, source-issue auditing, sketch-target scope, and Spreadsheet
-  connectivity/cleanliness.
-
-Detailed content is intentionally not copied into this documentation page.
+When changing a rule, state the failing behavior, its applicability, the proposed
+decision criterion, and a counterexample or relevant test. Keep evaluation
+fixtures out of the runtime instructions so a known case does not become the
+definition of engineering practice.

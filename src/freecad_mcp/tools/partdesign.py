@@ -1396,6 +1396,7 @@ try:
 
     doc.recompute()
     sketch_status = _analyze_sketch(sketch)
+    _require_healthy_sketch_solver(sketch_status)
     doc.commitTransaction()
 except Exception:
     doc.abortTransaction()
@@ -1433,9 +1434,12 @@ _result_ = {{
         ``Dimensions.PlateWidth`` when they are created. Use ``set_expression``
         or ``clear_expression`` to update an existing ``Constraints[index]``
         binding. ``constraint_name`` optionally assigns a stable readable name.
-        Fix/Block constraints may not cover more than 50% of the sketch geometry;
-        use geometric/dimensional constraints or remove existing Fix constraints
-        instead of freezing most of the profile.
+        Fix/Block can preserve intentionally immutable reference geometry.
+        Use geometric/dimensional relations for intended editable drivers;
+        the final solver state, rather than an arbitrary fixed-geometry ratio,
+        determines acceptance. Both sketch edit batches roll back on unhealthy
+        or unverified solver state. Apply coupled repairs in one batch;
+        healthy under-constrained intermediate sketches remain allowed.
 
         Args:
             sketch_name: Name of the sketch to edit.
@@ -1563,21 +1567,6 @@ try:
         expression = operation.get("expression")
         constraint_name = operation.get("constraint_name")
 
-        if constraint_type == "Block":
-            geometry_count = int(sketch.GeometryCount)
-            existing_fix_count = sum(
-                1
-                for existing_constraint in (sketch.Constraints or [])
-                if getattr(existing_constraint, "Type", "") == "Block"
-            )
-            projected_fix_count = existing_fix_count + 1
-            if projected_fix_count > geometry_count * 0.5:
-                raise ValueError(
-                    "Cannot apply Fix/Block constraints to more than 50% of "
-                    "sketch geometry. Use geometric or dimensional constraints, "
-                    "or delete existing Fix/Block constraints."
-                )
-
         if constraint_type in ["Horizontal", "Vertical", "Block"]:
             constraint = (
                 Sketcher.Constraint(constraint_type, geometry1, point1)
@@ -1658,6 +1647,7 @@ try:
 
     doc.recompute()
     sketch_status = _analyze_sketch(sketch)
+    _require_healthy_sketch_solver(sketch_status)
     doc.commitTransaction()
 except Exception:
     doc.abortTransaction()

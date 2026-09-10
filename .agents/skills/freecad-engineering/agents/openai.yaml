@@ -1,6 +1,6 @@
 interface:
   display_name: "FreeCAD Engineering"
-  short_description: "Parametric mechanical CAD modeling in FreeCAD"
+  short_description: "Mechanical design, manufacturing intent and verification"
   default_prompt: "Use $freecad-engineering for this FreeCAD modeling task."
 policy:
   allow_implicit_invocation: true

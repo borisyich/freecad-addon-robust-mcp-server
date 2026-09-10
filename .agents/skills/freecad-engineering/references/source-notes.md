@@ -1,123 +1,78 @@
-# Source notes
+# Evidence basis and limits
 
-The skill distills the following official documentation and established CAD
-principles. These links are references, not runtime dependencies.
+This bundle separates tested tool behavior, engineering reasoning, and empirical
+agent-performance claims. No finite test suite proves that a language/vision model
+has acquired the complete competence of a design or manufacturing engineer.
 
-## Codex skill placement and loading
+## Reproducible repository experiments
 
-- OpenAI, **Build skills**:
-  https://developers.openai.com/codex/build-skills
-  - repository skills belong under `.agents/skills/<skill-name>/SKILL.md`;
-  - Codex initially sees skill name/description/path and loads full instructions
-    when selected;
-  - concise, front-loaded descriptions improve implicit activation.
-- OpenAI, **AGENTS.md**:
-  https://developers.openai.com/codex/agent-configuration/agents-md
-  - Codex reads repository `AGENTS.md` before work;
-  - keep durable routing rules concise and use skills for richer workflows.
+The repository test module
+`tests/integration/test_engineering_policy_experiments.py` runs disposable
+FreeCAD documents against the local bridge. Its ablations hold candidate geometry
+fixed while removing one check:
 
-## FreeCAD parametric structure
+| Check/decision | Counterexample or control |
+|---|---|
+| Local interface evidence beyond global metrics | Relocated symmetric voids retain volume, area, bounds, center of mass, and solid count |
+| Parameter response and recovery | Linked and frozen placements agree at nominal size; only the linked one follows two changed sizes |
+| Toleranced interfaces | Nominal non-interference becomes interference at dimensional limits |
+| Diagnose redundancy before reinterpreting geometry | Duplicate Tangent fails; removing the duplicate preserves the original relationship |
+| Purpose-based Fix/Block | A single intentionally fixed reference circle is valid in FreeCAD |
+| Independent fit validation | An interpolating curve matches all fit points but misses a held-out source point |
+| Explicit angle convention | Non-right-angle panel rotations distinguish sweep from included angle |
 
-- FreeCAD documentation, **Sketcher Workbench**:
-  https://github.com/FreeCAD/FreeCAD-documentation/blob/main/wiki/Sketcher_Workbench.md
-  (live wiki: https://wiki.freecad.org/Sketcher_Workbench)
-  - profile sketches require closed contours without self-intersection,
-    contour-to-contour intersections, shared/duplicate edges, or T-connections;
-  - dimensional constraints can be toggled between driving and reference mode,
-    supporting the distinction between independent model inputs and solved check
-    measurements;
-  - use geometric constraints before the minimum necessary dimensions, prefer
-    horizontal/vertical constraints and dimensions where appropriate, and use
-    Validate Sketch rather than treating fully constrained status as sufficient;
-  - a fully constrained sketch can still flip to an unintended solution after a
-    parameter change.
-- FreeCAD documentation, **Sketcher Micro Tutorial - Constraint Practices**:
-  https://github.com/FreeCAD/FreeCAD-documentation/blob/main/wiki/Sketcher_Micro_Tutorial_-_Constraint_Practices.md
-  (live wiki:
-  https://wiki.freecad.org/Sketcher_Micro_Tutorial_-_Constraint_Practices)
-  - prefer geometric relationships to datum/dimensional constraints when they
-    express the same intent; fewer dimensional constraints generally produce a
-    cleaner solver graph.
-- FreeCAD documentation, **Sketcher CreateFillet**:
-  https://github.com/FreeCAD/FreeCAD-documentation/blob/main/wiki/Sketcher_CreateFillet.md
-  (live wiki: https://wiki.freecad.org/Sketcher_CreateFillet)
-  - the native Sketcher fillet joins two non-parallel parent edges and preserves
-    their geometric relationship better than an unrelated free arc.
-- FreeCAD documentation, **Sketcher CreateBSpline**:
-  https://github.com/FreeCAD/FreeCAD-documentation/blob/main/wiki/Sketcher_CreateBSpline.md
-  (live wiki: https://wiki.freecad.org/Sketcher_CreateBSpline)
-  - a B-spline is explicitly defined by control points or knot points and brings
-    internal geometry, degree, knot multiplicity, and weight semantics; it is not
-    a generic replacement for lines or circular arcs.
+These are mechanism tests and counterexamples to universal rules. They do not
+score a VLM's reading or execution of prose. The accompanying repository audit,
+`docs/engineering-skill-audit.md`, records results, virtual task walkthroughs,
+and the protocol for a separate blinded agent evaluation.
 
-- FreeCAD documentation, **Basic Part Design Tutorial**:
-  https://github.com/FreeCAD/FreeCAD-documentation/blob/main/wiki/Basic_Part_Design_Tutorial.md
-  - PartDesign starts with a Body and builds a solid from sketches and additive/
-    subtractive features;
-  - sketches are constrained and redundant constraints should be corrected.
-- FreeCAD documentation, **Glossary — Body**:
-  https://github.com/FreeCAD/FreeCAD-documentation/blob/main/wiki/Glossary.md
-  - a Body groups sketches, construction geometry, and features to create one
-    contiguous solid.
-- FreeCAD blog, **Spreadsheets and Parametric Design**:
-  https://blog.freecad.org/2025/04/08/tutorialgetting-started-with-spreadsheets-and-parametric-design/
-  - Spreadsheet aliases/expressions can centralize reusable design parameters.
+Existing integration tests cover B-rep component population/ties, checkpoint
+differences, native sketches, sheet metal, and parametric dependencies. Run the
+relevant suites when their contracts change; passing only text assertions does
+not validate engineering behavior.
 
-## Sheet-metal deformation
+## Documentation used as bounded support
 
-- SOLIDWORKS Help, **Bend Allowance and Bend Deduction**:
-  https://help.solidworks.com/2013/english/solidworks/sldworks/c_bend_allowance_and_bend_deduction.htm
-  - bend allowance is measured along the neutral axis and K-factor participates
-    in flat-length calculation.
-- Autodesk Inventor Help, **Bend tables for sheet metal materials**:
-  https://help.autodesk.com/view/INVNTOR/2023/ENU/?guid=GUID-27FD9757-5B40-4528-B361-D9BDFDB2EA4D
-  - bend deductions vary with bend angle and radius.
+- [FreeCAD Sketcher Workbench](https://github.com/FreeCAD/FreeCAD-documentation/blob/main/wiki/Sketcher_Workbench.md):
+  distinguishes sketch uses and constraints; profile closure/nesting rules apply
+  to appropriate solid profiles, and a constrained sketch can have different
+  geometric solutions.
+- [Constraint practices](https://github.com/FreeCAD/FreeCAD-documentation/blob/main/wiki/Sketcher_Micro_Tutorial_-_Constraint_Practices.md):
+  geometric relationships can express intent more directly than redundant
+  dimensions; this is not a universal ban on ordinate dimensions.
+- [Sketcher fillet](https://github.com/FreeCAD/FreeCAD-documentation/blob/main/wiki/Sketcher_CreateFillet.md):
+  parent-edge fillet construction is conditional on the intended transition.
+- [Sketcher B-spline](https://github.com/FreeCAD/FreeCAD-documentation/blob/main/wiki/Sketcher_CreateBSpline.md):
+  free-form curves have explicit control/degree/knot semantics. The tool's existence
+  does not restrict legitimate source intent to supplied point tables.
+- [Basic Part Design](https://github.com/FreeCAD/FreeCAD-documentation/blob/main/wiki/Basic_Part_Design_Tutorial.md)
+  and [attachment](https://github.com/FreeCAD/FreeCAD-documentation/blob/main/wiki/Basic_Attachment_Tutorial.md):
+  native feature dependencies and attachment are model structures to preserve,
+  not a demand that every deliverable be one manufactured solid.
+- [Fusion turning](https://help.autodesk.com/view/fusion360/ENU/?contextId=MFG-TURNING-OVERVIEW):
+  rotating workpiece/axis and explicit radius-versus-diameter semantics.
+- [Fusion modeling modes](https://help.autodesk.com/view/fusion360/ENU/?contextId=ASM-DESIGN-MODELING-MODES):
+  parametric history and direct modeling provide different forms of editability.
+- [Onshape sketching guidance](https://www.onshape.com/en/resource-center/tech-tips/how-to-avoid-3-common-cad-sketching-mistakes):
+  sketch size and construction relationships affect maintainability.
 
-The sheet-metal guidance therefore rejects a universal "add equal volume on one
-side and remove it on the other" rule. That boolean heuristic does not represent
-neutral-axis deformation or guarantee a correct developed blank. The detailed
-flat-pattern reference uses the common convention `Rn = Ri + K * t` and
-`BA = theta * Rn`, while requiring explicit drawing values or bend tables to
-override generic formulas and preventing compensation from being applied twice
-to an already dimensioned blank.
+The FreeCAD documentation repository is an archived reference; installed
+FreeCAD/tool behavior must be checked for version-specific claims. During this
+audit several old SOLIDWORKS links returned only help-shell content, the Inventor
+link returned no readable body, and the old Fusion stock link returned Page Not
+Found. They are not retained as verified support for strong requirements.
 
-## Manufacturing-oriented classification
+Clearance interval bounds follow subtraction of endpoint intervals. Bend
+allowance in the stated K convention follows arc length at the neutral radius;
+that geometric relation does not identify a physical K-factor. No numeric
+allowable, fit, tool-access limit, or material rule is supplied as universal truth.
+Fetch an applicable authoritative source and establish conditions for a production
+decision.
 
-- Autodesk Fusion Help, **Turning**:
-  https://help.autodesk.com/view/fusion360/ENU/?contextId=MFG-TURNING-OVERVIEW
-  - turning is centered on a defined rotary axis and is suited to cylindrical,
-    conical, bore, groove, shaft, ring, and thread geometry;
-  - radius-versus-diameter interpretation must be explicit.
-- Autodesk Fusion Help, **Stock tab reference**:
-  https://help.autodesk.com/view/fusion360/ENU/?guid=MFG-REF-SETUP-STOCK
-  - subtractive setups distinguish box, cylinder, tube, and supplied-solid stock;
-  - stock form and work coordinate system are separate from finished geometry.
-- FreeCAD documentation, **Basic Attachment Tutorial**:
-  https://github.com/FreeCAD/FreeCAD-documentation/blob/main/wiki/Basic_Attachment_Tutorial.md
-  - origin planes, datum geometry, and stable attachment choices are preferable
-    to unnecessary references to generated faces/edges.
-- SOLIDWORKS Help, **Sketch Status Conventions / Fully Defined Sketches**:
-  https://help.solidworks.com/2026/English/SolidWorks/sldworks/c_Sketch_Status_Conventions.htm
-  - fully defined sketches are a deliberate design state; under-defined status
-    should be visible and understood rather than silently ignored.
+## Scope of practical evidence
 
-## Additional feature-based CAD guidance
-
-- Autodesk Fusion Help, **Modeling modes in Fusion**:
-  https://help.autodesk.com/view/fusion360/ENU/?contextId=ASM-DESIGN-MODELING-MODES
-  - parametric mode records sketches, construction geometry, named parameters,
-    and feature relationships in an editable timeline;
-  - direct modeling does not preserve the same feature relationships.
-- SOLIDWORKS Help, **Design Intent**:
-  https://help.solidworks.com/2024/English/SolidWorks/sldworks/t_Editing_Features.htm
-  - editable feature definitions, sketches, and feature-order history are part of
-    maintaining design intent; a static matching shape is not enough.
-- SOLIDWORKS Help, **Fillet Overview**:
-  https://help.solidworks.com/2025/English/SolidWorks/sldworks/c_FilletXpert_Overview.htm
-  - cosmetic fillets are generally saved for late in the history; structural or
-    functional fillets may need earlier placement.
-- Onshape, **How to Avoid 3 Common CAD Sketching Mistakes**:
-  https://www.onshape.com/en/resource-center/tech-tips/how-to-avoid-3-common-cad-sketching-mistakes
-  - construction geometry and geometric relationships communicate design intent;
-  - oversized sketches increase solver complexity;
-  - functional sketch radii and cosmetic model fillets should be distinguished.
+The experiments establish failure modes and necessary distinctions on the
+tested FreeCAD build. They do not establish production manufacturability,
+load-bearing capacity, universal rollback reliability, or superiority across
+VLMs. CAD guidance remains conditional on requested fidelity, source evidence,
+and actual tool capabilities. Preserve this distinction when extending the skill.

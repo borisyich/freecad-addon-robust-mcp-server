@@ -1607,13 +1607,14 @@ SKETCH_ANALYSIS_RUNTIME_HELPERS = _runtime_code(
 
         if tangent_conflict:
             issues.append(
-                "A Tangent constraint conflicts with the current geometry interpretation."
+                "A Tangent constraint is implicated in the solver conflict."
             )
             hints.append(
                 "Do not delete or relax source-backed tangency merely to satisfy "
-                "the solver. Stop this feature group, reinspect the drawing crop, "
-                "and revise endpoints, radius, arc side, datum, or dimension-chain "
-                "interpretation before rebuilding the transition."
+                "the solver. First check duplicate/redundant constraints, referenced "
+                "indices, units, and solution branch. Then compare endpoints, radius, "
+                "arc side, datum, and dimension chain with the source or design "
+                "contract before changing its interpretation."
             )
 
         if profile["state"] == "open":
@@ -1672,5 +1673,16 @@ SKETCH_ANALYSIS_RUNTIME_HELPERS = _runtime_code(
         if hints:
             result["hints"] = hints
         return result
+
+
+    def _require_healthy_sketch_solver(analysis):
+        status = analysis["solver"]["status"]
+        solve_code = analysis["solver"].get("solve_code")
+        if status not in {"under_constrained", "fully_constrained"} or solve_code != 0:
+            raise ValueError(
+                "Sketch edit rejected: " + status + f" (solve_code={solve_code!r}); "
+                + "; ".join(analysis.get("issues", []))
+                + ". Repair related constraints in one batch."
+            )
     '''
 )
